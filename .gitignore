@@ -31,6 +31,7 @@ writing-samples/*
 
 # User config and customization (never auto-updated)
 config/profile.yml
+config/job-search.yml
 portals.yml
 modes/_profile.md
 .update-dismissed
@@ -65,6 +66,10 @@ reports/*-RESERVED.md
 .opencode/settings.local.json
 .opencode/memory/
 career-dashboard
+data/job-dashboard.json
+data/dashboard-web.*.log
+data/profile-archives/
+data/onboarding-drafts/
 package-lock.json
 
 # Playwright MCP server run artifacts (ephemeral, machine-local — never commit)

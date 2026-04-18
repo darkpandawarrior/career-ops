@@ -1,0 +1,72 @@
+# Machine-readable job search and scoring rules.
+# The onboarding flow will create config/job-search.yml from a reviewed resume.
+
+titles:
+  strong:
+    - Senior Backend Engineer
+    - Backend Engineer
+  adjacent:
+    - Software Engineer
+    - Platform Engineer
+  exclude:
+    - Frontend Engineer
+    - Mobile Engineer
+
+skills:
+  demonstrated:
+    - Java
+    - Spring Boot
+    - PostgreSQL
+  confirmed_unlisted:
+    - Docker
+  supporting:
+    - Kafka
+    - AWS
+  learning:
+    - Kubernetes
+  recommended_gaps:
+    - Terraform
+  excluded:
+    - React
+
+seniority:
+  minimum_years: 4
+  maximum_years: 8
+  preferred_levels:
+    - senior
+
+location:
+  home_country: India
+  preferred_locations:
+    - India
+    - Remote
+  remote_eligibility_required: true
+  remote_regions:
+    - Worldwide
+    - Global
+    - APAC
+  relocation: open
+  visa_sponsorship_required: false
+
+compensation:
+  home_country:
+    currency: INR
+    minimum_annual: 2500000
+  remote:
+    currency: null
+    minimum_annual: null
+  international:
+    currency: null
+    minimum_annual: null
+
+preferences:
+  domains: []
+  company_types: []
+  negative_keywords: []
+
+weights:
+  title: 30
+  skills: 35
+  experience: 10
+  location: 15
+  preferences: 10

@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>HireSignal</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Local-first career command center</p>
+        <h1>HireSignal</h1>
+        <p id="profileLine" hidden></p>
+      </div>
+      <div class="actions">
+        <button id="changeProfileBtn" type="button">Change profile</button>
+        <button id="refreshBtn" type="button">Refresh jobs</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="onboardingPanel" class="onboarding" hidden>
+        <section id="returningPanel" class="onboarding-card" hidden>
+          <p class="eyebrow">Welcome back</p>
+          <h2>Continue with your current profile?</h2>
+          <div class="profile-preview">
+            <strong id="returningName">Candidate</strong>
+            <span id="returningHeadline"></span>
+            <span id="returningLocation"></span>
+            <span id="returningRoles"></span>
+          </div>
+          <div class="onboarding-actions">
+            <button id="continueBtn" type="button" class="primary">Continue to dashboard</button>
+            <button id="newProfileBtn" type="button">Upload a new resume</button>
+          </div>
+          <p class="privacy-note">Your current profile stays active until a replacement is reviewed and confirmed.</p>
+        </section>
+
+        <section id="uploadPanel" class="onboarding-card" hidden>
+          <button id="backToProfileBtn" class="text-button" type="button" hidden>← Back to current profile</button>
+          <p class="eyebrow">Private local onboarding</p>
+          <h2>Start with your resume</h2>
+          <p>
+            Upload one PDF resume. It is staged locally for
+            extraction and review; uploading does not replace your active profile.
+          </p>
+
+          <form id="uploadForm">
+            <label id="dropZone" class="drop-zone" for="resumeInput">
+              <span class="drop-icon" aria-hidden="true">↑</span>
+              <strong>Choose a resume or drop it here</strong>
+              <span>PDF only · maximum 10 MB</span>
+              <span id="selectedFile">No file selected</span>
+            </label>
+            <input id="resumeInput" name="resume" type="file" accept=".pdf,application/pdf" required>
+            <button id="uploadBtn" class="primary" type="submit">Upload resume</button>
+          </form>
+
+          <div id="uploadStatus" class="statusline" role="status" hidden></div>
+
+          <section id="draftPanel" class="draft-card" hidden>
+            <div>
+              <p class="eyebrow">Upload staged</p>
+              <h3 id="draftFilename">Resume</h3>
+              <p id="draftDetails"></p>
+            </div>
+            <div class="onboarding-actions">
+              <button id="extractBtn" class="primary" type="button">Extract resume</button>
+              <button id="discardDraftBtn" type="button">Remove upload</button>
+            </div>
+            <p>Extraction runs locally. No profile files are written.</p>
+          </section>
+
+          <section id="extractionPanel" class="draft-card extraction-card" hidden>
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Local extraction complete</p>
+                <h3>Resume text and sections</h3>
+              </div>
+              <span id="extractionStats"></span>
+            </div>
+            <div id="extractionWarnings" class="extraction-warnings" hidden></div>
+            <div id="extractionSections" class="extraction-sections"></div>
+            <details>
+              <summary>Extracted text preview</summary>
+              <pre id="extractionPreview"></pre>
+            </details>
+            <div class="onboarding-actions">
+              <button id="reviewBtn" class="primary" type="button">Continue to profile review</button>
+            </div>
+            <p>Suggested values remain editable and evidence-labelled.</p>
+          </section>
+
+          <p class="privacy-note">
+            Files are stored under ignored local draft storage and are never executed or committed to Git.
+          </p>
+        </section>
+
+        <section id="reviewPanel" class="onboarding-card review-card" hidden>
+          <button id="backToExtractionBtn" class="text-button" type="button">← Back to extraction</button>
+          <div class="review-heading">
+            <div>
+              <p class="eyebrow">Review before activation</p>
+              <h2>Shape your job-search profile</h2>
+            </div>
+            <span id="reviewProgress">Step 1 of 7</span>
+          </div>
+
+          <form id="reviewForm">
+            <section class="review-step" data-step="0">
+              <h3>Personal details</h3>
+              <p>Confirm contact information extracted from the resume.</p>
+              <div class="form-grid">
+                <label>Full name *<input id="reviewName" required></label>
+                <label>Email<input id="reviewEmail" type="email"></label>
+                <label>Phone<input id="reviewPhone"></label>
+                <label>Current location<input id="reviewLocation"></label>
+                <label>LinkedIn<input id="reviewLinkedin"></label>
+                <label>GitHub<input id="reviewGithub"></label>
+                <label class="wide">Portfolio<input id="reviewPortfolio"></label>
+              </div>
+              <div id="personalEvidence" class="evidence-note"></div>
+            </section>
+
+            <section class="review-step" data-step="1" hidden>
+              <h3>Experience and summary</h3>
+              <p>Dates provide an estimate; edit it if overlapping or incomplete roles distort the result.</p>
+              <div class="form-grid">
+                <label>Total years *<input id="reviewYears" type="number" min="0" step="0.1" required></label>
+                <label>Experience level *
+                  <select id="reviewSeniority" required>
+                    <option value="">Choose</option>
+                    <option>intern</option><option>entry-level</option><option>junior</option>
+                    <option>mid</option><option>senior</option>
+                    <option>staff/lead</option><option>executive</option>
+                  </select>
+                </label>
+                <label>Notice period *<input id="reviewNoticePeriod" placeholder="Immediate, 30 days, 2 months" required></label>
+                <label class="wide">Professional summary<textarea id="reviewSummary" rows="5"></textarea></label>
+              </div>
+              <div id="experienceEvidence" class="evidence-note"></div>
+            </section>
+
+            <section class="review-step" data-step="2" hidden>
+              <h3>Skills</h3>
+              <p>Only demonstrated skills receive full scoring credit. Add unlisted skills only if you can support them.</p>
+              <div class="form-grid">
+                <label class="wide">Demonstrated skills *<textarea id="reviewSkillsDemonstrated" rows="4" required></textarea></label>
+                <label class="wide">Confirmed but unlisted<textarea id="reviewSkillsConfirmed" rows="3"></textarea></label>
+                <label class="wide">Supporting skills<textarea id="reviewSkillsSupporting" rows="3"></textarea></label>
+                <label class="wide">Currently learning<textarea id="reviewSkillsLearning" rows="2"></textarea></label>
+                <label class="wide">Exclude from targeting<textarea id="reviewSkillsExcluded" rows="2"></textarea></label>
+              </div>
+              <p class="field-help">Use comma-separated skill names. Confirm at least five demonstrated skills.</p>
+              <div id="skillsEvidence" class="evidence-list"></div>
+            </section>
+
+            <section class="review-step" data-step="3" hidden>
+              <h3>Target roles and seniority</h3>
+              <p>Resume-derived roles are only a starting point. Add every relevant title employers may use for the work you want; leaving this list narrow will narrow the search.</p>
+              <div class="form-grid">
+                <label class="wide">Primary target roles *<textarea id="reviewTargetRoles" rows="3" required></textarea></label>
+                <label class="wide">Adjacent roles<textarea id="reviewAdjacentRoles" rows="3"></textarea></label>
+                <label class="wide">Excluded titles<textarea id="reviewExcludedTitles" rows="2"></textarea></label>
+                <label class="wide">Target industries or domains<input id="reviewIndustries" placeholder="Fintech, healthcare, retail, SaaS"></label>
+              </div>
+              <p class="field-help">Use comma-separated role titles. Include spelling and level variants such as Android Engineer, Android Developer, Mobile Engineer, Senior Android Engineer, and Software Engineer - Android.</p>
+              <div id="rolesEvidence" class="evidence-list"></div>
+            </section>
+
+            <section class="review-step" data-step="4" hidden>
+              <h3>Location and remote policy</h3>
+              <p>Remote eligibility cannot be inferred from a resume. These answers directly control filtering.</p>
+              <div class="form-grid">
+                <label>Home country *<input id="reviewHomeCountry" required></label>
+                <label>Relocation *
+                  <select id="reviewRelocation" required><option value="">Choose</option><option>open</option><option>limited</option><option>closed</option></select>
+                </label>
+                <fieldset class="wide scope-choice">
+                  <legend>Job-search scope *</legend>
+                  <label class="checkbox"><input id="reviewScopeLocal" type="checkbox"> Local roles in my home country</label>
+                  <label class="checkbox"><input id="reviewScopeRemote" type="checkbox"> Remote roles</label>
+                  <label class="checkbox"><input id="reviewScopeInternational" type="checkbox"> International roles outside my home country</label>
+                </fieldset>
+                <label class="wide">Preferred locations<input id="reviewPreferredLocations" placeholder="Bangalore, Toronto, Berlin"></label>
+                <label class="wide">Accepted remote regions<input id="reviewRemoteRegions" placeholder="Worldwide, North America"></label>
+                <label id="internationalLocationsLabel" class="wide">International target countries or regions *<input id="reviewInternationalLocations" placeholder="Germany, UK, Canada, Singapore"></label>
+                <label class="checkbox"><input id="reviewRemoteEligibility" type="checkbox" checked> Require explicit remote eligibility</label>
+                <label class="checkbox"><input id="reviewVisaRequired" type="checkbox"> Visa sponsorship required</label>
+              </div>
+            </section>
+
+            <section class="review-step" data-step="5" hidden>
+              <h3>Compensation</h3>
+              <p>This is never inferred from the resume. Leave amounts blank if you do not want a compensation gate.</p>
+              <div class="form-grid">
+                <label>Currency<input id="reviewCurrency" maxlength="3" placeholder="CAD"></label>
+                <label>Minimum annual<input id="reviewMinimumAnnual" type="number" min="0" step="1000"></label>
+                <label>Target annual<input id="reviewTargetAnnual" type="number" min="0" step="1000"></label>
+              </div>
+            </section>
+
+            <section class="review-step" data-step="6" hidden>
+              <h3>Confirmation preview</h3>
+              <p>Validate the reviewed profile, then activate it. The previous profile and its cached onboarding data are permanently removed only after the new job search completes.</p>
+              <div id="reviewErrors" class="extraction-warnings" hidden></div>
+              <pre id="reviewPreview" class="review-preview"></pre>
+              <div id="activationPreview" class="activation-preview" hidden></div>
+              <label class="checkbox activation-confirm">
+                <input id="activationConfirm" type="checkbox">
+                I reviewed these settings and want to replace the active local profile. *
+              </label>
+              <div id="activationProgress" class="activation-progress" role="status" aria-live="polite" hidden>
+                <span class="spinner" aria-hidden="true"></span>
+                <span>
+                  <strong>Activating your profile and searching for jobs…</strong>
+                  <small>This first search checks many job sources and may take a few minutes. Please keep this page open.</small>
+                </span>
+              </div>
+            </section>
+
+            <div id="reviewStepErrors" class="extraction-warnings" hidden></div>
+            <div class="wizard-actions">
+              <button id="reviewPrevBtn" type="button">Previous</button>
+              <button id="reviewNextBtn" class="primary" type="button">Next</button>
+              <button id="validateReviewBtn" class="primary" type="submit" hidden>Validate reviewed profile</button>
+              <button id="activateProfileBtn" class="primary" type="button" hidden disabled>Activate profile</button>
+            </div>
+          </form>
+        </section>
+      </section>
+
+      <section id="dashboardPanel" hidden>
+        <section class="stats" aria-label="Summary">
+          <div><span id="totalCount">0</span><small>Jobs</small></div>
+          <div><span id="excellentCount">0</span><small>Excellent</small></div>
+          <div><span id="sourceCount">0</span><small>Source searches</small></div>
+        </section>
+
+        <section class="toolbar" aria-label="Filters">
+          <input id="searchInput" type="search" placeholder="Search company, title, skill, or location">
+          <select id="scoreFilter" aria-label="Minimum score">
+            <option value="0">All scores</option>
+            <option value="7">Strong+</option>
+            <option value="8">Excellent</option>
+          </select>
+        </section>
+
+        <section class="statusline" id="statusLine">Loading dashboard...</section>
+
+        <div class="columns">
+          <section class="job-section">
+            <div class="section-head">
+              <h2>Recommended</h2>
+              <span id="recommendedCount">0</span>
+            </div>
+            <div id="recommendedJobs" class="job-list"></div>
+          </section>
+
+          <section class="job-section">
+            <div class="section-head">
+              <h2>Review</h2>
+              <span id="reviewCount">0</span>
+            </div>
+            <div id="reviewJobs" class="job-list"></div>
+          </section>
+        </div>
+
+        <section class="job-section source-section">
+          <div class="section-head">
+            <h2>Source searches</h2>
+            <span id="sourceSectionCount">0</span>
+          </div>
+          <div id="sourceJobs" class="job-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="actionDialog">
+      <form method="dialog">
+        <header>
+          <h2 id="dialogTitle">Action</h2>
+          <button value="close" aria-label="Close">×</button>
+        </header>
+        <div id="dialogBody"></div>
+      </form>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
