@@ -1,0 +1,34 @@
+[
+  {
+    "title": "Senior Backend Engineer",
+    "company": "LedgerFox",
+    "location": "Bengaluru, India",
+    "url": "https://example.test/jobs/backend",
+    "source": "Fictional ATS",
+    "snippet": "Fintech product team. 5+ years. Java, Spring Boot, PostgreSQL, Docker and Kafka. INR 30-40 LPA."
+  },
+  {
+    "title": "Software Engineer",
+    "company": "CloudHarbor",
+    "location": "Remote - Worldwide",
+    "url": "https://example.test/jobs/software",
+    "source": "Fictional ATS",
+    "snippet": "Product engineering role requiring 4+ years with Java, Spring Boot and Docker."
+  },
+  {
+    "title": "Frontend Engineer",
+    "company": "PixelMint",
+    "location": "Remote - India",
+    "url": "https://example.test/jobs/frontend",
+    "source": "Fictional ATS",
+    "snippet": "React product role for a senior frontend specialist."
+  },
+  {
+    "title": "Backend Engineer",
+    "company": "InfraNest",
+    "location": "Remote - US only",
+    "url": "https://example.test/jobs/infra",
+    "source": "Fictional ATS",
+    "snippet": "5+ years. Java, PostgreSQL and Terraform required."
+  }
+]
