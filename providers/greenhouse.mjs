@@ -33,7 +33,7 @@ function resolveApiUrl(entry) {
   }
   const url = entry.careers_url || '';
   const match = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
-  if (match) return `https://boards-api.greenhouse.io/v1/boards/${match[1]}/jobs`;
+  if (match) return `https://boards-api.greenhouse.io/v1/boards/${match[1]}/jobs?content=true`;
   return null;
 }
 
@@ -70,6 +70,7 @@ export default {
       url: j.absolute_url,
       company: entry.name,
       location: j.location?.name || '',
+      description: typeof j.content === 'string' ? j.content.replace(/<[^>]+>/g, ' ') : '',
       postedAt: toEpochMs(j.first_published),
     }));
   },

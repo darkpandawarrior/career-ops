@@ -1,0 +1,146 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+
+import { parseDuckResults, refreshJobSearch } from '../search/job-search-runner.mjs';
+
+test('fresh search uses active profile rules, scores results, and persists the cache', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
+  await mkdir(path.join(root, 'config'), { recursive: true });
+  await mkdir(path.join(root, 'data'), { recursive: true });
+  await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig());
+  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  const fetchImpl = async (url) => {
+    if (String(url).includes('remoteok.com')) return jsonResponse([]);
+    if (String(url).includes('remotive.com')) return jsonResponse({ jobs: [] });
+    if (String(url).includes('jobicy.com')) return jsonResponse({ jobs: [] });
+    if (String(url).includes('himalayas.app')) return jsonResponse({ jobs: [] });
+    if (String(url).includes('arbeitnow.com')) return jsonResponse({ data: [] });
+    if (String(url).includes('workingnomads.com')) return jsonResponse([]);
+    if (String(url).includes('solid.jobs')) return jsonResponse({ jobs: [] });
+    return textResponse(`
+      <a class="result__a" href="https://jobs.example.test/backend">
+        Senior Backend Engineer Java PostgreSQL Docker Kafka - Northstar
+      </a>
+    `);
+  };
+  const payload = await refreshJobSearch(root, {
+    fetchImpl,
+    runScan: async () => ({ code: 0, stdout: 'scan complete', stderr: '' }),
+    runWideScan: async () => ({ code: 0, stdout: 'reverse ATS scan complete', stderr: '' }),
+  });
+  assert.equal(payload.scored, true);
+  assert.ok(payload.jobs.some((job) =>
+    job.title.includes('Senior Backend Engineer')
+    && job.company === 'Northstar'
+    && job.score >= 7
+  ));
+  const cached = JSON.parse(await readFile(path.join(root, 'data', 'job-dashboard.json'), 'utf8'));
+  assert.equal(cached.generatedAt, payload.generatedAt);
+  assert.equal(cached.scored, true);
+});
+
+test('DuckDuckGo result parsing preserves source and job URL', () => {
+  const jobs = parseDuckResults(
+    '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fjobs.example.test%2F42">Platform Engineer | Example Corp</a>',
+    { name: 'Configured source', category: 'ats' },
+  );
+  assert.equal(jobs[0].company, 'Example Corp');
+  assert.equal(jobs[0].source, 'Configured source');
+  assert.equal(jobs[0].url, 'https://jobs.example.test/42');
+});
+
+test('broad feeds do not admit unrelated jobs with neutral profile scoring', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
+  await mkdir(path.join(root, 'config'), { recursive: true });
+  await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig());
+  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  const fetchImpl = async (url) => {
+    if (String(url).includes('remoteok.com')) return jsonResponse([]);
+    if (String(url).includes('remotive.com')) return jsonResponse({
+      jobs: [{
+        title: 'Staff Product Engineer',
+        company_name: 'Unrelated Co',
+        candidate_required_location: 'Worldwide',
+        url: 'https://example.test/unrelated',
+        description: 'Product strategy and team leadership.',
+      }],
+    });
+    if (String(url).includes('jobicy.com')) return jsonResponse({ jobs: [] });
+    if (String(url).includes('himalayas.app')) return jsonResponse({ jobs: [] });
+    if (String(url).includes('arbeitnow.com')) return jsonResponse({ data: [] });
+    if (String(url).includes('workingnomads.com')) return jsonResponse([]);
+    if (String(url).includes('solid.jobs')) return jsonResponse({ jobs: [] });
+    return textResponse('');
+  };
+  const payload = await refreshJobSearch(root, {
+    fetchImpl,
+    runScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+    runWideScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  assert.equal(payload.jobs.some((job) => job.url === 'https://example.test/unrelated'), false);
+});
+
+test('adjacent titles require supporting profile evidence', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
+  await mkdir(path.join(root, 'config'), { recursive: true });
+  await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig());
+  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  const fetchImpl = async () => textResponse(`
+    <a class="result__a" href="https://jobs.example.test/generic">
+      Platform Engineer Product Strategy - Generic Co
+    </a>
+  `);
+  const payload = await refreshJobSearch(root, {
+    fetchImpl,
+    runScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+    runWideScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  assert.equal(payload.jobs.some((job) => job.url === 'https://jobs.example.test/generic'), false);
+});
+
+function profileConfig() {
+  return `
+titles:
+  strong: [Senior Backend Engineer, Backend Engineer]
+  adjacent: [Platform Engineer]
+  exclude: [Frontend Engineer]
+skills:
+  demonstrated: [Java, PostgreSQL]
+  confirmed_unlisted: [Docker]
+  supporting: [Kafka]
+  learning: []
+  recommended_gaps: [Terraform]
+  excluded: [React]
+seniority:
+  minimum_years: 4
+  maximum_years: 8
+  preferred_levels: [senior]
+location:
+  home_country: India
+  preferred_locations: [India, Remote]
+  remote_eligibility_required: true
+  remote_regions: [Worldwide]
+  relocation: open
+  visa_sponsorship_required: false
+compensation:
+  home_country: { currency: INR, minimum_annual: 2500000 }
+  remote: { currency: null, minimum_annual: null }
+  international: { currency: null, minimum_annual: null }
+preferences:
+  domains: []
+  company_types: []
+  negative_keywords: []
+weights: { title: 30, skills: 35, experience: 10, location: 15, preferences: 10 }
+`;
+}
+
+function jsonResponse(value) {
+  return { ok: true, status: 200, json: async () => value };
+}
+
+function textResponse(value) {
+  return { ok: true, status: 200, text: async () => value };
+}

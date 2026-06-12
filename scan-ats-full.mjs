@@ -37,7 +37,14 @@ import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
-import { buildTitleFilter, buildLocationFilter, loadSeenUrls, appendToPipeline, appendToScanHistory } from './scan.mjs';
+import {
+  buildTitleFilter,
+  buildLocationFilter,
+  buildContentFilter,
+  loadSeenUrls,
+  appendToPipeline,
+  appendToScanHistory,
+} from './scan.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -154,7 +161,8 @@ function parseArgs(argv) {
 async function loadCompanyList(name, url) {
   mkdirSync(CACHE_DIR, { recursive: true });
   const cacheFile = path.join(CACHE_DIR, `${name}.json`);
-  if (existsSync(cacheFile)) {
+  const freshScan = process.env.CAREER_OPS_FRESH_SCAN === '1';
+  if (!freshScan && existsSync(cacheFile)) {
     const ageHours = (Date.now() - statSync(cacheFile).mtimeMs) / 3_600_000;
     if (ageHours < CACHE_TTL_HOURS) {
       try { return { list: JSON.parse(readFileSync(cacheFile, 'utf-8')), status: 'ok' }; } catch { /* refetch below */ }
@@ -262,7 +270,8 @@ async function main() {
   const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
   const titleFilter = buildTitleFilter(config?.title_filter);
   const locationFilter = buildLocationFilter(config?.location_filter);
-  if (!config?.title_filter?.positive?.length) {
+  const contentFilter = buildContentFilter(config?.content_filter);
+  if (!config?.content_filter?.positive?.length) {
     console.error('⚠️  portals.yml has no title_filter.positive — every fresh posting on every board will match. Consider adding keywords.');
   }
 
@@ -304,6 +313,7 @@ async function main() {
           if (dateClass === 'stale') continue;
           if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
           if (!titleFilter(job.title)) continue;
+          if (!contentFilter(`${job.title || ''} ${job.description || ''}`)) continue;
           if (!locationFilter(job.location)) continue;
           if (seenUrls.has(job.url)) continue;
           seenUrls.add(job.url); // intra-scan dedup
