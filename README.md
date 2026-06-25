@@ -1,9 +1,9 @@
-# Career-Ops
+# HireSignal
 
 [English](README.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md)
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Multi-Agent Job Search System" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="HireSignal AI Career Dashboard" width="800"></a>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops Demo" width="800">
+  <img src="docs/demo.gif" alt="HireSignal Demo" width="800">
 </p>
 
 <p align="center"><strong>740+ job listings evaluated · 100+ personalized CVs · 1 dream role landed</strong></p>
@@ -77,7 +77,7 @@
 
 ## What Is This
 
-Career-Ops ([career-ops.org](https://career-ops.org), also known as **careerops**) turns any AI coding CLI into a full job search command center. Instead of manually tracking applications in a spreadsheet, you get an AI-powered pipeline that:
+HireSignal is a local-first AI career dashboard built on the career-ops pipeline. Instead of manually tracking applications in a spreadsheet, you get an AI-powered command center that:
 
 - **Evaluates offers** with a structured A-F scoring system (10 weighted dimensions)
 - **Generates tailored PDFs** -- ATS-optimized CVs customized per job description

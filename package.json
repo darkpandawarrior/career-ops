@@ -1,7 +1,7 @@
 {
-  "name": "career-ops",
+  "name": "hiresignal",
   "version": "1.13.0",
-  "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, OpenCode, Gemini, Codex, Qwen)",
+  "description": "HireSignal: a local-first AI career dashboard for resume onboarding, job discovery, and fit scoring",
   "private": true,
   "scripts": {
     "doctor": "node doctor.mjs",
@@ -23,6 +23,9 @@
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",
     "patterns": "node analyze-patterns.mjs",
+    "dashboard:web": "node dashboard-web/server.mjs",
+    "dashboard:check": "node --test dashboard-web/test/*.test.mjs",
+    "dashboard:audit": "node dashboard-web/private-data-audit.mjs",
     "gemini:eval": "node gemini-eval.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps"
   },
@@ -32,6 +35,7 @@
     "claude-code",
     "opencode",
     "career",
+    "hiresignal",
     "career-ops",
     "careerops",
     "automation"
@@ -45,8 +49,10 @@
   "license": "MIT",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "busboy": "^1.6.0",
     "dotenv": "^17.0.0",
     "js-yaml": "^4.1.1",
+    "pdfjs-dist": "^6.0.227",
     "playwright": "1.61.0"
   }
 }
