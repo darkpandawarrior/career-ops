@@ -233,48 +233,235 @@
       </section>
 
       <section id="dashboardPanel" hidden>
-        <section class="stats" aria-label="Summary">
-          <div><span id="totalCount">0</span><small>Jobs</small></div>
-          <div><span id="excellentCount">0</span><small>Excellent</small></div>
-          <div><span id="sourceCount">0</span><small>Source searches</small></div>
-        </section>
+        <nav class="tab-bar" role="tablist" aria-label="Dashboard tabs">
+          <button class="tab-btn active" data-tab="jobs" role="tab">Jobs</button>
+          <button class="tab-btn" data-tab="tracker" role="tab">Tracker</button>
+          <button class="tab-btn" data-tab="coach" role="tab">Coach</button>
+          <button class="tab-btn" data-tab="console" role="tab">Console<span id="queueBadge" class="tab-badge" hidden></span></button>
+          <button class="tab-btn" data-tab="scanner" role="tab">Scanner</button>
+          <button class="tab-btn" data-tab="profile" role="tab">Profile &amp; CV</button>
+        </nav>
 
-        <section class="toolbar" aria-label="Filters">
-          <input id="searchInput" type="search" placeholder="Search company, title, skill, or location">
-          <select id="scoreFilter" aria-label="Minimum score">
-            <option value="0">All scores</option>
-            <option value="7">Strong+</option>
-            <option value="8">Excellent</option>
-          </select>
-        </section>
-
-        <section class="statusline" id="statusLine">Loading dashboard...</section>
-
-        <div class="columns">
-          <section class="job-section">
-            <div class="section-head">
-              <h2>Recommended</h2>
-              <span id="recommendedCount">0</span>
-            </div>
-            <div id="recommendedJobs" class="job-list"></div>
+        <!-- ── Jobs tab ── -->
+        <div id="tab-jobs" class="tab-panel">
+          <section class="stats" aria-label="Summary">
+            <div><span id="totalCount">0</span><small>Jobs</small></div>
+            <div><span id="excellentCount">0</span><small>Excellent</small></div>
+            <div><span id="sourceCount">0</span><small>Source searches</small></div>
           </section>
 
-          <section class="job-section">
+          <section class="toolbar" aria-label="Filters">
+            <input id="searchInput" type="search" placeholder="Search company, title, skill, or location">
+            <select id="scoreFilter" aria-label="Minimum score">
+              <option value="0">All scores</option>
+              <option value="7">Strong+</option>
+              <option value="8">Excellent</option>
+            </select>
+          </section>
+
+          <section class="statusline" id="statusLine">Loading dashboard...</section>
+
+          <div class="columns">
+            <section class="job-section">
+              <div class="section-head">
+                <h2>Recommended</h2>
+                <span id="recommendedCount">0</span>
+              </div>
+              <div id="recommendedJobs" class="job-list"></div>
+            </section>
+
+            <section class="job-section">
+              <div class="section-head">
+                <h2>Review</h2>
+                <span id="reviewCount">0</span>
+              </div>
+              <div id="reviewJobs" class="job-list"></div>
+            </section>
+          </div>
+
+          <section class="job-section source-section">
             <div class="section-head">
-              <h2>Review</h2>
-              <span id="reviewCount">0</span>
+              <h2>Source searches</h2>
+              <span id="sourceSectionCount">0</span>
             </div>
-            <div id="reviewJobs" class="job-list"></div>
+            <div id="sourceJobs" class="job-list"></div>
           </section>
         </div>
 
-        <section class="job-section source-section">
-          <div class="section-head">
-            <h2>Source searches</h2>
-            <span id="sourceSectionCount">0</span>
+        <!-- ── Tracker tab ── -->
+        <div id="tab-tracker" class="tab-panel" hidden>
+          <div class="t-grid">
+            <div class="t-panel t-wide">
+              <h3 class="t-head">Applications Tracker <span class="t-muted">status + notes editable — writes to applications.md</span><span id="tracker-updated" class="t-muted" style="font-size:11px;font-weight:400;margin-left:auto"></span></h3>
+              <div class="t-scroll">
+                <table id="apps-table">
+                  <thead><tr><th>Company</th><th>Role</th><th>Date</th><th>Score</th><th>Status</th><th>Report</th><th>Notes</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Pending Offers Inbox</h3>
+              <div id="apps-pipeline"><p class="t-muted">Loading…</p></div>
+              <p class="t-muted" style="margin-top:8px">Evaluate all: queue <strong>/career-ops pipeline</strong> from Console.</p>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Evaluation Reports</h3>
+              <div id="apps-reports"></div>
+              <div id="report-view" class="t-md" style="margin-top:12px"></div>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Follow-up Cadence</h3>
+              <table id="cadence-table">
+                <thead><tr><th>Company</th><th>Status</th><th>Urgency</th><th>Next</th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <p class="t-muted" style="margin-top:6px">Queue "/career-ops followup" in Console for drafted messages.</p>
+            </div>
           </div>
-          <div id="sourceJobs" class="job-list"></div>
-        </section>
+        </div>
+
+        <!-- ── Coach tab ── -->
+        <div id="tab-coach" class="tab-panel" hidden>
+          <div class="t-grid">
+            <div class="t-panel t-wide">
+              <h3 class="t-head">Storybank <span class="t-muted">click a story for full STAR + earned secret</span></h3>
+              <div id="co-stories"></div>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Drill Progression <span class="t-muted" id="co-stage"></span></h3>
+              <div id="co-drills" style="margin-bottom:10px"></div>
+              <h4 class="t-subhead">Active Strategy</h4>
+              <ul id="co-strategy" class="t-list"></ul>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Works / Doesn't</h3>
+              <ul id="co-patterns" class="t-list"></ul>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Company Patterns</h3>
+              <div id="co-companies"></div>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Question Bank <span class="t-muted">real questions faced</span></h3>
+              <div class="t-scroll">
+                <table id="co-questions">
+                  <thead><tr><th>Company</th><th>Question</th><th>Outcome</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Outcome Log</h3>
+              <div class="t-scroll">
+                <table id="co-outcomes">
+                  <thead><tr><th>Company</th><th>Round</th><th>Result</th><th>Notes</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Coaching Notes</h3>
+              <ul id="co-notes" class="t-list"></ul>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Session Log</h3>
+              <div class="t-scroll">
+                <table id="co-sessions">
+                  <thead><tr><th>Date</th><th>Commands</th><th>Outcomes</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Console tab ── -->
+        <div id="tab-console" class="tab-panel" hidden>
+          <div class="t-grid">
+            <div class="t-panel t-wide">
+              <h3 class="t-head">Agent Inbox <span class="t-muted">queued here, Claude executes at next session start</span></h3>
+              <div style="display:flex;gap:8px;margin-bottom:10px">
+                <input type="text" id="freereq" class="t-input" placeholder="Ask Claude anything… e.g. 'evaluate the Upstox role first'">
+                <button id="queueFreeBtn" class="primary">Queue</button>
+              </div>
+              <div id="inbox"></div>
+              <p class="t-muted" style="margin-top:8px">Or paste directly in Claude Code: <code>"process the agent inbox"</code></p>
+            </div>
+            <div class="t-panel t-wide">
+              <h3 class="t-head">career-ops commands</h3>
+              <div id="cmds-career" class="cmd-grid"></div>
+            </div>
+            <div class="t-panel t-wide">
+              <h3 class="t-head">interview-coach commands <span class="t-muted">● live ones need you present — start in Claude Code directly</span></h3>
+              <div id="cmds-coach" class="cmd-grid"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Scanner tab ── -->
+        <div id="tab-scanner" class="tab-panel" hidden>
+          <div class="t-grid">
+            <div class="t-panel">
+              <h3 class="t-head">Controls</h3>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+                <button id="scanBtn" class="primary">⚡ Zero-token scan</button>
+                <button id="scanVerifyBtn">🔍 Scan + verify</button>
+              </div>
+              <h4 class="t-subhead">Check a job URL is still live</h4>
+              <div style="display:flex;gap:8px;margin-bottom:8px">
+                <input type="text" id="liveurl" class="t-input" placeholder="https://jobs.lever.co/…">
+                <button id="checkLiveBtn">Check</button>
+              </div>
+              <pre id="scan-out" class="t-pre" hidden></pre>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">Tracked Companies <span id="sc-count" class="t-muted"></span></h3>
+              <div id="sc-companies"></div>
+              <h4 class="t-subhead" style="margin-top:12px">Search queries</h4>
+              <div id="sc-queries"></div>
+            </div>
+            <div class="t-panel t-wide">
+              <h3 class="t-head">Scan History <span id="sc-stats" class="t-muted"></span></h3>
+              <div style="margin-bottom:8px">
+                <select id="sc-filter" class="t-select">
+                  <option value="">all statuses</option>
+                </select>
+              </div>
+              <div class="t-scroll">
+                <table id="sc-table">
+                  <thead><tr><th>Seen</th><th>Company</th><th>Title</th><th>Portal</th><th>Status</th><th>Location</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Profile tab ── -->
+        <div id="tab-profile" class="tab-panel" hidden>
+          <div class="t-grid">
+            <div class="t-panel">
+              <h3 class="t-head">Targets &amp; Comp</h3>
+              <div id="pr-comp"></div>
+              <h4 class="t-subhead">Archetypes</h4>
+              <div id="pr-arch"></div>
+              <h4 class="t-subhead">Superpowers</h4>
+              <ul id="pr-powers" class="t-list"></ul>
+            </div>
+            <div class="t-panel">
+              <h3 class="t-head">System Health</h3>
+              <button id="healthBtn">Run pipeline health check</button>
+              <pre id="health-out" class="t-pre" hidden></pre>
+              <h4 class="t-subhead" style="margin-top:14px">Coach profile</h4>
+              <ul id="pr-coachprofile" class="t-list"></ul>
+            </div>
+            <div class="t-panel t-wide">
+              <h3 class="t-head">Canonical CV (cv.md)</h3>
+              <div id="pr-cv" class="t-md"></div>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
 

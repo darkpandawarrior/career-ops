@@ -108,7 +108,8 @@ async function initialize() {
       history.replaceState({}, '', location.pathname);
     }
   }
-  if (state.payload.setup?.hasActiveProfile) showReturningProfile();
+  // Auto-bypass onboarding when an active profile already exists
+  if (state.payload.setup?.hasActiveProfile) showDashboard();
   else showUpload();
 }
 
@@ -616,7 +617,7 @@ function renderJob(job) {
   const row = document.createElement('article');
   row.className = 'job';
   const score = document.createElement('div');
-  score.className = `score ${job.score >= 8 ? 'good' : job.score >= 7 ? 'ok' : 'low'}`;
+  score.className = `score ${Number(job.score) >= 8 ? 'good' : Number(job.score) >= 7 ? 'ok' : 'low'}`;
   score.textContent = `${job.score || 0}/10`;
   const main = document.createElement('div');
   main.className = 'job-main';
@@ -653,6 +654,7 @@ function renderJob(job) {
   } else {
     actions.append(
       actionButton('Tailor resume', () => tailorResume(job), 'secondary'),
+      actionButton('Fill with AI', () => fillWithAi(job), 'secondary'),
       actionButton('Open job', () => window.open(job.url, '_blank', 'noopener'), 'primary'),
     );
   }
@@ -686,6 +688,27 @@ async function tailorResume(job) {
   } catch (error) {
     showDialog('Resume tailoring failed', error.message);
   }
+}
+
+async function fillWithAi(job) {
+  if (!job.url) { showDialog('No URL', 'This job has no application URL.'); return; }
+  showDialog('Fill with AI — queued', [
+    `Queued for Claude Code:`,
+    `  /career-ops apply ${job.url}`,
+    '',
+    `Claude will open the application page with Playwright and auto-fill every field`,
+    `using your CV, profile, and knowledge base.`,
+    '',
+    `You must be present — Claude will pause before clicking Submit for your review.`,
+    '',
+    `Open Claude Code and say: "process the agent inbox"`,
+  ].join('\n'));
+  await request('/api/queue', {
+    method: 'POST',
+    body: JSON.stringify({ text: `/career-ops apply ${job.url}  # ${job.company} — ${job.title}` }),
+  });
+  // Always reload console badge regardless of whether tracker tab was visited
+  trackerData = null; await loadTrackerData();
 }
 
 function addField(container, label, value) {
@@ -745,3 +768,433 @@ function formatBytes(bytes) {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${Math.round((bytes / 1024 / 1024) * 10) / 10} MB`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TRACKER TABS — folded in from career-ops dashboard
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+let trackerData = null;
+let scanRows = [];
+let trackerRefreshTimer = null;
+let trackerLastUpdated = null;
+
+document.querySelectorAll('.tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach((p) => { p.hidden = p.id !== `tab-${name}`; });
+  if (name === 'jobs') {
+    // Stop auto-refresh when on Jobs tab
+    clearInterval(trackerRefreshTimer); trackerRefreshTimer = null;
+  } else {
+    if (!trackerData) loadTrackerData();
+    // Auto-refresh every 30s while on tracker tabs to pick up file changes
+    if (!trackerRefreshTimer) {
+      trackerRefreshTimer = setInterval(() => {
+        trackerData = null; loadTrackerData();
+      }, 30000);
+    }
+  }
+}
+
+// ── Wire new buttons ──────────────────────────────────────────────────────────
+document.getElementById('queueFreeBtn').addEventListener('click', queueFree);
+document.getElementById('freereq').addEventListener('keydown', (e) => { if (e.key === 'Enter') queueFree(); });
+document.getElementById('scanBtn').addEventListener('click', () => runScan(false));
+document.getElementById('scanVerifyBtn').addEventListener('click', () => runScan(true));
+document.getElementById('checkLiveBtn').addEventListener('click', checkLive);
+document.getElementById('healthBtn').addEventListener('click', runHealth);
+document.getElementById('sc-filter').addEventListener('change', renderScanRows);
+
+// Event delegation for dynamically rendered inbox unqueue buttons
+document.getElementById('inbox').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-unqueue-idx]');
+  if (!btn || !trackerData) return;
+  const idx = Number(btn.dataset.unqueueIdx);
+  const pending = trackerData.inbox.filter((i) => !i.done);
+  if (pending[idx]) unqueue(pending[idx].text);
+});
+
+// ── Data loading ──────────────────────────────────────────────────────────────
+async function loadTrackerData() {
+  try {
+    trackerData = await request('/api/data');
+    trackerLastUpdated = Date.now();
+    renderTracker();
+    renderCoach();
+    renderConsole();
+    renderScanner();
+    renderProfile();
+    loadCadence();
+    // Update "last updated" timestamp across all tabs
+    const el = document.getElementById('tracker-updated');
+    if (el) el.textContent = 'Updated just now';
+  } catch (e) {
+    console.warn('Tracker data unavailable:', e.message);
+    const el = document.getElementById('tracker-updated');
+    if (el) el.textContent = 'Error: ' + e.message;
+  }
+}
+
+function relativeTime(ms) {
+  const secs = Math.floor((Date.now() - ms) / 1000);
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  return `${Math.floor(secs / 3600)}h ago`;
+}
+
+// Periodically update the "last updated" label
+setInterval(() => {
+  if (!trackerLastUpdated) return;
+  const el = document.getElementById('tracker-updated');
+  if (el) el.textContent = 'Updated ' + relativeTime(trackerLastUpdated);
+}, 15000);
+
+async function loadCadence() {
+  try {
+    const r = await request('/api/cadence');
+    if (!r.ok || !r.data) return;
+    const rows = (r.data.entries || []).filter((e) => e.urgency !== 'none')
+      .sort((a, b) => (a.daysUntilNext || 0) - (b.daysUntilNext || 0));
+    document.querySelector('#cadence-table tbody').innerHTML = rows.map((e) => {
+      const cls = e.urgency === 'overdue' ? 't-overdue' : e.urgency === 'urgent' ? 't-urgent' : 't-ok';
+      return `<tr><td><strong>${tesc(e.company)}</strong></td><td class="t-muted">${tesc(e.status)}</td><td class="${cls}">${tesc(e.urgency)}</td><td class="t-muted">${tesc(e.nextFollowupDate || '—')}</td></tr>`;
+    }).join('') || '<tr><td colspan="4" class="t-muted">Nothing actionable right now.</td></tr>';
+  } catch { /* cadence script may not exist */ }
+}
+
+// ── Minimal helpers ───────────────────────────────────────────────────────────
+function tesc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+function tattr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function ttoast(msg) {
+  let t = document.getElementById('t-toast');
+  if (!t) { t = document.createElement('div'); t.id = 't-toast'; t.className = 't-toast'; document.body.append(t); }
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1400);
+}
+
+function tmd(text) {
+  const lines = String(text).split('\n');
+  const out = []; let inUl = false; let inTable = false;
+  const inline = (s) => tesc(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  for (const l of lines) {
+    if (/^\|/.test(l)) {
+      if (/^\|[\s\-|]+\|$/.test(l)) continue;
+      if (!inTable) { out.push('<table class="t-md-table">'); inTable = true; }
+      out.push('<tr>' + l.split('|').slice(1, -1).map((c) => `<td>${inline(c.trim())}</td>`).join('') + '</tr>');
+      continue;
+    } else if (inTable) { out.push('</table>'); inTable = false; }
+    if (/^- /.test(l)) { if (!inUl) { out.push('<ul>'); inUl = true; } out.push(`<li>${inline(l.slice(2))}</li>`); continue; }
+    else if (inUl) { out.push('</ul>'); inUl = false; }
+    if (/^### /.test(l)) out.push(`<h4>${inline(l.slice(4))}</h4>`);
+    else if (/^## /.test(l)) out.push(`<h3>${inline(l.slice(3))}</h3>`);
+    else if (/^# /.test(l)) out.push(`<h2>${inline(l.slice(2))}</h2>`);
+    else if (/^---+$/.test(l)) out.push('<hr>');
+    else if (l.trim() === '') out.push('<p></p>');
+    else out.push(`<p>${inline(l)}</p>`);
+  }
+  if (inUl) out.push('</ul>'); if (inTable) out.push('</table>');
+  return out.join('\n');
+}
+
+// ── Tracker tab ───────────────────────────────────────────────────────────────
+function renderTracker() {
+  if (!trackerData) return;
+  const { apps, pipeline, reports, states } = trackerData;
+
+  document.querySelector('#apps-table tbody').innerHTML = apps.map((a) => {
+    const opts = states.map((st) => `<option${st === a.status ? ' selected' : ''}>${tesc(st)}</option>`).join('');
+    const rep = a.report && a.report !== '—'
+      ? a.report.replace(/\[([^\]]+)\]\(([^)]+)\)/, `<a href="#" onclick="openReport('${tattr((a.report.match(/\(([^)]+)\)/) || [])[1] || '')}');return false">$1</a>`)
+      : '—';
+    return `<tr>
+      <td><strong>${tesc(a.company)}</strong></td>
+      <td>${tesc(a.role)}</td>
+      <td class="t-muted">${tesc(a.date)}</td>
+      <td>${tesc(a.score)}</td>
+      <td>
+        <span class="t-badge t-b-${a.status}">${tesc(a.status)}</span>
+        <select class="t-select-sm" onchange="setStatus(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${opts}</select>
+      </td>
+      <td>${rep}</td>
+      <td class="t-muted"><span class="t-editnote" onclick="editNote(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${tesc(a.notes)}</span></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="t-muted">No applications yet.</td></tr>';
+
+  document.getElementById('apps-pipeline').innerHTML = pipeline.length
+    ? pipeline.map((p) => `<div class="t-checkrow${p.done ? ' t-done' : ''}">
+        <input type="checkbox" ${p.done ? 'checked' : ''} onchange="togglePipe(this)" data-u="${tattr(p.url)}">
+        <div><strong>${tesc(p.company)}</strong> — ${tesc(p.title)}<br><a class="t-mono" href="${tattr(p.url)}" target="_blank" rel="noopener">${tesc(p.url.slice(0, 70))}…</a></div>
+      </div>`).join('')
+    : '<p class="t-muted">Inbox empty — run a scan.</p>';
+
+  document.getElementById('apps-reports').innerHTML = reports.length
+    ? reports.map((r) => `<span class="t-pill" style="cursor:pointer" onclick="openReport('${tattr(r)}')">${tesc(r)}</span>`).join('')
+    : '<p class="t-muted">No reports yet.</p>';
+}
+
+async function openReport(name) {
+  name = (name || '').replace(/^.*\//, '');
+  if (!name) return;
+  const resp = await fetch(`/api/report/${encodeURIComponent(name)}`);
+  document.getElementById('report-view').innerHTML = tmd(await resp.text());
+  switchTab('tracker');
+}
+
+async function setStatus(el) {
+  try {
+    await request('/api/status', { method: 'POST', body: JSON.stringify({ company: el.dataset.c, role: el.dataset.r, status: el.value }) });
+    ttoast('Status saved');
+  } catch (e) { ttoast('Error: ' + e.message); }
+  trackerData = null; await loadTrackerData();
+}
+
+async function editNote(el) {
+  const cur = el.textContent;
+  const v = prompt(`Notes for ${el.dataset.c}:`, cur);
+  if (v === null || v === cur) return;
+  try {
+    await request('/api/notes', { method: 'POST', body: JSON.stringify({ company: el.dataset.c, role: el.dataset.r, notes: v }) });
+    ttoast('Note saved');
+  } catch (e) { ttoast('Error: ' + e.message); }
+  trackerData = null; await loadTrackerData();
+}
+
+async function togglePipe(el) {
+  try {
+    await request('/api/pipeline-toggle', { method: 'POST', body: JSON.stringify({ url: el.dataset.u, done: el.checked }) });
+  } catch (e) { el.checked = !el.checked; ttoast('Error: ' + e.message); return; }
+  trackerData = null; await loadTrackerData();
+}
+
+// ── Coach tab ─────────────────────────────────────────────────────────────────
+function renderCoach() {
+  if (!trackerData?.coach) {
+    document.getElementById('co-stories').innerHTML = '<p class="t-muted">Coach state not found (coaching_state.md).</p>';
+    return;
+  }
+  const co = trackerData.coach;
+  document.getElementById('co-stories').innerHTML = co.stories.map((st) => {
+    const det = co.details[st.id];
+    const retired = /RETIRED/.test(st.strength + st.title);
+    return `<details${retired ? ' style="opacity:.5"' : ''}>
+      <summary><span><code class="t-code-id">${tesc(st.id)}</code> ${tesc(st.title)}</span><strong class="t-strength">${tesc(st.strength)}</strong></summary>
+      <div class="t-detail"><p class="t-muted">${tesc(st.skill)} · ${tesc(st.skill2)}</p>${det ? tmd(det.body) : '<em>no details</em>'}</div>
+    </details>`;
+  }).join('') || '<p class="t-muted">No stories yet.</p>';
+
+  document.getElementById('co-stage').textContent = `(stage ${co.drillStage} · gates: ${co.gatesPassed})`;
+  document.getElementById('co-drills').innerHTML = (co.drillQueue || '').split(';').filter(Boolean).map((x) => `<span class="t-pill">${tesc(x.trim())}</span>`).join('');
+  document.getElementById('co-strategy').innerHTML = co.strategy.slice(0, 5).map((x) => `<li>${tesc(x)}</li>`).join('');
+  document.getElementById('co-patterns').innerHTML =
+    co.effectivePatterns.map((x) => `<li>✅ ${tesc(x)}</li>`).join('') +
+    co.ineffectivePatterns.map((x) => `<li>❌ ${tesc(x)}</li>`).join('');
+  document.getElementById('co-companies').innerHTML = co.companyPatterns.map((cp) =>
+    `<details><summary>${tesc(cp.company)}</summary><div class="t-detail">${tmd(cp.body)}</div></details>`
+  ).join('');
+  document.querySelector('#co-questions tbody').innerHTML = co.questions.map((q) =>
+    `<tr><td><strong>${tesc(q.company)}</strong></td><td class="t-muted">${tesc(q.question)}</td><td class="${/advanced/.test(q.outcome) ? 't-ok' : /reject/.test(q.outcome) ? 't-overdue' : 't-muted'}">${tesc(q.outcome)}</td></tr>`
+  ).join('') || '<tr><td colspan="3" class="t-muted">No questions logged.</td></tr>';
+  document.querySelector('#co-outcomes tbody').innerHTML = co.outcomes.map((o) =>
+    `<tr><td><strong>${tesc(o.company)}</strong><div class="t-muted">${tesc(o.role)}</div></td><td class="t-muted">${tesc(o.round)}</td><td class="${/advanced|submitted/.test(o.result) ? 't-ok' : /reject|stall/.test(o.result) ? 't-overdue' : 't-muted'}">${tesc(o.result)}</td><td class="t-muted">${tesc(o.notes)}</td></tr>`
+  ).join('') || '<tr><td colspan="4" class="t-muted">No outcomes logged.</td></tr>';
+  document.getElementById('co-notes').innerHTML = co.coachingNotes.map((n) => `<li>${tesc(n)}</li>`).join('') || '<li class="t-muted">No notes.</li>';
+  document.querySelector('#co-sessions tbody').innerHTML = co.sessionLog.map((s) =>
+    `<tr><td class="t-muted">${tesc(s.date)}</td><td class="t-mono">${tesc(s.commands)}</td><td class="t-muted">${tesc(s.outcomes)}</td></tr>`
+  ).join('') || '<tr><td colspan="3" class="t-muted">No sessions logged.</td></tr>';
+}
+
+// ── Console tab ───────────────────────────────────────────────────────────────
+function renderConsole() {
+  if (!trackerData) return;
+  const { commands, inbox } = trackerData;
+  document.getElementById('cmds-career').innerHTML = (commands['career-ops'] || []).map(cmdCard).join('');
+  document.getElementById('cmds-coach').innerHTML = (commands['interview-coach'] || []).map(cmdCard).join('');
+
+  const pending = inbox.filter((i) => !i.done);
+  const done = inbox.filter((i) => i.done);
+  document.getElementById('inbox').innerHTML =
+    (pending.length
+      ? pending.map((i, idx) => `<div class="t-checkrow">
+          <span style="color:#b45309">◷</span>
+          <div style="flex:1">${tesc(i.text)}</div>
+          <button data-unqueue-idx="${idx}" style="padding:3px 8px;font-size:12px">✕</button>
+        </div>`).join('')
+      : '<p class="t-muted">Queue empty — add requests above or copy commands below.</p>') +
+    (done.length
+      ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:#667085">Completed (${done.length})</summary><div style="padding:8px 0">${done.map((i) => `<div style="opacity:.5;text-decoration:line-through;font-size:12px;padding:3px 0">${tesc(i.text)}</div>`).join('')}</div></details>`
+      : '');
+
+  const q = pending.length;
+  const badge = document.getElementById('queueBadge');
+  badge.hidden = !q; badge.textContent = q;
+}
+
+function cmdCard(c) {
+  const hasArg = c.cmd.includes('{');
+  const inputId = 'arg-' + c.cmd.replace(/[^a-z]/gi, '');
+  return `<div class="cmd-card">
+    <strong>${tesc(c.label)}${c.live ? ' <span class="t-live">● live</span>' : ''}</strong>
+    <div class="t-muted" style="font-size:12px;flex:1">${tesc(c.desc)}</div>
+    ${hasArg ? `<input type="text" id="${inputId}" class="t-input" placeholder="${tattr(c.arg)}">` : ''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button onclick="composeCopy('${tattr(c.cmd)}',${hasArg ? `'${inputId}'` : 'null'})" style="font-size:12px;padding:4px 10px">Copy</button>
+      ${c.live ? '' : `<button class="primary" onclick="composeQueue('${tattr(c.cmd)}',${hasArg ? `'${inputId}'` : 'null'})" style="font-size:12px;padding:4px 10px">Queue</button>`}
+    </div>
+  </div>`;
+}
+
+function compose(cmd, inputId) {
+  if (inputId) {
+    const v = (document.getElementById(inputId) || {}).value || '';
+    if (cmd.includes('{') && !v) { ttoast('Needs an argument'); return null; }
+    return cmd.replace(/\{[^}]+\}/, v);
+  }
+  return cmd;
+}
+
+function composeCopy(cmd, inputId) {
+  const c = compose(cmd, inputId);
+  if (c) { navigator.clipboard.writeText(c); ttoast('Copied: ' + c.slice(0, 40)); }
+}
+
+async function composeQueue(cmd, inputId) {
+  const c = compose(cmd, inputId);
+  if (!c) return;
+  try {
+    await request('/api/queue', { method: 'POST', body: JSON.stringify({ text: c }) });
+    ttoast('Queued for Claude');
+  } catch (e) { ttoast('Error: ' + e.message); return; }
+  trackerData = null; await loadTrackerData();
+}
+
+async function queueFree() {
+  const inp = document.getElementById('freereq');
+  const v = inp.value.trim();
+  if (!v) return;
+  try {
+    await request('/api/queue', { method: 'POST', body: JSON.stringify({ text: v }) });
+    inp.value = '';
+    ttoast('Queued for Claude');
+  } catch (e) { ttoast('Error: ' + e.message); return; }
+  trackerData = null; await loadTrackerData();
+}
+
+async function unqueue(text) {
+  try {
+    await request('/api/queue-remove', { method: 'POST', body: JSON.stringify({ text }) });
+  } catch (e) { ttoast('Error: ' + e.message); return; }
+  trackerData = null; await loadTrackerData();
+}
+
+// ── Scanner tab ───────────────────────────────────────────────────────────────
+function renderScanner() {
+  if (!trackerData) return;
+  const { scan, portals } = trackerData;
+  scanRows = scan.rows || [];
+  document.getElementById('sc-stats').textContent = `${scan.total} urls · last scan ${scan.lastScan || 'never'}`;
+  document.getElementById('sc-count').textContent = `(${portals.companies.filter((c) => c.enabled).length} enabled)`;
+
+  const sel = document.getElementById('sc-filter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">all statuses</option>' +
+    Object.keys(scan.byStatus || {}).map((k) => `<option${cur === k ? ' selected' : ''}>${tesc(k)}</option>`).join('');
+
+  document.getElementById('sc-companies').innerHTML = portals.companies.map((c) =>
+    `<span class="t-pill${c.enabled ? '' : ' t-pill-off'}" title="${tattr(c.notes)}">${tesc(c.name)}</span>`
+  ).join('');
+  document.getElementById('sc-queries').innerHTML = portals.queries.map((q) =>
+    `<span class="t-pill${q.enabled ? '' : ' t-pill-off'}">${tesc(q.name)}</span>`
+  ).join('');
+  renderScanRows();
+}
+
+function renderScanRows() {
+  const f = document.getElementById('sc-filter').value;
+  const rows = scanRows.filter((r) => !f || r.status === f).slice(0, 80);
+  document.querySelector('#sc-table tbody').innerHTML = rows.map((r) => {
+    const good = r.status === 'added'; const bad = /expired|no_apply|blocked|invalid/.test(r.status);
+    return `<tr>
+      <td class="t-muted">${tesc(r.first_seen)}</td>
+      <td><strong>${tesc(r.company)}</strong></td>
+      <td><a href="${tattr(r.url)}" target="_blank" rel="noopener">${tesc(r.title)}</a></td>
+      <td class="t-muted">${tesc(r.portal)}</td>
+      <td class="${good ? 't-ok' : bad ? 't-overdue' : 't-muted'}">${tesc(r.status)}</td>
+      <td class="t-muted">${tesc(r.location || '')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="t-muted">No scan history.</td></tr>';
+}
+
+async function runScan(verify) {
+  switchTab('scanner');
+  const out = document.getElementById('scan-out');
+  out.hidden = false;
+  out.textContent = verify ? 'Running scan + Playwright verify… (may take a couple of minutes)' : 'Running zero-token scan…';
+  try {
+    const r = await request(verify ? '/api/scan-verify' : '/api/scan', { method: 'POST' });
+    out.textContent = r.output || 'done';
+  } catch (e) {
+    out.textContent = 'Scan error: ' + e.message;
+    return;
+  }
+  trackerData = null; await loadTrackerData();
+}
+
+async function checkLive() {
+  const u = document.getElementById('liveurl').value.trim();
+  if (!u) return;
+  const out = document.getElementById('scan-out');
+  out.hidden = false; out.textContent = `Checking ${u} …`;
+  const r = await request('/api/liveness', { method: 'POST', body: JSON.stringify({ url: u }) });
+  out.textContent = r.output || JSON.stringify(r);
+}
+
+// ── Profile tab ───────────────────────────────────────────────────────────────
+function renderProfile() {
+  if (!trackerData) return;
+  const profile = state.payload?.profile || {};
+  const comp = profile.compensation || {};
+  const tr = profile.target_roles || {};
+  const narr = profile.narrative || {};
+
+  document.getElementById('pr-comp').innerHTML = `
+    <div style="font-size:20px;font-weight:750;color:#047857">${tesc(comp.target_range || (comp.target_annual ? `${comp.currency || ''} ${comp.target_annual}`.trim() : '—'))}</div>
+    <div class="t-muted">walk-away: ${tesc(comp.minimum || comp.minimum_annual || '—')} · ${tesc(comp.location_flexibility || '')}</div>`;
+
+  document.getElementById('pr-arch').innerHTML = (tr.archetypes || []).map((a) =>
+    `<span class="t-pill">${tesc(a.name)} <span class="t-muted">[${tesc(a.fit)}]</span></span>`
+  ).join('') || '<span class="t-muted">No archetypes configured.</span>';
+
+  document.getElementById('pr-powers').innerHTML = (narr.superpowers || []).map((p) => `<li>${tesc(p)}</li>`).join('') || '<li class="t-muted">No superpowers configured.</li>';
+
+  if (trackerData.coach) {
+    document.getElementById('pr-coachprofile').innerHTML = trackerData.coach.profileBullets.slice(0, 8).map((b) => `<li>${tesc(b)}</li>`).join('');
+  }
+
+  fetch('/api/cv').then((r) => r.text()).then((t) => { document.getElementById('pr-cv').innerHTML = tmd(t); });
+}
+
+async function runHealth() {
+  const out = document.getElementById('health-out');
+  out.hidden = false; out.textContent = 'Running verify-pipeline.mjs…';
+  const r = await request('/api/pipeline-health', { method: 'POST' });
+  out.textContent = r.output || 'done';
+}
+
+// ── Expose module-scoped functions to window for inline onclick= handlers ──────
+// app.js runs as type="module" — top-level names are NOT global by default.
+// Every function referenced from innerHTML onclick= attributes must be on window.
+window.setStatus    = setStatus;
+window.editNote     = editNote;
+window.togglePipe   = togglePipe;
+window.openReport   = openReport;
+window.composeCopy  = composeCopy;
+window.composeQueue = composeQueue;
+window.unqueue      = unqueue;
