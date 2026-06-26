@@ -12,10 +12,6 @@
     "reconcile": "node reconcile-pipeline.mjs",
     "pdf": "node generate-pdf.mjs",
     "sync-check": "node cv-sync-check.mjs",
-    "update:check": "node update-system.mjs check",
-    "update:test": "node updater-migration-tests.mjs",
-    "update": "node update-system.mjs apply",
-    "rollback": "node update-system.mjs rollback",
     "liveness": "node check-liveness.mjs",
     "scan": "node scan.mjs",
     "scan:full": "node scan-ats-full.mjs",
@@ -26,7 +22,6 @@
     "dashboard:web": "node dashboard-web/server.mjs",
     "dashboard:check": "node --test dashboard-web/test/*.test.mjs",
     "dashboard:audit": "node dashboard-web/private-data-audit.mjs",
-    "gemini:eval": "node gemini-eval.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps"
   },
   "keywords": [
@@ -40,11 +35,11 @@
     "careerops",
     "automation"
   ],
-  "author": "Santiago Fernández de Valderrama <hi@santifer.io> (https://santifer.io)",
-  "homepage": "https://santifer.io",
+  "author": "Gagandeep Singh",
+  "homepage": "https://github.com/kirklazar-android/hiresignal#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/santifer/career-ops"
+    "url": "https://github.com/kirklazar-android/hiresignal.git"
   },
   "license": "MIT",
   "dependencies": {
