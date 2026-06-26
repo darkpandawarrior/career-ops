@@ -51,6 +51,10 @@ export async function loadActiveProfile(root) {
     headline: profile.narrative?.headline || '',
     location: candidate.location || profile.location?.city || '',
     roles: profile.target_roles?.primary || jobSearch.titles?.strong || [],
+    // Full fields for Profile & CV tab
+    compensation: profile.compensation || {},
+    target_roles: profile.target_roles || {},
+    narrative: profile.narrative || {},
   };
 }
 
