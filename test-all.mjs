@@ -3315,6 +3315,9 @@ try {
 console.log('\n13. Batch rate-limit pause');
 
 try {
+  if (run('bash', ['--version']) === null) {
+    warn('Batch rate-limit pause test skipped because bash is not available');
+  } else {
   const tmp = mkdtempSync(join(tmpdir(), 'co-batch-rate-'));
   const batchDir = join(tmp, 'batch');
   const fakeBin = join(tmp, 'bin');
@@ -3349,7 +3352,9 @@ try {
     execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
   }
 
-  const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` };
+  const bashFakeBin = process.platform === 'win32' ? toBashPath(fakeBin) : fakeBin;
+  const bashPathSeparator = process.platform === 'win32' ? ':' : delimiter;
+  const env = { ...process.env, PATH: `${bashFakeBin}${bashPathSeparator}${process.env.PATH}` };
   const out = run('bash', [toBashPath(join(batchDir, 'batch-runner.sh')), '--parallel', '1', '--max-retries', '3', '--rate-limit-sleep', '0'], {
     cwd: tmp,
     env,
@@ -3401,6 +3406,7 @@ try {
   }
 
   try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+  }
 } catch (e) {
   fail(`Batch rate-limit pause test crashed: ${e.message}`);
 }
