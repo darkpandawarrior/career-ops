@@ -797,6 +797,7 @@ function switchTab(name) {
         trackerData = null; loadTrackerData();
       }, 30000);
     }
+    if (name === 'profile') renderProfile();
   }
 }
 
@@ -1158,15 +1159,15 @@ async function checkLive() {
 
 // ── Profile tab ───────────────────────────────────────────────────────────────
 function renderProfile() {
-  if (!trackerData) return;
   const profile = state.payload?.profile || {};
   const comp = profile.compensation || {};
   const tr = profile.target_roles || {};
   const narr = profile.narrative || {};
 
-  document.getElementById('pr-comp').innerHTML = `
-    <div style="font-size:20px;font-weight:750;color:#047857">${tesc(comp.target_range || (comp.target_annual ? `${comp.currency || ''} ${comp.target_annual}`.trim() : '—'))}</div>
-    <div class="t-muted">walk-away: ${tesc(comp.minimum || comp.minimum_annual || '—')} · ${tesc(comp.location_flexibility || '')}</div>`;
+  document.getElementById('pr-comp').innerHTML = Object.keys(comp).length
+    ? `<div style="font-size:20px;font-weight:750;color:#047857">${tesc(comp.target_range || (comp.target_annual ? `${comp.currency || ''} ${comp.target_annual}`.trim() : '—'))}</div>
+    <div class="t-muted">walk-away: ${tesc(comp.minimum || comp.minimum_annual || '—')} · ${tesc(comp.location_flexibility || '')}</div>`
+    : '<span class="t-muted">No compensation targets configured.</span>';
 
   document.getElementById('pr-arch').innerHTML = (tr.archetypes || []).map((a) =>
     `<span class="t-pill">${tesc(a.name)} <span class="t-muted">[${tesc(a.fit)}]</span></span>`
@@ -1174,11 +1175,15 @@ function renderProfile() {
 
   document.getElementById('pr-powers').innerHTML = (narr.superpowers || []).map((p) => `<li>${tesc(p)}</li>`).join('') || '<li class="t-muted">No superpowers configured.</li>';
 
-  if (trackerData.coach) {
+  if (trackerData?.coach) {
     document.getElementById('pr-coachprofile').innerHTML = trackerData.coach.profileBullets.slice(0, 8).map((b) => `<li>${tesc(b)}</li>`).join('');
   }
 
-  fetch('/api/cv').then((r) => r.text()).then((t) => { document.getElementById('pr-cv').innerHTML = tmd(t); });
+  fetch('/api/cv').then((r) => r.ok ? r.text() : Promise.reject(r.status)).then((t) => {
+    document.getElementById('pr-cv').innerHTML = tmd(t);
+  }).catch(() => {
+    document.getElementById('pr-cv').innerHTML = '<span class="t-muted">cv.md not found — run the onboarding flow to generate it.</span>';
+  });
 }
 
 async function runHealth() {
