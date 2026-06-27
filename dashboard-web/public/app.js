@@ -207,11 +207,14 @@ async function loadProfileSwitcher() {
         ${p.active ? '<span class="profile-menu-check" aria-hidden="true">✓</span>' : ''}
       </a>`).join('') + `
       <div class="profile-menu-divider"></div>
-      <button class="profile-menu-item profile-menu-add" type="button" role="menuitem"
-              onclick="closeProfileMenu();openAddProfileModal();">
+      <button class="profile-menu-item profile-menu-add" type="button" role="menuitem">
         <span class="profile-menu-avatar profile-menu-add-icon">+</span>
         <span class="profile-menu-info"><strong>Add new profile</strong><span>Create a new profile</span></span>
       </button>`;
+    els.profileSwitcherMenu.querySelector('.profile-menu-add').addEventListener('click', () => {
+      closeProfileMenu();
+      openAddProfileModal();
+    });
     els.profileSwitcher.hidden = false;
   } catch {
     // profiles.yml absent or malformed — switcher stays hidden
