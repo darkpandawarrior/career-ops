@@ -196,7 +196,7 @@ async function loadProfileSwitcher() {
     els.profileAvatar.style.background = active.color || 'var(--accent)';
     els.profileSwitcherName.textContent = active.display_name.split(' ')[0];
     els.profileSwitcherMenu.innerHTML = profiles.map((p) => `
-      <a class="profile-menu-item${p.active ? ' is-active' : ''}" href="${p.url}" role="menuitem">
+      <a class="profile-menu-item${p.active ? ' is-active' : ''}" href="${p.url}" data-port="${p.port}" data-name="${tesc(p.display_name)}" data-active="${p.active}" role="menuitem">
         <span class="profile-menu-avatar" style="background:${p.color || 'var(--accent)'}">
           ${p.display_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
         </span>
@@ -214,6 +214,25 @@ async function loadProfileSwitcher() {
     els.profileSwitcherMenu.querySelector('.profile-menu-add').addEventListener('click', () => {
       closeProfileMenu();
       openAddProfileModal();
+    });
+    els.profileSwitcherMenu.querySelectorAll('a.profile-menu-item').forEach((a) => {
+      if (a.dataset.active === 'true') return;
+      a.addEventListener('click', async (e) => {
+        e.preventDefault();
+        closeProfileMenu();
+        const port = a.dataset.port;
+        const name = a.dataset.name;
+        const url = a.href;
+        try {
+          await fetch(url, { mode: 'no-cors', cache: 'no-store' });
+          window.location.href = url;
+        } catch {
+          showDialog(
+            `${name} — server not running`,
+            `Start it in a new terminal tab:\n\nCAREER_DASHBOARD_PORT=${port} node dashboard-web/server.mjs\n\nThen click the profile again to switch.`
+          );
+        }
+      });
     });
     els.profileSwitcher.hidden = false;
   } catch {
