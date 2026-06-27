@@ -1,9 +1,8 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light dark">
     <title>Career-Ops Dashboard</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
@@ -50,10 +49,7 @@
           <button id="backToProfileBtn" class="text-button" type="button" hidden>← Back to current profile</button>
           <p class="eyebrow">Private local onboarding</p>
           <h2>Start with your resume</h2>
-          <p>
-            Upload one PDF resume. It is staged locally for
-            extraction and review; uploading does not replace your active profile.
-          </p>
+          <p>Upload one PDF resume. It is staged locally for extraction and review; uploading does not replace your active profile.</p>
 
           <form id="uploadForm">
             <label id="dropZone" class="drop-zone" for="resumeInput">
@@ -101,9 +97,7 @@
             <p>Suggested values remain editable and evidence-labelled.</p>
           </section>
 
-          <p class="privacy-note">
-            Files are stored under ignored local draft storage and are never executed or committed to Git.
-          </p>
+          <p class="privacy-note">Files are stored under ignored local draft storage and are never executed or committed to Git.</p>
         </section>
 
         <section id="reviewPanel" class="onboarding-card review-card" hidden>
@@ -167,14 +161,14 @@
 
             <section class="review-step" data-step="3" hidden>
               <h3>Target roles and seniority</h3>
-              <p>Resume-derived roles are only a starting point. Add every relevant title employers may use for the work you want; leaving this list narrow will narrow the search.</p>
+              <p>Resume-derived roles are only a starting point. Add every relevant title employers may use for the work you want.</p>
               <div class="form-grid">
                 <label class="wide">Primary target roles *<textarea id="reviewTargetRoles" rows="3" required></textarea></label>
                 <label class="wide">Adjacent roles<textarea id="reviewAdjacentRoles" rows="3"></textarea></label>
                 <label class="wide">Excluded titles<textarea id="reviewExcludedTitles" rows="2"></textarea></label>
                 <label class="wide">Target industries or domains<input id="reviewIndustries" placeholder="Fintech, healthcare, retail, SaaS"></label>
               </div>
-              <p class="field-help">Use comma-separated role titles. Include spelling and level variants such as Android Engineer, Android Developer, Mobile Engineer, Senior Android Engineer, and Software Engineer - Android.</p>
+              <p class="field-help">Use comma-separated role titles. Include spelling and level variants.</p>
               <div id="rolesEvidence" class="evidence-list"></div>
             </section>
 
@@ -260,18 +254,35 @@
 
       <section id="dashboardPanel" hidden>
         <nav class="tab-bar" role="tablist" aria-label="Dashboard tabs">
-          <button class="tab-btn active" data-tab="jobs" role="tab">Jobs</button>
-          <button class="tab-btn" data-tab="tracker" role="tab">Tracker</button>
-          <button class="tab-btn" data-tab="coach" role="tab">Coach</button>
-          <button class="tab-btn" data-tab="console" role="tab">Console<span id="queueBadge" class="tab-badge" hidden></span></button>
-          <button class="tab-btn" data-tab="scanner" role="tab">Scanner</button>
-          <button class="tab-btn" data-tab="profile" role="tab">Profile &amp; CV</button>
+          <button class="tab-btn active" data-tab="jobs" role="tab">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+            Jobs
+          </button>
+          <button class="tab-btn" data-tab="tracker" role="tab">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            Tracker
+          </button>
+          <button class="tab-btn" data-tab="coach" role="tab">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+            Coach
+          </button>
+          <button class="tab-btn" data-tab="console" role="tab">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            Console<span id="queueBadge" class="tab-badge" hidden></span>
+          </button>
+          <button class="tab-btn" data-tab="scanner" role="tab">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+            Scanner
+          </button>
+          <button class="tab-btn" data-tab="profile" role="tab">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Profile &amp; CV
+          </button>
         </nav>
 
         <!-- ── Jobs tab ── -->
         <div id="tab-jobs" class="tab-panel">
 
-          <!-- Refresh progress panel — shown only during active scan -->
           <div id="refreshPanel" class="refresh-panel" hidden>
             <div class="refresh-panel-inner">
               <div class="refresh-spinner" aria-hidden="true"></div>
@@ -279,18 +290,10 @@
                 <p class="refresh-title">Scanning for new jobs…</p>
                 <p id="refreshPhaseName" class="refresh-phase">Starting up</p>
                 <div class="refresh-stages">
-                  <div class="refresh-stage" data-phase="1">
-                    <span class="stage-dot"></span><span>Scan company boards</span>
-                  </div>
-                  <div class="refresh-stage" data-phase="2">
-                    <span class="stage-dot"></span><span>ATS discovery</span>
-                  </div>
-                  <div class="refresh-stage" data-phase="3">
-                    <span class="stage-dot"></span><span>Fetch job feeds</span>
-                  </div>
-                  <div class="refresh-stage" data-phase="4">
-                    <span class="stage-dot"></span><span>Score &amp; save</span>
-                  </div>
+                  <div class="refresh-stage" data-phase="1"><span class="stage-dot"></span><span>Scan company boards</span></div>
+                  <div class="refresh-stage" data-phase="2"><span class="stage-dot"></span><span>ATS discovery</span></div>
+                  <div class="refresh-stage" data-phase="3"><span class="stage-dot"></span><span>Fetch job feeds</span></div>
+                  <div class="refresh-stage" data-phase="4"><span class="stage-dot"></span><span>Score &amp; save</span></div>
                 </div>
                 <p id="refreshElapsed" class="refresh-elapsed">0s elapsed</p>
               </div>
@@ -298,24 +301,31 @@
           </div>
 
           <section class="stats" aria-label="Summary">
-            <div><span id="totalCount">0</span><small>Jobs</small></div>
-            <div><span id="excellentCount">0</span><small>Excellent</small></div>
-            <div><span id="sourceCount">0</span><small>Source searches</small></div>
+            <div class="stat-card"><span id="totalCount">0</span><small>Jobs</small></div>
+            <div class="stat-card"><span id="excellentCount">0</span><small>Excellent</small></div>
+            <div class="stat-card"><span id="sourceCount">0</span><small>Source searches</small></div>
           </section>
 
-          <section class="toolbar" aria-label="Filters">
-            <input id="searchInput" type="search" placeholder="Search company, title, skill, or location">
-            <select id="scoreFilter" aria-label="Minimum score">
-              <option value="0">All scores</option>
-              <option value="7">Strong+</option>
-              <option value="8">Excellent</option>
-            </select>
-          </section>
+          <div id="livenessBanner" class="liveness-banner" hidden>
+            <span id="livenessBannerText">Checking job liveness…</span>
+            <button type="button" class="liveness-banner-dismiss" id="livenessBannerDismiss" aria-label="Dismiss">×</button>
+          </div>
+
+          <div class="jobs-toolbar">
+            <section class="toolbar" aria-label="Filters">
+              <input id="searchInput" type="search" placeholder="Search company, title, skill, or location">
+              <select id="scoreFilter" aria-label="Minimum score">
+                <option value="0">All scores</option>
+                <option value="7">Strong+</option>
+                <option value="8">Excellent</option>
+              </select>
+            </section>
+          </div>
 
           <section class="statusline" id="statusLine">Loading dashboard...</section>
 
           <div class="columns">
-            <section class="job-section">
+            <section class="job-section" data-section="recommended">
               <div class="section-head">
                 <h2>Recommended</h2>
                 <span id="recommendedCount">0</span>
@@ -323,7 +333,7 @@
               <div id="recommendedJobs" class="job-list"></div>
             </section>
 
-            <section class="job-section">
+            <section class="job-section" data-section="review">
               <div class="section-head">
                 <h2>Review</h2>
                 <span id="reviewCount">0</span>
@@ -332,7 +342,7 @@
             </section>
           </div>
 
-          <section class="job-section source-section">
+          <section class="job-section source-section" data-section="source">
             <div class="section-head">
               <h2>Source searches</h2>
               <span id="sourceSectionCount">0</span>
@@ -345,7 +355,7 @@
         <div id="tab-tracker" class="tab-panel" hidden>
           <div class="t-grid">
             <div class="t-panel t-wide">
-              <h3 class="t-head">Applications Tracker <span class="t-muted">status + notes editable — writes to applications.md</span><span id="tracker-updated" class="t-muted" style="font-size:11px;font-weight:400;margin-left:auto"></span></h3>
+              <div class="t-head-row"><h3 class="t-head">Applications tracker</h3><span id="tracker-updated" class="t-updated-stamp"></span></div>
               <div class="t-scroll">
                 <table id="apps-table">
                   <thead><tr><th>Company</th><th>Role</th><th>Date</th><th>Score</th><th>Status</th><th>Report</th><th>Notes</th></tr></thead>
@@ -460,6 +470,7 @@
               <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
                 <button id="scanBtn" class="primary">⚡ Zero-token scan</button>
                 <button id="scanVerifyBtn">🔍 Scan + verify</button>
+                <button id="livenessAllBtn">Check all recommended</button>
               </div>
               <h4 class="t-subhead">Check a job URL is still live</h4>
               <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -477,9 +488,7 @@
             <div class="t-panel t-wide">
               <h3 class="t-head">Scan History <span id="sc-stats" class="t-muted"></span></h3>
               <div style="margin-bottom:8px">
-                <select id="sc-filter" class="t-select">
-                  <option value="">all statuses</option>
-                </select>
+                <select id="sc-filter" class="t-select"><option value="">all statuses</option></select>
               </div>
               <div class="t-scroll">
                 <table id="sc-table">

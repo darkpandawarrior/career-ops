@@ -227,9 +227,10 @@ function parseCoachState() {
   };
 }
 
-function listReports() {
-  if (!existsSync(REPORTS_DIR)) return [];
-  return readdirSync(REPORTS_DIR).filter((f) => f.endsWith('.md')).sort().reverse();
+function listReports(root = DEFAULT_ROOT) {
+  const dir = paths(root).reportsDir;
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => f.endsWith('.md')).sort().reverse();
 }
 
 function buildTrackerData(root) {
@@ -239,7 +240,7 @@ function buildTrackerData(root) {
   const portals = parsePortals(root);
   const inbox = parseAgentInbox(root);
   const coach = parseCoachState();
-  const reports = listReports();
+  const reports = listReports(root);
   return {
     apps, pipeline, scan, portals, inbox, coach, reports, commands: COMMANDS, states: CANONICAL_STATES,
     stats: {

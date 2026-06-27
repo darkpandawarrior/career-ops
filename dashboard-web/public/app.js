@@ -8,6 +8,7 @@ const state = {
   draft: null,
   inference: null,
   reviewStep: 0,
+  liveness: {},
 };
 
 const ids = [
@@ -705,6 +706,7 @@ function renderJobs() {
   renderList(els.recommendedJobs, recommended);
   renderList(els.reviewJobs, review);
   renderList(els.sourceJobs, sourceJobs);
+  startLivenessCheck(realJobs.filter((j) => j.url).slice(0, 15));
 }
 
 function matchesFilter(job) {
@@ -716,6 +718,68 @@ function matchesFilter(job) {
   ].join(' ').toLowerCase().includes(state.filterText);
 }
 
+function normalizeTitle(title) {
+  if (!title) return '';
+  const t = cleanText(title);
+  // Strip trailing " - Anything that looks like a location" (city, country, state)
+  // Strategy: strip from " - " if what follows contains a comma (City, Country pattern)
+  // or matches a known location pattern
+  const dashIdx = t.lastIndexOf(' - ');
+  if (dashIdx > 0) {
+    const suffix = t.slice(dashIdx + 3);
+    // If suffix looks like a location (has comma, or is mostly proper nouns)
+    if (suffix.includes(',') || /^[A-Z][a-z]+(?:\s[A-Z][a-z]+)*$/.test(suffix)) {
+      return t.slice(0, dashIdx).trim();
+    }
+  }
+  const emDashIdx = t.lastIndexOf(' – ');
+  if (emDashIdx > 0) {
+    const suffix = t.slice(emDashIdx + 3);
+    if (suffix.includes(',') || /^[A-Z]/.test(suffix)) {
+      return t.slice(0, emDashIdx).trim();
+    }
+  }
+  return t;
+}
+
+function groupByCompany(jobs) {
+  const companyMap = new Map();
+  for (const job of jobs) {
+    const company = job.company || 'Unknown';
+    if (!companyMap.has(company)) companyMap.set(company, []);
+    companyMap.get(company).push(job);
+  }
+
+  // Within each company, merge same-base-title jobs into one card with location variants
+  const result = new Map();
+  for (const [company, companyJobs] of companyMap) {
+    const titleMap = new Map();
+    for (const job of companyJobs) {
+      const baseTitle = normalizeTitle(job.title);
+      if (!titleMap.has(baseTitle)) {
+        titleMap.set(baseTitle, { ...job, title: baseTitle, _locations: [] });
+      }
+      const existing = titleMap.get(baseTitle);
+      const loc = cleanLocation(job.locationLabel || job.location || '');
+      if (loc && !existing._locations.includes(loc)) existing._locations.push(loc);
+      // Keep highest score
+      if ((Number(job.score) || 0) > (Number(existing.score) || 0)) {
+        existing.score = job.score;
+      }
+    }
+    const merged = [...titleMap.values()].map(j => {
+      if (j._locations.length > 1) {
+        j.locationLabel = j._locations.slice(0, 3).join(' · ') + (j._locations.length > 3 ? ` +${j._locations.length - 3}` : '');
+      } else if (j._locations.length === 1) {
+        j.locationLabel = j._locations[0];
+      }
+      return j;
+    });
+    result.set(company, merged);
+  }
+  return result;
+}
+
 function renderList(container, jobs) {
   container.textContent = '';
   if (jobs.length === 0) {
@@ -725,43 +789,165 @@ function renderList(container, jobs) {
     container.append(empty);
     return;
   }
-  jobs.forEach((job) => container.append(renderJob(job)));
+  const grouped = groupByCompany(jobs);
+  for (const [company, companyJobs] of grouped) {
+    container.append(renderCompanyGroup(company, companyJobs));
+  }
 }
 
-function renderJob(job) {
+function renderCompanyGroup(company, jobs) {
+  const group = document.createElement('div');
+  group.className = 'company-group';
+
+  const header = document.createElement('div');
+  header.className = 'company-header';
+
+  const name = document.createElement('span');
+  name.className = 'company-name';
+  name.textContent = company;
+
+  const count = document.createElement('span');
+  count.className = 'company-count';
+  count.textContent = `${jobs.length} role${jobs.length !== 1 ? 's' : ''}`;
+
+  const chevron = document.createElement('span');
+  chevron.className = 'company-chevron';
+  chevron.textContent = '▾';
+
+  header.append(name, count, chevron);
+  group.append(header);
+
+  const body = document.createElement('div');
+  body.className = 'company-jobs';
+
+  jobs.forEach((job) => {
+    const card = renderJob(job, false, true);
+    body.append(card);
+  });
+
+  group.append(body);
+
+  header.addEventListener('click', () => {
+    group.classList.toggle('collapsed');
+  });
+
+  return group;
+}
+
+function toggleJobExpand(jobId) {
+  for (const card of document.querySelectorAll(`.job[data-job-id="${jobId}"]`)) {
+    card.classList.toggle('expanded');
+  }
+}
+
+function renderJob(job, defaultExpanded = false, inGroup = false) {
   const row = document.createElement('article');
-  row.className = 'job';
+  row.className = `job${defaultExpanded ? ' expanded' : ''}`;
+  if (job.id) row.dataset.jobId = job.id;
+
+  const scoreVal = Number(job.score) || 0;
+  const scoreClass = scoreVal >= 8 ? 'good' : scoreVal >= 7 ? 'ok' : 'low';
+
   const score = document.createElement('div');
-  score.className = `score ${Number(job.score) >= 8 ? 'good' : Number(job.score) >= 7 ? 'ok' : 'low'}`;
-  score.textContent = `${job.score || 0}/10`;
-  const main = document.createElement('div');
-  main.className = 'job-main';
-  const title = document.createElement('div');
-  title.className = 'job-title';
-  const heading = document.createElement('h3');
-  heading.textContent = job.title || 'Untitled role';
-  title.append(heading);
-  const meta = document.createElement('dl');
-  meta.className = 'job-fields';
-  addField(meta, 'Organization', job.company);
-  addField(meta, 'Job site', job.source);
-  addField(meta, 'Matched title', job.matchedTitle || job.titleMatch);
-  addField(meta, 'Location', job.locationLabel || job.location);
-  addField(meta, 'Experience', job.yearsRequired);
-  addField(meta, 'Matched skills', (job.matchedSkills || []).join(', '));
-  addField(meta, 'Supporting skills', (job.supportingSkills || []).join(', '));
-  addField(meta, 'Skill gaps', (job.recommendedSkillGaps || []).join(', '));
-  addField(meta, 'Eligibility', job.eligibility?.label || job.remoteStatus);
-  addField(meta, 'Compensation', job.compensation?.label || job.salaryBand);
-  addField(meta, 'Urgency', job.urgency || job.priority);
-  const reasons = document.createElement('div');
-  reasons.className = 'reasons';
+  score.className = `score ${scoreClass}`;
+  score.textContent = `${scoreVal}`;
+
+  // Compact row (always visible)
+  const compactRow = document.createElement('div');
+  compactRow.className = 'job-card-compact';
+
+  const cardHeader = document.createElement('div');
+  cardHeader.className = 'job-card-header';
+
+  const titleSpan = document.createElement('span');
+  titleSpan.className = 'job-title';
+  titleSpan.textContent = cleanText(job.title) || 'Untitled role';
+
+  const metaSpan = document.createElement('div');
+  metaSpan.className = 'job-card-meta';
+  const rawLoc = job.locationLabel || job.location || '';
+  const cleanLoc = cleanLocation(rawLoc);
+  const metaParts = [];
+  if (!inGroup && job.company) metaParts.push(`<span>${tesc(cleanText(job.company))}</span>`);
+  if (cleanLoc) metaParts.push(`<span>${tesc(cleanLoc)}</span>`);
+  if (job.yearsRequired) metaParts.push(`<span>${tesc(cleanText(job.yearsRequired))}</span>`);
+  metaSpan.innerHTML = metaParts.join('');
+
+  // Only show liveness badge when status is known (not unknown)
+  if (job.type !== 'searchLead' && job.url && job.id) {
+    const currentStatus = state.liveness[job.id];
+    if (currentStatus && currentStatus !== 'unknown') {
+      const livenessBadge = document.createElement('span');
+      livenessBadge.className = `liveness-badge liveness-${currentStatus}`;
+      livenessBadge.dataset.jobId = job.id;
+      livenessBadge.textContent = currentStatus === 'live' ? 'live' : currentStatus === 'dead' ? 'closed' : '…';
+      metaSpan.append(livenessBadge);
+    } else if (job.url && job.id) {
+      // Hidden placeholder for when liveness is checked later
+      const placeholder = document.createElement('span');
+      placeholder.className = 'liveness-badge liveness-unknown';
+      placeholder.dataset.jobId = job.id;
+      placeholder.hidden = true;
+      metaSpan.append(placeholder);
+    }
+  }
+
+  cardHeader.append(titleSpan, metaSpan);
+
+  const expandBtn = document.createElement('button');
+  expandBtn.type = 'button';
+  expandBtn.className = 'job-card-expand-btn';
+  expandBtn.setAttribute('aria-label', 'Toggle details');
+  expandBtn.innerHTML = '▾';
+
+  compactRow.append(score, cardHeader, expandBtn);
+
+  // Skills chips row (compact)
+  const skillsRow = document.createElement('div');
+  skillsRow.className = 'job-skills-row';
+  for (const skill of (job.matchedSkills || []).slice(0, 4)) {
+    const chip = document.createElement('span');
+    chip.className = 'skill-chip';
+    chip.textContent = skill;
+    skillsRow.append(chip);
+  }
+  for (const reason of (job.reasons || [])) {
+    const label = formatReason(reason);
+    if (!label) continue;
+    const chip = document.createElement('span');
+    chip.className = 'reason reason-sm';
+    chip.textContent = label;
+    skillsRow.append(chip);
+    if (skillsRow.children.length >= 6) break;
+  }
+
+  // Expanded details (hidden by default via CSS .job-card-details)
+  const details = document.createElement('div');
+  details.className = 'job-card-details';
+
+  const grid = document.createElement('dl');
+  grid.className = 'job-fields';
+  if (!inGroup) addField(grid, 'Organization', cleanText(job.company));
+  addField(grid, 'Job site', cleanText(job.source));
+  addField(grid, 'Matched title', cleanText(job.matchedTitle || job.titleMatch));
+  addField(grid, 'Location', cleanLocation(job.locationLabel || job.location));
+  addField(grid, 'Experience', cleanText(job.yearsRequired));
+  addField(grid, 'Matched skills', (job.matchedSkills || []).map(cleanText).join(', '));
+  addField(grid, 'Supporting skills', (job.supportingSkills || []).map(cleanText).join(', '));
+  addField(grid, 'Skill gaps', (job.recommendedSkillGaps || []).map(cleanText).join(', '));
+  addField(grid, 'Eligibility', cleanText(job.eligibility?.label || job.remoteStatus));
+  addField(grid, 'Compensation', cleanText(job.compensation?.label || job.salaryBand));
+  addField(grid, 'Urgency', cleanText(job.urgency || job.priority));
+
+  const allReasons = document.createElement('div');
+  allReasons.className = 'reasons';
   for (const reason of job.reasons || []) {
     const chip = document.createElement('span');
     chip.className = 'reason';
     chip.textContent = reason;
-    reasons.append(chip);
+    allReasons.append(chip);
   }
+
   const actions = document.createElement('div');
   actions.className = 'job-actions';
   if (job.type === 'searchLead') {
@@ -773,9 +959,56 @@ function renderJob(job) {
       actionButton('Open job', () => window.open(job.url, '_blank', 'noopener'), 'primary'),
     );
   }
-  main.append(title, meta, reasons, actions);
-  row.append(score, main);
+
+  const detailsInner = document.createElement('div');
+  detailsInner.className = 'job-main';
+  detailsInner.append(grid, allReasons, actions);
+  details.append(detailsInner);
+
+  expandBtn.addEventListener('click', () => {
+    row.classList.toggle('expanded');
+  });
+
+  row.append(compactRow, skillsRow, details);
   return row;
+}
+
+async function startLivenessCheck(jobs) {
+  if (!jobs || jobs.length === 0) return;
+  for (const job of jobs.filter((j) => j.url && j.id)) {
+    if (state.liveness[job.id] && state.liveness[job.id] !== 'unknown') continue;
+    state.liveness[job.id] = 'checking';
+    updateLivenessBadge(job.id, 'checking');
+    (async () => {
+      try {
+        const result = await request('/api/liveness', {
+          method: 'POST',
+          body: JSON.stringify({ url: job.url }),
+        });
+        const status = result.live === true ? 'live' : result.live === false ? 'dead' : 'unknown';
+        state.liveness[job.id] = status;
+        updateLivenessBadge(job.id, status);
+      } catch {
+        state.liveness[job.id] = 'unknown';
+        updateLivenessBadge(job.id, 'unknown');
+      }
+    })();
+  }
+}
+
+function updateLivenessBadge(jobId, status) {
+  for (const badge of document.querySelectorAll(`.liveness-badge[data-job-id="${jobId}"]`)) {
+    badge.className = `liveness-badge liveness-${status}`;
+    if (status === 'checking') {
+      badge.textContent = '…';
+      badge.hidden = false;
+    } else if (status === 'live' || status === 'dead') {
+      badge.textContent = status === 'live' ? 'live' : 'closed';
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+  }
 }
 
 async function tailorResume(job) {
@@ -992,6 +1225,17 @@ document.getElementById('freereq').addEventListener('keydown', (e) => { if (e.ke
 document.getElementById('scanBtn').addEventListener('click', () => runScan(false));
 document.getElementById('scanVerifyBtn').addEventListener('click', () => runScan(true));
 document.getElementById('checkLiveBtn').addEventListener('click', checkLive);
+document.getElementById('livenessAllBtn').addEventListener('click', () => {
+  const jobs = (state.payload?.jobs || []).filter((j) => j.score >= 7 && j.url && j.id);
+  if (jobs.length === 0) return;
+  const banner = document.getElementById('livenessBanner');
+  document.getElementById('livenessBannerText').textContent = `Checking liveness for ${jobs.length} recommended jobs…`;
+  banner.hidden = false;
+  startLivenessCheck(jobs);
+});
+document.getElementById('livenessBannerDismiss').addEventListener('click', () => {
+  document.getElementById('livenessBanner').hidden = true;
+});
 document.getElementById('healthBtn').addEventListener('click', runHealth);
 document.getElementById('sc-filter').addEventListener('change', renderScanRows);
 
@@ -1054,6 +1298,74 @@ async function loadCadence() {
 
 // ── Minimal helpers ───────────────────────────────────────────────────────────
 function tesc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function stripHtml(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;[^&]*&gt;/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
+}
+
+function cleanText(s) {
+  if (!s) return '';
+  const stripped = stripHtml(s);
+  // Truncate at first sentence if very long (>80 chars)
+  if (stripped.length > 80) {
+    const dot = stripped.indexOf('. ');
+    if (dot > 0 && dot < 80) return stripped.slice(0, dot);
+    return stripped.slice(0, 80).replace(/\s+\S*$/, '') + '…';
+  }
+  return stripped;
+}
+
+function cleanLocation(s) {
+  if (!s) return '';
+  const stripped = stripHtml(s);
+  // Cut where company description bleeds in after location data
+  // Matches: "<location> <Sentence starting word> ..."
+  // Common bleed patterns: "The mission", "Our team", "Senior", "We are", "About"
+  const descPattern = /^(.{4,50}?(?:,\s*[A-Z][a-z]+)?)\s+(?=[A-Z][a-z]{2,}\s+(?:Android|Mobile|Software|Senior|Lead|Engineer|Product|the |our |we |at |join|come|this|about))/i;
+  const m = stripped.match(descPattern);
+  if (m) return m[1].replace(/[,\s·]+$/, '');
+  // Simple fallback: cut at natural location end (after "Country" or 50 chars)
+  // If it looks like "City, Country ExtraStuff", find where ExtraStuff begins
+  const commaIdx = stripped.lastIndexOf(',');
+  if (commaIdx > 0 && commaIdx < 40) {
+    const afterCountry = stripped.slice(commaIdx + 1).trimStart();
+    const wordEnd = afterCountry.search(/\s/);
+    if (wordEnd > 0) {
+      const country = afterCountry.slice(0, wordEnd);
+      const remainder = afterCountry.slice(wordEnd).trim();
+      if (remainder.length > 5) return stripped.slice(0, commaIdx + 1 + wordEnd).trim();
+    }
+  }
+  if (stripped.length > 50) return stripped.slice(0, 48).replace(/[,\s]+$/, '') + '…';
+  return stripped;
+}
+
+function formatReason(r) {
+  if (!r) return null;
+  const s = String(r);
+  // "Skills: 6 verified, 1 supporting" → "6 skills matched"
+  const skillM = s.match(/Skills?:\s*(\d+)\s*verified/i);
+  if (skillM) return `${skillM[1]} skills matched`;
+  // "Experience: Experience aligns at 5-9 years" → "exp: 5-9 yrs"
+  const expAligns = s.match(/Experience.*aligns.*?(\d[\d-–+]*\s*(?:years?|yrs?))/i);
+  if (expAligns) return `exp: ${expAligns[1].replace('years', 'yrs').replace('year', 'yr')}`;
+  // "Experience: Role starts at 30 years" → skip
+  if (/Experience.*role starts/i.test(s)) return null;
+  // "Joining availability" → skip verbose
+  if (/joining|availability/i.test(s)) return null;
+  // Otherwise truncate to 35 chars
+  const clean = stripHtml(s.replace(/^[^:]+:\s*/, ''));
+  return clean.length > 35 ? clean.slice(0, 33) + '…' : clean;
+}
 function tattr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 function ttoast(msg) {
   let t = document.getElementById('t-toast');
@@ -1096,28 +1408,42 @@ function renderTracker() {
   const { apps, pipeline, reports, states } = trackerData;
 
   document.querySelector('#apps-table tbody').innerHTML = apps.map((a) => {
+    const statusSlug = (a.status || '').replace(/\s+/g, '-');
     const opts = states.map((st) => `<option${st === a.status ? ' selected' : ''}>${tesc(st)}</option>`).join('');
     const rep = a.report && a.report !== '—'
       ? a.report.replace(/\[([^\]]+)\]\(([^)]+)\)/, `<a href="#" onclick="openReport('${tattr((a.report.match(/\(([^)]+)\)/) || [])[1] || '')}');return false">$1</a>`)
       : '—';
-    return `<tr>
+    const notesRaw = a.notes || '';
+    const notesShort = notesRaw.length > 60 ? notesRaw.slice(0, 58) + '…' : notesRaw;
+    return `<tr class="apps-table-row">
       <td><strong>${tesc(a.company)}</strong></td>
       <td>${tesc(a.role)}</td>
       <td class="t-muted">${tesc(a.date)}</td>
       <td>${tesc(a.score)}</td>
       <td>
-        <span class="t-badge t-b-${a.status}">${tesc(a.status)}</span>
-        <select class="t-select-sm" onchange="setStatus(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${opts}</select>
+        <select class="t-select-sm t-select-status t-b-${tesc(statusSlug)}" onchange="setStatus(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${opts}</select>
       </td>
       <td>${rep}</td>
-      <td class="t-muted"><span class="t-editnote" onclick="editNote(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${tesc(a.notes)}</span></td>
+      <td class="t-muted"><span class="t-editnote" title="${tattr(notesRaw)}" onclick="editNote(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${tesc(notesShort)}</span></td>
     </tr>`;
   }).join('') || '<tr><td colspan="7" class="t-muted">No applications yet.</td></tr>';
 
+  function truncateUrl(url, max = 55) {
+    if (!url || url.length <= max) return url;
+    return url.slice(0, max) + '…';
+  }
+
   document.getElementById('apps-pipeline').innerHTML = pipeline.length
-    ? pipeline.map((p) => `<div class="t-checkrow${p.done ? ' t-done' : ''}">
-        <input type="checkbox" ${p.done ? 'checked' : ''} onchange="togglePipe(this)" data-u="${tattr(p.url)}">
-        <div><strong>${tesc(p.company)}</strong> — ${tesc(p.title)}<br><a class="t-mono" href="${tattr(p.url)}" target="_blank" rel="noopener">${tesc(p.url.slice(0, 70))}…</a></div>
+    ? pipeline.map((p) => `<div class="pipeline-card${p.done ? ' pipeline-card-done' : ''}">
+        <input type="checkbox" ${p.done ? 'checked' : ''} onchange="togglePipe(this)" data-u="${tattr(p.url)}" class="pipeline-checkbox">
+        <div class="pipeline-card-body">
+          <div class="pipeline-card-header">
+            <strong class="pipeline-company">${tesc(p.company)}</strong>
+            ${p.title ? `<span class="pipeline-role t-muted">${tesc(p.title)}</span>` : ''}
+          </div>
+          <a class="pipeline-url t-mono" href="${tattr(p.url)}" target="_blank" rel="noopener" title="${tattr(p.url)}">${tesc(truncateUrl(p.url))}</a>
+        </div>
+        <button class="pipeline-evaluate-btn" onclick="composeQueue('/career-ops oferta ${tattr(p.url)}', null)" title="Queue evaluation">Evaluate</button>
       </div>`).join('')
     : '<p class="t-muted">Inbox empty — run a scan.</p>';
 
@@ -1125,6 +1451,15 @@ function renderTracker() {
     ? reports.map((r) => `<span class="t-pill" style="cursor:pointer" onclick="openReport('${tattr(r)}')">${tesc(r)}</span>`).join('')
     : '<p class="t-muted">No reports yet.</p>';
 }
+
+window.clearCompletedInbox = async function clearCompletedInbox() {
+  if (!trackerData) return;
+  for (const item of trackerData.inbox.filter((i) => i.done)) {
+    try { await request('/api/queue-remove', { method: 'POST', body: JSON.stringify({ text: item.text }) }); } catch { /* best effort */ }
+  }
+  trackerData = null;
+  await loadTrackerData();
+};
 
 async function openReport(name) {
   name = (name || '').replace(/^.*\//, '');
@@ -1206,17 +1541,58 @@ function renderConsole() {
 
   const pending = inbox.filter((i) => !i.done);
   const done = inbox.filter((i) => i.done);
-  document.getElementById('inbox').innerHTML =
-    (pending.length
-      ? pending.map((i, idx) => `<div class="t-checkrow">
-          <span style="color:#b45309">◷</span>
-          <div style="flex:1">${tesc(i.text)}</div>
-          <button data-unqueue-idx="${idx}" style="padding:3px 8px;font-size:12px">✕</button>
-        </div>`).join('')
-      : '<p class="t-muted">Queue empty — add requests above or copy commands below.</p>') +
-    (done.length
-      ? `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:13px;color:#667085">Completed (${done.length})</summary><div style="padding:8px 0">${done.map((i) => `<div style="opacity:.5;text-decoration:line-through;font-size:12px;padding:3px 0">${tesc(i.text)}</div>`).join('')}</div></details>`
-      : '');
+
+  function parsePriority(text) {
+    if (/urgent|asap|today/i.test(text)) return { label: 'urgent', cls: 'inbox-priority-amber' };
+    if (/interview|apply/i.test(text)) return { label: 'action', cls: 'inbox-priority-blue' };
+    return { label: null, cls: 'inbox-priority-gray' };
+  }
+
+  function parseTimestamp(text) {
+    const m = String(text).match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s*[—–-]\s*/);
+    if (!m) return { ts: null, body: text };
+    return { ts: m[1], body: text.slice(m[0].length) };
+  }
+
+  const inboxEl = document.getElementById('inbox');
+  let html = '';
+
+  if (pending.length === 0 && done.length === 0) {
+    html = '<p class="t-muted">Queue empty — add requests above or copy commands below.</p>';
+  } else {
+    if (pending.length > 0) {
+      html += pending.map((item, idx) => {
+        const { ts, body } = parseTimestamp(item.text);
+        const { label, cls } = parsePriority(item.text);
+        return `<div class="inbox-card inbox-card-pending">
+          <div class="inbox-card-dot">◷</div>
+          <div class="inbox-card-body">
+            ${label ? `<span class="inbox-priority-chip ${cls}">${tesc(label)}</span>` : ''}
+            <span class="inbox-card-text">${tesc(body)}</span>
+            ${ts ? `<span class="inbox-card-ts">${tesc(ts)}</span>` : ''}
+          </div>
+          <button data-unqueue-idx="${idx}" class="inbox-remove-btn" title="Remove">✕</button>
+        </div>`;
+      }).join('');
+    } else {
+      html += '<p class="t-muted" style="margin-bottom:8px">Queue empty — add requests above.</p>';
+    }
+
+    if (done.length > 0) {
+      html += `<details class="inbox-done-section" style="margin-top:10px">
+        <summary class="inbox-done-summary">Completed <span class="inbox-done-badge">${done.length}</span></summary>
+        <div class="inbox-done-list">
+          ${done.map((i) => {
+            const { ts, body } = parseTimestamp(i.text);
+            return `<div class="inbox-done-item"><span class="inbox-done-text">${tesc(body)}</span>${ts ? `<span class="inbox-card-ts">${tesc(ts)}</span>` : ''}</div>`;
+          }).join('')}
+          <button class="inbox-clear-btn" onclick="clearCompletedInbox()">Clear completed</button>
+        </div>
+      </details>`;
+    }
+  }
+
+  inboxEl.innerHTML = html;
 
   const q = pending.length;
   const badge = document.getElementById('queueBadge');
