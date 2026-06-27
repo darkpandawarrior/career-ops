@@ -2,10 +2,11 @@
 
 import { existsSync, readFileSync, writeFileSync, appendFileSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 import yaml from 'js-yaml';
 
@@ -26,24 +27,47 @@ import { findCachedJob, refreshJobSearch } from './search/job-search-runner.mjs'
 import { createTailoredResume } from './resume-tailor.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
+const ENGINE_ROOT = path.resolve(__dirname, '..');
+const DEFAULT_ROOT = process.env.CAREER_OPS_ROOT
+  ? path.resolve(process.env.CAREER_OPS_ROOT)
+  : ENGINE_ROOT;
 const PUBLIC = path.join(__dirname, 'public');
-const CACHE_PATH = path.join(ROOT, 'data', 'job-dashboard.json');
 const FIXTURES = path.join(__dirname, 'test', 'fixtures');
 const HOST = process.env.CAREER_DASHBOARD_HOST || '127.0.0.1';
 const PORT = Number(process.env.CAREER_DASHBOARD_PORT || 4173);
 const DEMO = process.env.CAREER_DASHBOARD_DEMO === '1';
+const PROFILES_REGISTRY = path.join(ENGINE_ROOT, 'profiles.yml');
 let refreshPromise = null;
+const refreshState = { running: false, phase: 0, phaseName: '', startedAt: null };
+const COACH_STATE = path.resolve(ENGINE_ROOT, '../interview-coach-skill/coaching_state.md');
 
-// ── Tracker paths ────────────────────────────────────────────────────────────
-const APPS        = path.join(ROOT, 'data/applications.md');
-const PIPELINE    = path.join(ROOT, 'data/pipeline.md');
-const SCAN_HIST   = path.join(ROOT, 'data/scan-history.tsv');
-const AGENT_INBOX = path.join(ROOT, 'data/agent-inbox.md');
-const PORTALS     = path.join(ROOT, 'portals.yml');
-const CV_PATH     = path.join(ROOT, 'cv.md');
-const REPORTS_DIR = path.join(ROOT, 'reports');
-const COACH_STATE = path.resolve(ROOT, '../interview-coach-skill/coaching_state.md');
+// ── Per-profile path resolver ─────────────────────────────────────────────────
+function resolveProfileRoot(urlObj) {
+  const slug = urlObj.searchParams.get('profile');
+  if (!slug || !/^[a-z0-9_-]+$/.test(slug)) return DEFAULT_ROOT;
+  // Look up in registry to find root override
+  try {
+    const registry = existsSync(PROFILES_REGISTRY)
+      ? yaml.load(readFileSync(PROFILES_REGISTRY, 'utf-8'))
+      : null;
+    const entry = registry?.profiles?.find((p) => p.name === slug);
+    if (!entry) return DEFAULT_ROOT;
+    return entry.root ? path.resolve(ENGINE_ROOT, entry.root) : DEFAULT_ROOT;
+  } catch { return DEFAULT_ROOT; }
+}
+
+function paths(root) {
+  return {
+    apps:      path.join(root, 'data/applications.md'),
+    pipeline:  path.join(root, 'data/pipeline.md'),
+    scanHist:  path.join(root, 'data/scan-history.tsv'),
+    agentInbox:path.join(root, 'data/agent-inbox.md'),
+    portals:   path.join(root, 'portals.yml'),
+    cvPath:    path.join(root, 'cv.md'),
+    reportsDir:path.join(root, 'reports'),
+    cachePath: path.join(root, 'data/job-dashboard.json'),
+  };
+}
 const CANONICAL_STATES = ['Evaluated','Applied','Responded','Interview','Offer','Rejected','Discarded','SKIP'];
 const COMMANDS = {
   'career-ops': [
@@ -74,26 +98,28 @@ const COMMANDS = {
 // ── Tracker helpers ──────────────────────────────────────────────────────────
 const readT = (f) => existsSync(f) ? readFileSync(f, 'utf-8') : '';
 
-function execJson(script, args = []) {
+function execJson(script, args = [], root = DEFAULT_ROOT) {
   return new Promise((resolve) => {
-    execFile(process.execPath, [script, ...args], { cwd: ROOT, timeout: 180_000 }, (err, stdout, stderr) => {
+    const env = { ...process.env, CAREER_OPS_ROOT: root };
+    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env, timeout: 180_000 }, (err, stdout, stderr) => {
       try { resolve({ ok: true, data: JSON.parse(stdout) }); }
       catch { resolve({ ok: !err, output: (stdout || '') + (stderr || '') }); }
     });
   });
 }
 
-function execText(script, args = []) {
+function execText(script, args = [], root = DEFAULT_ROOT) {
   return new Promise((resolve) => {
-    execFile(process.execPath, [script, ...args], { cwd: ROOT, timeout: 180_000 }, (err, stdout, stderr) => {
+    const env = { ...process.env, CAREER_OPS_ROOT: root };
+    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env, timeout: 180_000 }, (err, stdout, stderr) => {
       resolve({ ok: !err, output: (stdout || '') + (stderr || '') });
     });
   });
 }
 
-function parseApplications() {
+function parseApplications(root) {
   const rows = [];
-  for (const line of readT(APPS).split('\n')) {
+  for (const line of readT(paths(root).apps).split('\n')) {
     const m = line.match(/^\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|$/);
     if (!m) continue;
     const c = m.slice(1).map((x) => x.trim());
@@ -103,9 +129,9 @@ function parseApplications() {
   return rows;
 }
 
-function parsePipeline() {
+function parsePipeline(root) {
   const items = [];
-  for (const m of readT(PIPELINE).matchAll(/- \[([ x])\] (https?:\/\/\S+) \| ([^|]+) \| (.+)/g)) {
+  for (const m of readT(paths(root).pipeline).matchAll(/- \[([ x])\] (https?:\/\/\S+) \| ([^|]+) \| (.+)/g)) {
     items.push({
       done: m[1] === 'x', url: m[2], company: m[3].trim(),
       title: m[4].replace(/<!--[\s\S]*?-->/g, '').trim(),
@@ -114,8 +140,8 @@ function parsePipeline() {
   return items;
 }
 
-function parseScanHistory() {
-  const lines = readT(SCAN_HIST).trim().split('\n').slice(1).filter(Boolean);
+function parseScanHistory(root) {
+  const lines = readT(paths(root).scanHist).trim().split('\n').slice(1).filter(Boolean);
   const byStatus = {};
   let lastScan = '';
   const all = [];
@@ -128,9 +154,9 @@ function parseScanHistory() {
   return { total: lines.length, byStatus, lastScan, rows: all.reverse() };
 }
 
-function parsePortals() {
+function parsePortals(root) {
   try {
-    const cfg = yaml.load(readT(PORTALS)) || {};
+    const cfg = yaml.load(readT(paths(root).portals)) || {};
     return {
       companies: (cfg.tracked_companies || []).filter((c) => c && typeof c === 'object')
         .map((c) => ({ name: c.name, enabled: c.enabled !== false, notes: c.notes || '', url: c.careers_url || '' })),
@@ -139,9 +165,9 @@ function parsePortals() {
   } catch { return { companies: [], queries: [] }; }
 }
 
-function parseAgentInbox() {
+function parseAgentInbox(root) {
   const items = [];
-  for (const m of readT(AGENT_INBOX).matchAll(/^- \[([ x])\] (.+)$/gm)) {
+  for (const m of readT(paths(root).agentInbox).matchAll(/^- \[([ x])\] (.+)$/gm)) {
     items.push({ done: m[1] === 'x', text: m[2] });
   }
   return items;
@@ -206,12 +232,12 @@ function listReports() {
   return readdirSync(REPORTS_DIR).filter((f) => f.endsWith('.md')).sort().reverse();
 }
 
-function buildTrackerData() {
-  const apps = parseApplications();
-  const pipeline = parsePipeline();
-  const scan = parseScanHistory();
-  const portals = parsePortals();
-  const inbox = parseAgentInbox();
+function buildTrackerData(root) {
+  const apps = parseApplications(root);
+  const pipeline = parsePipeline(root);
+  const scan = parseScanHistory(root);
+  const portals = parsePortals(root);
+  const inbox = parseAgentInbox(root);
   const coach = parseCoachState();
   const reports = listReports();
   return {
@@ -226,11 +252,12 @@ function buildTrackerData() {
   };
 }
 
-function updateAppField(company, role, field, value) {
+function updateAppField(company, role, field, value, root) {
   if (field === 'status' && !CANONICAL_STATES.includes(value)) throw Object.assign(new Error(`non-canonical status: ${value}`), { status: 400 });
   if (field === 'notes') value = value.replace(/\|/g, '/');
   const colIdx = field === 'status' ? 6 : 9;
-  const lines = readT(APPS).split('\n');
+  const appsFile = paths(root).apps;
+  const lines = readT(appsFile).split('\n');
   let hit = false;
   const out = lines.map((line) => {
     const cells = line.split('|').map((c) => c.trim());
@@ -243,44 +270,44 @@ function updateAppField(company, role, field, value) {
     return line;
   });
   if (!hit) throw Object.assign(new Error(`row not found: ${company} / ${role}`), { status: 404 });
-  writeFileSync(APPS, out.join('\n'), 'utf-8');
+  writeFileSync(appsFile, out.join('\n'), 'utf-8');
 }
 
-function togglePipelineItem(url, done) {
+function togglePipelineItem(url, done, root) {
+  const pipelineFile = paths(root).pipeline;
   const esc = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const original = readT(PIPELINE);
+  const original = readT(pipelineFile);
   const updated = original.replace(new RegExp(`- \\[[ x]\\] ${esc}`), `- [${done ? 'x' : ' '}] ${url}`);
   if (updated === original) throw Object.assign(new Error(`url not found in pipeline: ${url}`), { status: 404 });
-  writeFileSync(PIPELINE, updated, 'utf-8');
+  writeFileSync(pipelineFile, updated, 'utf-8');
 }
 
-function queueAgentTask(text) {
-  if (!existsSync(AGENT_INBOX)) writeFileSync(AGENT_INBOX, '# Agent Inbox\n\n', 'utf-8');
+function queueAgentTask(text, root) {
+  const inboxFile = paths(root).agentInbox;
+  if (!existsSync(inboxFile)) writeFileSync(inboxFile, '# Agent Inbox\n\n', 'utf-8');
   const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
   const entry = `- [ ] ${stamp} — ${text.replace(/\n/g, ' ')}\n`;
-  // Deduplicate: skip if same text already queued (ignoring timestamp)
-  const existing = readT(AGENT_INBOX);
+  const existing = readT(inboxFile);
   if (existing.includes(text.slice(0, 80))) { return; }
-  appendFileSync(AGENT_INBOX, entry, 'utf-8');
+  appendFileSync(inboxFile, entry, 'utf-8');
 }
 
-function removeAgentTask(text) {
-  // Match on full text to avoid accidental deletion of similar tasks
-  const lines = readT(AGENT_INBOX).split('\n');
+function removeAgentTask(text, root) {
+  const inboxFile = paths(root).agentInbox;
+  const lines = readT(inboxFile).split('\n');
   const before = lines.length;
   const filtered = lines.filter((l) => !(l.startsWith('- [ ]') && l.endsWith(text.trim())));
-  // Fallback: if exact-end match found nothing, use substring match
   const out = filtered.length < before ? filtered : lines.filter((l) => !(l.startsWith('- [ ]') && l.includes(text.trim())));
-  writeFileSync(AGENT_INBOX, out.join('\n'), 'utf-8');
+  writeFileSync(inboxFile, out.join('\n'), 'utf-8');
 }
 
-export async function buildDashboardPayload() {
+export async function buildDashboardPayload(root = DEFAULT_ROOT) {
   const demo = DEMO ? await loadDemoData() : null;
-  const setup = demo?.setup || await getSetupStatus(ROOT);
-  const profile = demo?.profile || (setup.hasActiveProfile ? await loadActiveProfile(ROOT) : null);
-  const rawConfig = demo?.jobSearch || await loadJobSearchConfig(ROOT);
+  const setup = demo?.setup || await getSetupStatus(root);
+  const profile = demo?.profile || (setup.hasActiveProfile ? await loadActiveProfile(root) : null);
+  const rawConfig = demo?.jobSearch || await loadJobSearchConfig(root);
   const validation = validateJobSearchConfig(rawConfig);
-  const cached = demo?.cache || await readCache();
+  const cached = demo?.cache || await readCache(root);
   const jobs = Array.isArray(cached?.jobs) && validation.valid
     ? cached.scored === true
       ? cached.jobs
@@ -317,57 +344,106 @@ export async function buildDashboardPayload() {
 export async function route(req, res) {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || `${HOST}:${PORT}`}`);
+    const root = resolveProfileRoot(url);
     if (req.method === 'OPTIONS') return sendEmpty(res, 204);
     if (url.pathname === '/api/health') {
-      return sendJson(res, { ok: true, service: 'hiresignal' });
+      return sendJson(res, { ok: true, service: 'career-ops-dashboard' });
+    }
+    if (url.pathname === '/api/refresh/status') {
+      return sendJson(res, {
+        running: refreshState.running,
+        phase: refreshState.phase,
+        phaseName: refreshState.phaseName,
+        elapsedMs: refreshState.startedAt ? Date.now() - refreshState.startedAt : 0,
+      });
+    }
+    if (url.pathname === '/api/profiles') {
+      try {
+        const registry = existsSync(PROFILES_REGISTRY)
+          ? yaml.load(readFileSync(PROFILES_REGISTRY, 'utf-8'))
+          : null;
+        const activeSlug = url.searchParams.get('profile');
+        const list = (registry?.profiles || []).map((p, i) => {
+          const isActive = activeSlug ? p.name === activeSlug : (i === 0 || !p.root);
+          return { ...p, active: isActive, url: `/?profile=${p.name}` };
+        });
+        return sendJson(res, { profiles: list });
+      } catch {
+        return sendJson(res, { profiles: [] });
+      }
+    }
+    if (url.pathname === '/api/profiles/create' && req.method === 'POST') {
+      try {
+        const { mkdirSync, writeFileSync: wfs } = await import('node:fs');
+        const body = await readJsonBody(req);
+        const { slug, display_name, color } = body;
+        if (!slug || !display_name) return sendJson(res, { error: 'slug and display_name are required' }, 400);
+        if (!/^[a-z0-9_-]+$/.test(slug)) return sendJson(res, { error: 'slug must be lowercase alphanumeric/dash/underscore' }, 400);
+        const profileDir = path.join(ENGINE_ROOT, 'profiles', slug);
+        if (existsSync(profileDir)) return sendJson(res, { error: `Profile "${slug}" already exists` }, 409);
+        mkdirSync(path.join(profileDir, 'data'), { recursive: true });
+        mkdirSync(path.join(profileDir, 'config'), { recursive: true });
+        mkdirSync(path.join(profileDir, 'reports'), { recursive: true });
+        const registry = existsSync(PROFILES_REGISTRY)
+          ? yaml.load(readFileSync(PROFILES_REGISTRY, 'utf-8'))
+          : { profiles: [] };
+        registry.profiles = registry.profiles || [];
+        if (!registry.profiles.find((p) => p.name === slug)) {
+          registry.profiles.push({ name: slug, display_name, root: `profiles/${slug}`, color: color || '#0284c7' });
+          wfs(PROFILES_REGISTRY, yaml.dump(registry));
+        }
+        return sendJson(res, { ok: true, slug, url: `/?profile=${slug}` });
+      } catch (err) {
+        return sendJson(res, { error: err.message }, 500);
+      }
     }
     if (url.pathname === '/api/setup/status') {
-      return sendJson(res, DEMO ? (await loadDemoData()).setup : await getSetupStatus(ROOT));
+      return sendJson(res, DEMO ? (await loadDemoData()).setup : await getSetupStatus(root));
     }
     if (url.pathname === '/api/setup/upload' && req.method === 'POST') {
-      const draft = await acceptResumeUpload(req, ROOT);
+      const draft = await acceptResumeUpload(req, root);
       return sendJson(res, { ok: true, draft }, 201);
     }
     if (url.pathname === '/api/setup/draft') {
-      const draft = await readDraft(ROOT, url.searchParams.get('id'));
-      const extraction = draft ? await readExtraction(ROOT, draft.draftId) : null;
-      const inference = draft ? await readInference(ROOT, draft.draftId) : null;
+      const draft = await readDraft(root, url.searchParams.get('id'));
+      const extraction = draft ? await readExtraction(root, draft.draftId) : null;
+      const inference = draft ? await readInference(root, draft.draftId) : null;
       return draft ? sendJson(res, { ok: true, draft, extraction, inference }) : sendJson(res, { error: 'draft_not_found' }, 404);
     }
     if (url.pathname === '/api/setup/extract' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const extraction = await extractResumeDraft(ROOT, body.draftId);
-      const draft = await readDraft(ROOT, body.draftId);
+      const extraction = await extractResumeDraft(root, body.draftId);
+      const draft = await readDraft(root, body.draftId);
       return sendJson(res, { ok: true, draft, extraction });
     }
     if (url.pathname === '/api/setup/infer' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      const inference = await inferProfileDraft(ROOT, body.draftId);
+      const inference = await inferProfileDraft(root, body.draftId);
       return sendJson(res, { ok: true, inference });
     }
     if (url.pathname === '/api/setup/preview' && req.method === 'POST') {
       const body = await readJsonBody(req, 256 * 1024);
-      const result = await saveReviewDraft(ROOT, body.draftId, body.review);
+      const result = await saveReviewDraft(root, body.draftId, body.review);
       return sendJson(res, result, result.valid ? 200 : 422);
     }
     if (url.pathname === '/api/setup/activation-preview' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      return sendJson(res, await previewProfileActivation(ROOT, body.draftId));
+      return sendJson(res, await previewProfileActivation(root, body.draftId));
     }
     if (url.pathname === '/api/setup/confirm' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);
       const body = await readJsonBody(req);
-      const activation = await activateProfile(ROOT, body.draftId);
+      const activation = await activateProfile(root, body.draftId);
       let dashboard;
       try {
-        dashboard = await refreshDashboard();
+        dashboard = await refreshDashboard(root);
       } catch (error) {
-        await rollbackProfileReplacement(ROOT, body.draftId);
+        await rollbackProfileReplacement(root, body.draftId);
         throw error;
       }
       let cleanup = { ok: true, previousProfilesRemoved: true };
       try {
-        cleanup = await finalizeProfileReplacement(ROOT, body.draftId);
+        cleanup = await finalizeProfileReplacement(root, body.draftId);
       } catch (error) {
         cleanup = { ok: false, previousProfilesRemoved: false, error: error.message };
       }
@@ -375,93 +451,91 @@ export async function route(req, res) {
     }
     if (url.pathname === '/api/setup/reset' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      await discardDraft(ROOT, body.draftId);
+      await discardDraft(root, body.draftId);
       return sendJson(res, { ok: true });
     }
     if (url.pathname === '/api/profile') {
       const demo = DEMO ? await loadDemoData() : null;
-      const setup = demo?.setup || await getSetupStatus(ROOT);
+      const setup = demo?.setup || await getSetupStatus(root);
       return sendJson(res, {
         setup,
-        profile: demo?.profile || (setup.hasActiveProfile ? await loadActiveProfile(ROOT) : null),
+        profile: demo?.profile || (setup.hasActiveProfile ? await loadActiveProfile(root) : null),
       });
     }
     if (url.pathname === '/api/search-plan') {
-      const rawConfig = DEMO ? (await loadDemoData()).jobSearch : await loadJobSearchConfig(ROOT);
+      const rawConfig = DEMO ? (await loadDemoData()).jobSearch : await loadJobSearchConfig(root);
       const validation = validateJobSearchConfig(rawConfig);
       if (!validation.valid) return sendJson(res, validation, 422);
       return sendJson(res, buildSearchPlan(validation.config));
     }
     if (url.pathname === '/api/jobs') {
-      return sendJson(res, await buildDashboardPayload());
+      return sendJson(res, await buildDashboardPayload(root));
     }
     if (url.pathname === '/api/refresh' && req.method === 'POST') {
-      const payload = DEMO ? await buildDashboardPayload() : await refreshDashboard();
-      if (!payload.setup.ready) {
-        return sendJson(res, { ...payload, error: 'setup_required' }, 409);
-      }
-      return sendJson(res, payload);
+      if (DEMO) return sendJson(res, { started: true, demo: true });
+      if (!refreshState.running) refreshDashboard(root).catch(() => {});
+      return sendJson(res, { started: true, running: refreshState.running });
     }
     if (url.pathname === '/api/resume' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);
       const body = await readJsonBody(req);
-      const job = await findCachedJob(ROOT, body.id);
+      const job = await findCachedJob(root, body.id);
       if (!job) return sendJson(res, { error: 'job_not_found' }, 404);
-      const artifact = await createTailoredResume(ROOT, job);
+      const artifact = await createTailoredResume(root, job);
       return sendJson(res, { ok: true, job, artifact });
     }
     // ── Tracker routes ──────────────────────────────────────────────────────
-    if (url.pathname === '/api/data') return sendJson(res, buildTrackerData());
-    if (url.pathname === '/api/cadence') return sendJson(res, await execJson('followup-cadence.mjs'));
-    if (url.pathname === '/api/patterns') return sendJson(res, await execJson('analyze-patterns.mjs'));
+    if (url.pathname === '/api/data') return sendJson(res, buildTrackerData(root));
+    if (url.pathname === '/api/cadence') return sendJson(res, await execJson('followup-cadence.mjs', [], root));
+    if (url.pathname === '/api/patterns') return sendJson(res, await execJson('analyze-patterns.mjs', [], root));
     if (url.pathname === '/api/cv') {
       res.writeHead(200, securityHeaders({ 'content-type': 'text/plain; charset=utf-8' }));
-      return res.end(readT(CV_PATH));
+      return res.end(readT(paths(root).cvPath));
     }
     if (url.pathname.startsWith('/api/report/')) {
       const name = decodeURIComponent(url.pathname.slice('/api/report/'.length));
       if (name.includes('..') || name.includes('/')) return sendJson(res, { error: 'bad name' }, 400);
-      const file = path.join(REPORTS_DIR, name);
+      const file = path.join(paths(root).reportsDir, name);
       if (!existsSync(file)) return sendJson(res, { error: 'not found' }, 404);
       res.writeHead(200, securityHeaders({ 'content-type': 'text/plain; charset=utf-8' }));
       return res.end(readFileSync(file, 'utf-8'));
     }
     if (url.pathname === '/api/status' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      updateAppField(body.company, body.role, 'status', body.status);
+      updateAppField(body.company, body.role, 'status', body.status, root);
       return sendJson(res, { ok: true });
     }
     if (url.pathname === '/api/notes' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      updateAppField(body.company, body.role, 'notes', body.notes);
+      updateAppField(body.company, body.role, 'notes', body.notes, root);
       return sendJson(res, { ok: true });
     }
     if (url.pathname === '/api/pipeline-toggle' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      togglePipelineItem(body.url, body.done);
+      togglePipelineItem(body.url, body.done, root);
       return sendJson(res, { ok: true });
     }
     if (url.pathname === '/api/queue' && req.method === 'POST') {
       const body = await readJsonBody(req);
       if (!body.text?.trim()) return sendJson(res, { error: 'empty' }, 400);
-      queueAgentTask(body.text.trim());
+      queueAgentTask(body.text.trim(), root);
       return sendJson(res, { ok: true });
     }
     if (url.pathname === '/api/queue-remove' && req.method === 'POST') {
       const body = await readJsonBody(req);
-      removeAgentTask(body.text);
+      removeAgentTask(body.text, root);
       return sendJson(res, { ok: true });
     }
-    if (url.pathname === '/api/scan' && req.method === 'POST') return sendJson(res, await execText('scan.mjs'));
-    if (url.pathname === '/api/scan-verify' && req.method === 'POST') return sendJson(res, await execText('scan.mjs', ['--verify']));
+    if (url.pathname === '/api/scan' && req.method === 'POST') return sendJson(res, await execText('scan.mjs', [], root));
+    if (url.pathname === '/api/scan-verify' && req.method === 'POST') return sendJson(res, await execText('scan.mjs', ['--verify'], root));
     if (url.pathname === '/api/liveness' && req.method === 'POST') {
       const body = await readJsonBody(req);
       if (!/^https?:\/\//.test(body.url || '')) return sendJson(res, { error: 'bad url' }, 400);
-      return sendJson(res, await execText('check-liveness.mjs', [body.url]));
+      return sendJson(res, await execText('check-liveness.mjs', [body.url], root));
     }
-    if (url.pathname === '/api/pipeline-health' && req.method === 'POST') return sendJson(res, await execText('verify-pipeline.mjs'));
+    if (url.pathname === '/api/pipeline-health' && req.method === 'POST') return sendJson(res, await execText('verify-pipeline.mjs', [], root));
     // ── End tracker routes ──────────────────────────────────────────────────
-    if (url.pathname.startsWith('/output/')) return serveOutput(url.pathname, res);
+    if (url.pathname.startsWith('/output/')) return serveOutput(url.pathname, res, root);
     return serveStatic(url.pathname, res);
   } catch (error) {
     console.error(error);
@@ -473,12 +547,51 @@ export async function route(req, res) {
   }
 }
 
-async function refreshDashboard() {
+function spawnNode(args, dataRoot) {
+  return new Promise((resolve) => {
+    const env = { ...process.env, ...(dataRoot && dataRoot !== ENGINE_ROOT ? { CAREER_OPS_ROOT: dataRoot } : {}) };
+    const child = spawn(process.execPath, args, { cwd: ENGINE_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (c) => { stdout += c; });
+    child.stderr.on('data', (c) => { stderr += c; });
+    child.on('error', (e) => resolve({ code: 1, stdout, stderr: e.message }));
+    child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+  });
+}
+
+async function refreshDashboard(root = DEFAULT_ROOT) {
   if (!refreshPromise) {
-    refreshPromise = refreshJobSearch(ROOT).finally(() => { refreshPromise = null; });
+    const setPhase = (n, name) => { refreshState.phase = n; refreshState.phaseName = name; };
+    refreshState.running = true;
+    refreshState.startedAt = Date.now();
+    setPhase(1, 'Scanning tracked companies');
+    refreshPromise = refreshJobSearch(root, {
+      engineRoot: ENGINE_ROOT,
+      runScan: async () => {
+        setPhase(1, 'Scanning tracked companies');
+        const r = await spawnNode(['scan.mjs'], root);
+        setPhase(2, 'Running ATS discovery');
+        return r;
+      },
+      runWideScan: async () => {
+        setPhase(2, 'Running ATS discovery');
+        const r = await spawnNode(['scan-ats-full.mjs', '--since', '14', '--limit', '50'], root);
+        setPhase(3, 'Fetching job board feeds');
+        return r;
+      },
+    }).then(() => setPhase(4, 'Scoring & saving results'))
+      .finally(() => {
+        setTimeout(() => {
+          refreshState.running = false;
+          refreshState.phase = 0;
+          refreshState.phaseName = '';
+          refreshState.startedAt = null;
+        }, 3000);
+        refreshPromise = null;
+      });
   }
   await refreshPromise;
-  return buildDashboardPayload();
+  return buildDashboardPayload(root);
 }
 
 async function readJsonBody(req, limit = 64 * 1024) {
@@ -525,10 +638,11 @@ async function loadDemoData() {
   };
 }
 
-async function readCache() {
-  if (!existsSync(CACHE_PATH)) return null;
+async function readCache(root = DEFAULT_ROOT) {
+  const cachePath = paths(root).cachePath;
+  if (!existsSync(cachePath)) return null;
   try {
-    return JSON.parse(await readFile(CACHE_PATH, 'utf8'));
+    return JSON.parse(await readFile(cachePath, 'utf8'));
   } catch {
     return null;
   }
@@ -546,13 +660,16 @@ async function serveStatic(pathname, res) {
     '.js': 'text/javascript',
     '.json': 'application/json',
   }[extension] || 'application/octet-stream';
-  res.writeHead(200, securityHeaders({ 'content-type': `${contentType}; charset=utf-8` }));
+  res.writeHead(200, securityHeaders({
+    'content-type': `${contentType}; charset=utf-8`,
+    'cache-control': 'no-store',
+  }));
   res.end(await readFile(full));
 }
 
-async function serveOutput(pathname, res) {
-  const outputRoot = path.join(ROOT, 'output');
-  const full = path.resolve(ROOT, `.${pathname}`);
+async function serveOutput(pathname, res, root = DEFAULT_ROOT) {
+  const outputRoot = path.join(root, 'output');
+  const full = path.resolve(root, `.${pathname}`);
   if (!full.startsWith(outputRoot) || !existsSync(full)) return sendText(res, 'Not found', 404);
   const extension = path.extname(full).toLowerCase();
   const contentType = {
@@ -595,7 +712,7 @@ function securityHeaders(extra = {}) {
 export function startServer() {
   const server = http.createServer(route);
   server.listen(PORT, HOST, () => {
-    console.log(`HireSignal: http://${HOST}:${PORT}`);
+    console.log(`career-ops dashboard: http://${HOST}:${PORT}`);
   });
   return server;
 }

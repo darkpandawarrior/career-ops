@@ -1,3 +1,5 @@
+const _profileParam = new URLSearchParams(location.search).get('profile');
+
 const state = {
   payload: null,
   jobs: [],
@@ -187,7 +189,8 @@ function renderHeader() {
 
 async function loadProfileSwitcher() {
   try {
-    const data = await request('/api/profiles');
+    const profileParam = new URLSearchParams(location.search).get('profile') || '';
+    const data = await request(`/api/profiles${profileParam ? `?profile=${encodeURIComponent(profileParam)}` : ''}`);
     const profiles = data.profiles || [];
     if (profiles.length < 1) return;
     const active = profiles.find((p) => p.active) || profiles[0];
@@ -196,13 +199,13 @@ async function loadProfileSwitcher() {
     els.profileAvatar.style.background = active.color || 'var(--accent)';
     els.profileSwitcherName.textContent = active.display_name.split(' ')[0];
     els.profileSwitcherMenu.innerHTML = profiles.map((p) => `
-      <a class="profile-menu-item${p.active ? ' is-active' : ''}" href="${p.url}" data-port="${p.port}" data-name="${tesc(p.display_name)}" data-active="${p.active}" role="menuitem">
+      <a class="profile-menu-item${p.active ? ' is-active' : ''}" href="${p.url}" role="menuitem">
         <span class="profile-menu-avatar" style="background:${p.color || 'var(--accent)'}">
           ${p.display_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
         </span>
         <span class="profile-menu-info">
           <strong>${p.display_name}</strong>
-          <span>port ${p.port}${p.active ? ' · current' : ''}</span>
+          <span>${p.active ? 'current' : 'switch'}</span>
         </span>
         ${p.active ? '<span class="profile-menu-check" aria-hidden="true">✓</span>' : ''}
       </a>`).join('') + `
@@ -214,25 +217,6 @@ async function loadProfileSwitcher() {
     els.profileSwitcherMenu.querySelector('.profile-menu-add').addEventListener('click', () => {
       closeProfileMenu();
       openAddProfileModal();
-    });
-    els.profileSwitcherMenu.querySelectorAll('a.profile-menu-item').forEach((a) => {
-      if (a.dataset.active === 'true') return;
-      a.addEventListener('click', async (e) => {
-        e.preventDefault();
-        closeProfileMenu();
-        const port = a.dataset.port;
-        const name = a.dataset.name;
-        const url = a.href;
-        try {
-          await fetch(url, { mode: 'no-cors', cache: 'no-store' });
-          window.location.href = url;
-        } catch {
-          showDialog(
-            `${name} — server not running`,
-            `Start it in a new terminal tab:\n\nCAREER_DASHBOARD_PORT=${port} node dashboard-web/server.mjs\n\nThen click the profile again to switch.`
-          );
-        }
-      });
     });
     els.profileSwitcher.hidden = false;
   } catch {
@@ -269,7 +253,6 @@ document.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
       const slug = document.getElementById('newProfileSlug').value.trim();
       const displayName = document.getElementById('newProfileDisplayName').value.trim();
-      const port = Number(document.getElementById('newProfilePort').value);
       const color = document.getElementById('newProfileColor').value;
       const statusEl = document.getElementById('addProfileStatus');
       const submitBtn = document.getElementById('addProfileSubmitBtn');
@@ -277,14 +260,15 @@ document.addEventListener('DOMContentLoaded', () => {
       submitBtn.textContent = 'Creating…';
       statusEl.hidden = true;
       try {
-        const res = await fetch('/api/profiles/create', {
+        const createUrl = _profileParam ? `/api/profiles/create?profile=${encodeURIComponent(_profileParam)}` : '/api/profiles/create';
+        const res = await fetch(createUrl, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ slug, display_name: displayName, port, color }),
+          body: JSON.stringify({ slug, display_name: displayName, color }),
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to create profile');
-        statusEl.textContent = `Profile "${displayName}" created! Start a server on port ${port} with: CAREER_OPS_ROOT=profiles/${slug} CAREER_DASHBOARD_PORT=${port} node dashboard-web/server.mjs`;
+        statusEl.textContent = `Profile "${displayName}" created! Click it in the switcher to open it.`;
         statusEl.classList.remove('error');
         statusEl.hidden = false;
         submitBtn.textContent = 'Done';
@@ -868,7 +852,9 @@ function showDialog(title, body) {
 
 async function request(url, options = {}, json = true) {
   const headers = json ? { 'content-type': 'application/json' } : {};
-  const response = await fetch(url, { headers, ...options });
+  const sep = url.includes('?') ? '&' : '?';
+  const resolved = _profileParam && url.startsWith('/api/') ? `${url}${sep}profile=${encodeURIComponent(_profileParam)}` : url;
+  const response = await fetch(resolved, { headers, ...options });
   const payload = await response.json();
   if (!response.ok) {
     const error = new Error(payload.detail || payload.error || response.statusText);
@@ -1377,7 +1363,8 @@ function renderProfile() {
     document.getElementById('pr-coachprofile').innerHTML = trackerData.coach.profileBullets.slice(0, 8).map((b) => `<li>${tesc(b)}</li>`).join('');
   }
 
-  fetch('/api/cv').then((r) => r.ok ? r.text() : Promise.reject(r.status)).then((t) => {
+  const cvUrl = _profileParam ? `/api/cv?profile=${encodeURIComponent(_profileParam)}` : '/api/cv';
+  fetch(cvUrl).then((r) => r.ok ? r.text() : Promise.reject(r.status)).then((t) => {
     document.getElementById('pr-cv').innerHTML = tmd(t);
   }).catch(() => {
     document.getElementById('pr-cv').innerHTML = '<span class="t-muted">cv.md not found — run the onboarding flow to generate it.</span>';

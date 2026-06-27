@@ -244,11 +244,10 @@
       <dialog id="addProfileModal" aria-labelledby="addProfileModalTitle">
         <form id="addProfileForm" method="dialog">
           <h2 id="addProfileModalTitle">Add new profile</h2>
-          <p>Create a new profile directory and register it. You'll need to start a separate server instance for the new profile.</p>
+          <p>Create a new profile directory and register it. You'll be able to switch to it instantly from this server.</p>
           <div class="form-grid">
             <label>Profile slug (no spaces) *<input id="newProfileSlug" placeholder="e.g. john" pattern="[a-z0-9_-]+" required></label>
             <label>Display name *<input id="newProfileDisplayName" placeholder="e.g. John Smith" required></label>
-            <label>Port *<input id="newProfilePort" type="number" placeholder="e.g. 4175" min="1024" max="65535" required></label>
             <label>Color<input id="newProfileColor" type="color" value="#0284c7"></label>
           </div>
           <div id="addProfileStatus" class="statusline" role="status" hidden></div>
