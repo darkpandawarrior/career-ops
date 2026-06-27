@@ -4,17 +4,25 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <title>HireSignal</title>
+    <title>Career-Ops Dashboard</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <header class="topbar">
       <div>
         <p class="eyebrow">Local-first career command center</p>
-        <h1>HireSignal</h1>
+        <h1>Career-Ops Dashboard</h1>
         <p id="profileLine" hidden></p>
       </div>
       <div class="actions">
+        <div class="profile-switcher" id="profileSwitcher" hidden>
+          <button class="profile-switcher-btn" id="profileSwitcherBtn" type="button" aria-haspopup="true" aria-expanded="false">
+            <span class="profile-avatar" id="profileAvatar"></span>
+            <span id="profileSwitcherName"></span>
+            <span class="profile-switcher-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="profile-switcher-menu" id="profileSwitcherMenu" hidden role="menu"></div>
+        </div>
         <button id="changeProfileBtn" type="button">Change profile</button>
         <button id="refreshBtn" type="button">Refresh jobs</button>
       </div>
@@ -232,6 +240,25 @@
         </section>
       </section>
 
+      <!-- ── Add Profile Modal ── -->
+      <dialog id="addProfileModal" aria-labelledby="addProfileModalTitle">
+        <form id="addProfileForm" method="dialog">
+          <h2 id="addProfileModalTitle">Add new profile</h2>
+          <p>Create a new profile directory and register it. You'll need to start a separate server instance for the new profile.</p>
+          <div class="form-grid">
+            <label>Profile slug (no spaces) *<input id="newProfileSlug" placeholder="e.g. john" pattern="[a-z0-9_-]+" required></label>
+            <label>Display name *<input id="newProfileDisplayName" placeholder="e.g. John Smith" required></label>
+            <label>Port *<input id="newProfilePort" type="number" placeholder="e.g. 4175" min="1024" max="65535" required></label>
+            <label>Color<input id="newProfileColor" type="color" value="#0284c7"></label>
+          </div>
+          <div id="addProfileStatus" class="statusline" role="status" hidden></div>
+          <div class="onboarding-actions">
+            <button id="addProfileSubmitBtn" class="primary" type="submit">Create profile</button>
+            <button type="button" onclick="document.getElementById('addProfileModal').close()">Cancel</button>
+          </div>
+        </form>
+      </dialog>
+
       <section id="dashboardPanel" hidden>
         <nav class="tab-bar" role="tablist" aria-label="Dashboard tabs">
           <button class="tab-btn active" data-tab="jobs" role="tab">Jobs</button>
@@ -244,6 +271,33 @@
 
         <!-- ── Jobs tab ── -->
         <div id="tab-jobs" class="tab-panel">
+
+          <!-- Refresh progress panel — shown only during active scan -->
+          <div id="refreshPanel" class="refresh-panel" hidden>
+            <div class="refresh-panel-inner">
+              <div class="refresh-spinner" aria-hidden="true"></div>
+              <div class="refresh-body">
+                <p class="refresh-title">Scanning for new jobs…</p>
+                <p id="refreshPhaseName" class="refresh-phase">Starting up</p>
+                <div class="refresh-stages">
+                  <div class="refresh-stage" data-phase="1">
+                    <span class="stage-dot"></span><span>Scan company boards</span>
+                  </div>
+                  <div class="refresh-stage" data-phase="2">
+                    <span class="stage-dot"></span><span>ATS discovery</span>
+                  </div>
+                  <div class="refresh-stage" data-phase="3">
+                    <span class="stage-dot"></span><span>Fetch job feeds</span>
+                  </div>
+                  <div class="refresh-stage" data-phase="4">
+                    <span class="stage-dot"></span><span>Score &amp; save</span>
+                  </div>
+                </div>
+                <p id="refreshElapsed" class="refresh-elapsed">0s elapsed</p>
+              </div>
+            </div>
+          </div>
+
           <section class="stats" aria-label="Summary">
             <div><span id="totalCount">0</span><small>Jobs</small></div>
             <div><span id="excellentCount">0</span><small>Excellent</small></div>

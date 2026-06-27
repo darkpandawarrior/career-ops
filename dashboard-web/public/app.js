@@ -9,7 +9,9 @@ const state = {
 };
 
 const ids = [
-  'refreshBtn', 'changeProfileBtn', 'profileLine', 'onboardingPanel', 'returningPanel',
+  'refreshBtn', 'changeProfileBtn', 'profileLine',
+  'profileSwitcher', 'profileSwitcherBtn', 'profileSwitcherMenu', 'profileSwitcherName', 'profileAvatar',
+  'onboardingPanel', 'returningPanel',
   'uploadPanel', 'dashboardPanel', 'returningName', 'returningHeadline',
   'returningLocation', 'returningRoles', 'continueBtn', 'newProfileBtn',
   'backToProfileBtn', 'uploadForm', 'dropZone', 'resumeInput', 'selectedFile',
@@ -33,11 +35,16 @@ const ids = [
   'searchInput', 'scoreFilter', 'statusLine', 'recommendedCount', 'reviewCount',
   'sourceSectionCount', 'recommendedJobs', 'reviewJobs', 'sourceJobs',
   'actionDialog', 'dialogTitle', 'dialogBody',
+  'refreshPanel', 'refreshPhaseName', 'refreshElapsed',
 ];
 const els = Object.fromEntries(ids.map((id) => [id, document.querySelector(`#${id}`)]));
 
 els.refreshBtn.addEventListener('click', () => loadDashboard(true));
 els.changeProfileBtn.addEventListener('click', showReturningProfile);
+els.profileSwitcherBtn.addEventListener('click', toggleProfileMenu);
+document.addEventListener('click', (e) => {
+  if (!els.profileSwitcher.contains(e.target)) closeProfileMenu();
+});
 els.continueBtn.addEventListener('click', showDashboard);
 els.newProfileBtn.addEventListener('click', showUpload);
 els.backToProfileBtn.addEventListener('click', showReturningProfile);
@@ -93,6 +100,7 @@ async function initialize() {
   state.jobs = state.payload.jobs || [];
   renderHeader();
   renderSummary(state.payload);
+  loadProfileSwitcher();
   renderJobs();
   const draftId = new URLSearchParams(location.search).get('draft');
   if (draftId) {
@@ -114,11 +122,21 @@ async function initialize() {
 }
 
 async function loadDashboard(force) {
-  setDashboardBusy(true);
+  if (force) {
+    // Start the scan — show progress panel immediately, poll until done
+    setDashboardBusy(true);
+    try {
+      await request('/api/refresh', { method: 'POST' });
+    } catch (error) {
+      els.statusLine.textContent = `Scan failed: ${error.message}`;
+      setDashboardBusy(false);
+    }
+    // Panel stays visible; poll will call loadDashboard(false) on completion
+    return;
+  }
+  // Non-force: just reload cached data
   try {
-    state.payload = await request(force ? '/api/refresh' : '/api/jobs', {
-      method: force ? 'POST' : 'GET',
-    });
+    state.payload = await request('/api/jobs');
     state.jobs = state.payload.jobs || [];
     renderHeader();
     renderSummary(state.payload);
@@ -126,8 +144,6 @@ async function loadDashboard(force) {
     els.statusLine.textContent = state.payload.diagnostics?.note || 'Dashboard ready.';
   } catch (error) {
     els.statusLine.textContent = `Dashboard failed: ${error.message}`;
-  } finally {
-    setDashboardBusy(false);
   }
 }
 
@@ -168,6 +184,99 @@ function renderHeader() {
     ? [profile.name, profile.headline, profile.location].filter(Boolean).join(' · ')
     : 'No active profile yet';
 }
+
+async function loadProfileSwitcher() {
+  try {
+    const data = await request('/api/profiles');
+    const profiles = data.profiles || [];
+    if (profiles.length < 1) return;
+    const active = profiles.find((p) => p.active) || profiles[0];
+    const initials = active.display_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+    els.profileAvatar.textContent = initials;
+    els.profileAvatar.style.background = active.color || 'var(--accent)';
+    els.profileSwitcherName.textContent = active.display_name.split(' ')[0];
+    els.profileSwitcherMenu.innerHTML = profiles.map((p) => `
+      <a class="profile-menu-item${p.active ? ' is-active' : ''}" href="${p.url}" role="menuitem">
+        <span class="profile-menu-avatar" style="background:${p.color || 'var(--accent)'}">
+          ${p.display_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
+        </span>
+        <span class="profile-menu-info">
+          <strong>${p.display_name}</strong>
+          <span>port ${p.port}${p.active ? ' · current' : ''}</span>
+        </span>
+        ${p.active ? '<span class="profile-menu-check" aria-hidden="true">✓</span>' : ''}
+      </a>`).join('') + `
+      <div class="profile-menu-divider"></div>
+      <button class="profile-menu-item profile-menu-add" type="button" role="menuitem"
+              onclick="closeProfileMenu();openAddProfileModal();">
+        <span class="profile-menu-avatar profile-menu-add-icon">+</span>
+        <span class="profile-menu-info"><strong>Add new profile</strong><span>Create a new profile</span></span>
+      </button>`;
+    els.profileSwitcher.hidden = false;
+  } catch {
+    // profiles.yml absent or malformed — switcher stays hidden
+  }
+}
+
+function toggleProfileMenu() {
+  const open = !els.profileSwitcherMenu.hidden;
+  els.profileSwitcherMenu.hidden = open;
+  els.profileSwitcherBtn.setAttribute('aria-expanded', String(!open));
+}
+
+function closeProfileMenu() {
+  els.profileSwitcherMenu.hidden = true;
+  els.profileSwitcherBtn.setAttribute('aria-expanded', 'false');
+}
+
+window.openAddProfileModal = openAddProfileModal;
+window.closeProfileMenu = closeProfileMenu;
+function openAddProfileModal() {
+  const modal = document.getElementById('addProfileModal');
+  document.getElementById('addProfileForm').reset();
+  document.getElementById('addProfileStatus').hidden = true;
+  document.getElementById('addProfileSubmitBtn').disabled = false;
+  document.getElementById('addProfileSubmitBtn').textContent = 'Create profile';
+  modal.showModal();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('addProfileForm');
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const slug = document.getElementById('newProfileSlug').value.trim();
+      const displayName = document.getElementById('newProfileDisplayName').value.trim();
+      const port = Number(document.getElementById('newProfilePort').value);
+      const color = document.getElementById('newProfileColor').value;
+      const statusEl = document.getElementById('addProfileStatus');
+      const submitBtn = document.getElementById('addProfileSubmitBtn');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating…';
+      statusEl.hidden = true;
+      try {
+        const res = await fetch('/api/profiles/create', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ slug, display_name: displayName, port, color }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to create profile');
+        statusEl.textContent = `Profile "${displayName}" created! Start a server on port ${port} with: CAREER_OPS_ROOT=profiles/${slug} CAREER_DASHBOARD_PORT=${port} node dashboard-web/server.mjs`;
+        statusEl.classList.remove('error');
+        statusEl.hidden = false;
+        submitBtn.textContent = 'Done';
+        loadProfileSwitcher();
+      } catch (err) {
+        statusEl.textContent = err.message;
+        statusEl.classList.add('error');
+        statusEl.hidden = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create profile';
+      }
+    });
+  }
+});
 
 function selectFiles(files) {
   const file = files?.[0];
@@ -752,9 +861,77 @@ function setUploadBusy(busy) {
   els.uploadBtn.textContent = busy ? 'Uploading…' : 'Upload resume';
 }
 
+let refreshPollTimer = null;
+let refreshStartTs = null;
+let refreshElapsedTimer = null;
+
 function setDashboardBusy(busy) {
   els.refreshBtn.disabled = busy;
-  els.refreshBtn.textContent = busy ? 'Refreshing…' : 'Refresh jobs';
+  els.refreshBtn.textContent = busy ? 'Scanning…' : 'Refresh jobs';
+  if (busy) {
+    refreshStartTs = Date.now();
+    showRefreshPanel(true);
+    startRefreshPoll();
+  } else {
+    showRefreshPanel(false);
+    stopRefreshPoll();
+  }
+}
+
+function showRefreshPanel(show) {
+  els.refreshPanel.hidden = !show;
+  if (show) {
+    // switch to jobs tab so the panel is visible
+    const jobsBtn = document.querySelector('[data-tab="jobs"]');
+    if (jobsBtn && !jobsBtn.classList.contains('active')) jobsBtn.click();
+    // start elapsed timer
+    stopElapsedTimer();
+    refreshElapsedTimer = setInterval(() => {
+      const s = Math.floor((Date.now() - refreshStartTs) / 1000);
+      const m = Math.floor(s / 60);
+      els.refreshElapsed.textContent = m > 0 ? `${m}m ${s % 60}s elapsed` : `${s}s elapsed`;
+    }, 1000);
+    updateRefreshStages(0);
+  } else {
+    stopElapsedTimer();
+  }
+}
+
+function stopElapsedTimer() {
+  if (refreshElapsedTimer) { clearInterval(refreshElapsedTimer); refreshElapsedTimer = null; }
+}
+
+function updateRefreshStages(phase) {
+  document.querySelectorAll('.refresh-stage').forEach((el) => {
+    const p = Number(el.dataset.phase);
+    el.classList.toggle('stage-done', p < phase);
+    el.classList.toggle('stage-active', p === phase);
+    el.classList.toggle('stage-pending', p > phase);
+  });
+  if (els.refreshPhaseName) {
+    const names = ['', 'Scanning company boards', 'Running ATS discovery', 'Fetching job feeds', 'Scoring & saving'];
+    els.refreshPhaseName.textContent = names[phase] || 'Working…';
+  }
+}
+
+function startRefreshPoll() {
+  stopRefreshPoll();
+  refreshPollTimer = setInterval(async () => {
+    try {
+      const s = await request('/api/refresh/status');
+      updateRefreshStages(s.phase || 1);
+      if (!s.running) {
+        stopRefreshPoll();
+        // reload jobs data now that scan finished
+        await loadDashboard(false);
+        setDashboardBusy(false);
+      }
+    } catch { /* server temporarily unreachable — keep polling */ }
+  }, 1500);
+}
+
+function stopRefreshPoll() {
+  if (refreshPollTimer) { clearInterval(refreshPollTimer); refreshPollTimer = null; }
 }
 
 function setUploadStatus(message, error) {
@@ -770,7 +947,7 @@ function formatBytes(bytes) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TRACKER TABS — folded in from career-ops dashboard
+// TRACKER TABS — folded in from my-dashboard.mjs
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
@@ -1164,10 +1341,9 @@ function renderProfile() {
   const tr = profile.target_roles || {};
   const narr = profile.narrative || {};
 
-  document.getElementById('pr-comp').innerHTML = Object.keys(comp).length
-    ? `<div style="font-size:20px;font-weight:750;color:#047857">${tesc(comp.target_range || (comp.target_annual ? `${comp.currency || ''} ${comp.target_annual}`.trim() : '—'))}</div>
-    <div class="t-muted">walk-away: ${tesc(comp.minimum || comp.minimum_annual || '—')} · ${tesc(comp.location_flexibility || '')}</div>`
-    : '<span class="t-muted">No compensation targets configured.</span>';
+  document.getElementById('pr-comp').innerHTML = `
+    <div style="font-size:20px;font-weight:750;color:#047857">${tesc(comp.target_range || (comp.target_annual ? `${comp.currency || ''} ${comp.target_annual}`.trim() : '—'))}</div>
+    <div class="t-muted">walk-away: ${tesc(comp.minimum || comp.minimum_annual || '—')} · ${tesc(comp.location_flexibility || '')}</div>`;
 
   document.getElementById('pr-arch').innerHTML = (tr.archetypes || []).map((a) =>
     `<span class="t-pill">${tesc(a.name)} <span class="t-muted">[${tesc(a.fit)}]</span></span>`
