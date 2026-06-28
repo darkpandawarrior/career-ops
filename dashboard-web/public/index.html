@@ -23,7 +23,7 @@
 
       <div class="topbar-actions">
         <button id="themeToggleBtn" class="topbar-btn topbar-theme-btn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
-        <button id="refreshBtn" class="topbar-btn" type="button" hidden>↻ Refresh</button>
+        <button id="refreshBtn" class="topbar-btn" type="button" hidden>↻ Search jobs</button>
         <div class="profile-switcher" id="profileSwitcher" hidden>
           <button class="profile-switcher-btn" id="profileSwitcherBtn" type="button" aria-haspopup="true" aria-expanded="false">
             <span>Switch</span>
@@ -38,8 +38,9 @@
     <main>
       <section id="onboardingPanel" class="onboarding" hidden>
         <section id="returningPanel" class="onboarding-card" hidden>
-          <p class="eyebrow">Welcome back</p>
-          <h2>Continue with your current profile?</h2>
+          <p class="eyebrow">Candidate Discovery</p>
+          <h2>Continue your job search with this profile?</h2>
+          <p>HireSignal discovers broadly, checks eligibility, then ranks jobs by application fit.</p>
           <div class="profile-preview">
             <strong id="returningName">Candidate</strong>
             <span id="returningHeadline"></span>
@@ -55,9 +56,9 @@
 
         <section id="uploadPanel" class="onboarding-card" hidden>
           <button id="backToProfileBtn" class="text-button" type="button" hidden>← Back to current profile</button>
-          <p class="eyebrow">Private local onboarding</p>
-          <h2>Start with your resume</h2>
-          <p>Upload one PDF resume. It is staged locally for extraction and review; uploading does not replace your active profile.</p>
+          <p class="eyebrow">Candidate Discovery</p>
+          <h2>Build your search profile from your resume</h2>
+          <p>Upload one PDF resume. HireSignal extracts evidence locally, then lets you review the signals used for discovery, eligibility, and ranking.</p>
 
           <form id="uploadForm">
             <label id="dropZone" class="drop-zone" for="resumeInput">
@@ -112,8 +113,8 @@
           <button id="backToExtractionBtn" class="text-button" type="button">← Back to extraction</button>
           <div class="review-heading">
             <div>
-              <p class="eyebrow">Review before activation</p>
-              <h2>Shape your job-search profile</h2>
+              <p class="eyebrow">Candidate Discovery</p>
+              <h2>Choose the profile signals HireSignal should use</h2>
             </div>
             <span id="reviewProgress">Step 1 of 7</span>
           </div>
@@ -155,7 +156,7 @@
 
             <section class="review-step" data-step="2" hidden>
               <h3>Skills</h3>
-              <p>Only demonstrated skills receive full scoring credit. Add unlisted skills only if you can support them.</p>
+              <p>Choose the skills that should shape discovery and application fit. Only evidence-backed or explicitly confirmed skills receive full credit.</p>
               <div class="form-grid">
                 <label class="wide">Demonstrated skills *<textarea id="reviewSkillsDemonstrated" rows="4" required></textarea></label>
                 <label class="wide">Confirmed but unlisted<textarea id="reviewSkillsConfirmed" rows="3"></textarea></label>
@@ -169,7 +170,7 @@
 
             <section class="review-step" data-step="3" hidden>
               <h3>Target roles and seniority</h3>
-              <p>Resume-derived roles are only a starting point. Add every relevant title employers may use for the work you want.</p>
+              <p>Titles expand job discovery. Final ranking relies more heavily on skills, experience, eligibility, notice period, and education.</p>
               <div class="form-grid">
                 <label class="wide">Primary target roles *<textarea id="reviewTargetRoles" rows="3" required></textarea></label>
                 <label class="wide">Adjacent roles<textarea id="reviewAdjacentRoles" rows="3"></textarea></label>
@@ -213,8 +214,8 @@
             </section>
 
             <section class="review-step" data-step="6" hidden>
-              <h3>Confirmation preview</h3>
-              <p>Validate the reviewed profile, then activate it. The previous profile and its cached onboarding data are permanently removed only after the new job search completes.</p>
+              <h3>Confirm and search</h3>
+              <p>Validate the reviewed profile, then search for jobs. The previous profile is removed only after the replacement profile's first search succeeds.</p>
               <div id="reviewErrors" class="extraction-warnings" hidden></div>
               <pre id="reviewPreview" class="review-preview"></pre>
               <div id="activationPreview" class="activation-preview" hidden></div>
@@ -225,7 +226,7 @@
               <div id="activationProgress" class="activation-progress" role="status" aria-live="polite" hidden>
                 <span class="spinner" aria-hidden="true"></span>
                 <span>
-                  <strong>Activating your profile and searching for jobs…</strong>
+                  <strong>Saving your profile and searching for jobs…</strong>
                   <small>This first search checks many job sources and may take a few minutes. Please keep this page open.</small>
                 </span>
               </div>
@@ -235,8 +236,8 @@
             <div class="wizard-actions">
               <button id="reviewPrevBtn" type="button">Previous</button>
               <button id="reviewNextBtn" class="primary" type="button">Next</button>
-              <button id="validateReviewBtn" class="primary" type="submit" hidden>Validate reviewed profile</button>
-              <button id="activateProfileBtn" class="primary" type="button" hidden disabled>Activate profile</button>
+              <button id="validateReviewBtn" class="primary" type="submit" hidden>Review search setup</button>
+              <button id="activateProfileBtn" class="primary" type="button" hidden disabled>Search jobs</button>
             </div>
           </form>
         </section>
@@ -324,10 +325,10 @@
           <div class="jobs-toolbar">
             <section class="toolbar" aria-label="Filters">
               <input id="searchInput" type="search" placeholder="Search company, title, skill, or location…">
-              <select id="scoreFilter" aria-label="Minimum score" style="display:none">
-                <option value="0">All scores</option>
-                <option value="7">Strong+</option>
-                <option value="8">Excellent</option>
+              <select id="scoreFilter" aria-label="Minimum application fit" style="display:none">
+                <option value="0">All fit scores</option>
+                <option value="7">Strong fit</option>
+                <option value="8">Excellent fit</option>
               </select>
               <div class="score-tabs" id="scoreTabs">
                 <button class="stab active" data-min="0">All</button>
@@ -343,13 +344,13 @@
 
           <nav class="job-section-nav" aria-label="Job sections">
             <button class="jsec-tab active" data-sec="recommended">
-              Recommended <span class="tab-count" id="recommendedCount">0</span>
+              High application fit <span class="tab-count" id="recommendedCount">0</span>
             </button>
             <button class="jsec-tab" data-sec="review">
               Review <span class="tab-count" id="reviewCount">0</span>
             </button>
             <button class="jsec-tab" data-sec="source">
-              Sources <span class="tab-count" id="sourceSectionCount">0</span>
+              Job discovery leads <span class="tab-count" id="sourceSectionCount">0</span>
             </button>
           </nav>
 

@@ -2860,6 +2860,25 @@ header.topbar {
   color: var(--muted);
   line-height: 1.4;
 }
+.jcard-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.jcard-description-full {
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-height: 24rem;
+  overflow: auto;
+}
 
 /* Skill chips */
 .jcard-skills { display: flex; flex-wrap: wrap; gap: 4px; }

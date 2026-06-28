@@ -612,7 +612,7 @@ async function validateReview(event) {
 async function activateProfile() {
   if (!state.draft || !els.activationConfirm.checked) return;
   els.activateProfileBtn.disabled = true;
-  els.activateProfileBtn.textContent = 'Activating…';
+  els.activateProfileBtn.textContent = 'Searching jobs…';
   els.activationProgress.hidden = false;
   els.activationConfirm.disabled = true;
   els.reviewErrors.hidden = true;
@@ -631,8 +631,8 @@ async function activateProfile() {
     renderJobs();
     showDashboard();
     els.statusLine.textContent = payload.cleanup?.previousProfilesRemoved
-      ? 'Profile activated. Previous profile data was removed after the new job list loaded.'
-      : 'Profile activated, but old local profile caches could not be fully removed. Retry after closing files that may be in use.';
+      ? 'Search complete. Previous profile data was removed after the new job list loaded.'
+      : 'Search complete, but old local profile caches could not be fully removed. Retry after closing files that may be in use.';
   } catch (error) {
     els.reviewErrors.textContent = error.message;
     els.reviewErrors.hidden = false;
@@ -640,14 +640,14 @@ async function activateProfile() {
     els.activationProgress.hidden = true;
     els.activationConfirm.disabled = false;
     els.activateProfileBtn.disabled = !els.activationConfirm.checked;
-    els.activateProfileBtn.textContent = 'Activate profile';
+    els.activateProfileBtn.textContent = 'Search jobs';
   }
 }
 
 function renderActivationPreview(activation) {
   els.activationPreview.textContent = '';
   const heading = document.createElement('strong');
-  heading.textContent = 'Files to activate';
+  heading.textContent = 'Profile files to save';
   const list = document.createElement('ul');
   for (const file of activation.files || []) {
     const item = document.createElement('li');
@@ -970,6 +970,14 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
     card.append(meta);
   }
 
+  const jobDescription = cleanText(job.snippet || job.description || '');
+  if (jobDescription) {
+    const preview = document.createElement('p');
+    preview.className = 'jcard-description';
+    preview.textContent = jobDescription;
+    card.append(preview);
+  }
+
   // ── Skills chips ──────────────────────────────────────────────────────
   const allSkills = job.matchedSkills || [];
   if (allSkills.length) {
@@ -1066,16 +1074,23 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
   addField(fg, 'Matched skills', (job.matchedSkills || []).map(cleanText).join(', '));
   addField(fg, 'Supporting skills', (job.supportingSkills || []).map(cleanText).join(', '));
   addField(fg, 'Skill gaps', (job.recommendedSkillGaps || []).map(cleanText).join(', '));
+  addField(fg, 'Education', cleanText((job.educationRequirements || []).join(' | ') || job.educationStatus));
   addField(fg, 'Eligibility', cleanText(job.eligibility?.label || job.remoteStatus));
   addField(fg, 'Compensation', cleanText(job.compensation?.label || job.salaryBand));
   detail.append(fg);
+
+  if (jobDescription) {
+    const fullDescription = document.createElement('p');
+    fullDescription.className = 'jcard-description-full';
+    fullDescription.textContent = jobDescription;
+    detail.append(fullDescription);
+  }
 
   const detailActs = document.createElement('div');
   detailActs.className = 'job-actions';
   if (job.type !== 'searchLead') {
     detailActs.append(
       actionButton('Tailor resume', () => tailorResume(job), 'secondary'),
-      actionButton('Fill with AI', () => fillWithAi(job), 'secondary'),
     );
     if (job.url) detailActs.append(actionButton('Open job ↗', () => window.open(job.url, '_blank', 'noopener'), 'primary'));
   }
@@ -1228,7 +1243,7 @@ let refreshElapsedTimer = null;
 
 function setDashboardBusy(busy) {
   els.refreshBtn.disabled = busy;
-  els.refreshBtn.textContent = busy ? 'Scanning…' : 'Refresh jobs';
+  els.refreshBtn.textContent = busy ? 'Searching…' : 'Search jobs';
   if (busy) {
     refreshStartTs = Date.now();
     showRefreshPanel(true);
