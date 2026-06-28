@@ -1029,15 +1029,8 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
     const a = document.createElement('a');
     a.href = job.url; a.target = '_blank'; a.rel = 'noopener';
     a.className = 'jcard-btn jcard-btn--apply';
-    a.textContent = 'Apply ↗';
+    a.textContent = job.type === 'searchLead' ? 'Open lead ↗' : 'Open job ↗';
     actionsEl.append(a);
-  }
-  if (job.type !== 'searchLead') {
-    const evalBtn = document.createElement('button');
-    evalBtn.type = 'button'; evalBtn.className = 'jcard-btn';
-    evalBtn.textContent = 'Eval';
-    evalBtn.addEventListener('click', (e) => { e.stopPropagation(); queueEval(job); });
-    actionsEl.append(evalBtn);
   }
 
   const expandBtn = document.createElement('button');
@@ -1160,27 +1153,6 @@ async function tailorResume(job) {
   } catch (error) {
     showDialog('Resume tailoring failed', error.message);
   }
-}
-
-async function fillWithAi(job) {
-  if (!job.url) { showDialog('No URL', 'This job has no application URL.'); return; }
-  showDialog('Fill with AI — queued', [
-    `Queued for Claude Code:`,
-    `  /career-ops apply ${job.url}`,
-    '',
-    `Claude will open the application page with Playwright and auto-fill every field`,
-    `using your CV, profile, and knowledge base.`,
-    '',
-    `You must be present — Claude will pause before clicking Submit for your review.`,
-    '',
-    `Open Claude Code and say: "process the agent inbox"`,
-  ].join('\n'));
-  await request('/api/queue', {
-    method: 'POST',
-    body: JSON.stringify({ text: `/career-ops apply ${job.url}  # ${job.company} — ${job.title}` }),
-  });
-  // Always reload console badge regardless of whether tracker tab was visited
-  trackerData = null; await loadTrackerData();
 }
 
 function addField(container, label, value) {
