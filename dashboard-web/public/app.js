@@ -1,3 +1,5 @@
+import { BASE_OPTION_CATALOG } from './option-catalog.js';
+
 const _profileParam = new URLSearchParams(location.search).get('profile');
 
 const state = {
@@ -11,6 +13,7 @@ const state = {
   liveness: {},
   rejectedCompanies: new Set(),
   hideRejected: true,
+  optionCatalog: BASE_OPTION_CATALOG,
 };
 let _scoreChart = null;
 
@@ -29,10 +32,20 @@ const ids = [
   'reviewGithub', 'reviewPortfolio', 'personalEvidence', 'reviewYears',
   'reviewSeniority', 'reviewNoticePeriod', 'reviewSummary', 'experienceEvidence', 'reviewSkillsDemonstrated',
   'reviewSkillsConfirmed', 'reviewSkillsSupporting', 'reviewSkillsLearning',
-  'reviewSkillsExcluded', 'skillsEvidence', 'reviewTargetRoles', 'reviewAdjacentRoles',
-  'reviewExcludedTitles', 'reviewIndustries', 'rolesEvidence', 'reviewHomeCountry', 'reviewRelocation',
+  'reviewSkillsExcluded', 'skillsDemonstratedPicker', 'skillsDemonstratedInput', 'skillsDemonstratedAdd',
+  'skillsConfirmedPicker', 'skillsConfirmedInput', 'skillsConfirmedAdd',
+  'skillsSupportingPicker', 'skillsSupportingInput', 'skillsSupportingAdd',
+  'skillsLearningPicker', 'skillsLearningInput', 'skillsLearningAdd',
+  'skillsExcludedPicker', 'skillsExcludedInput', 'skillsExcludedAdd',
+  'skillsEvidence', 'reviewTargetRoles', 'targetRolesPicker', 'targetRolesInput', 'targetRolesAdd',
+  'reviewAdjacentRoles', 'adjacentRolesPicker', 'adjacentRolesInput', 'adjacentRolesAdd',
+  'reviewExcludedTitles', 'excludedTitlesPicker', 'excludedTitlesInput', 'excludedTitlesAdd',
+  'reviewIndustries', 'industriesPicker', 'industriesInput', 'industriesAdd',
+  'rolesEvidence', 'reviewHomeCountry', 'homeCountryPicker', 'homeCountryInput', 'homeCountryAdd', 'reviewRelocation',
   'reviewScopeLocal', 'reviewScopeRemote', 'reviewScopeInternational',
-  'reviewPreferredLocations', 'reviewRemoteRegions', 'reviewInternationalLocations',
+  'reviewPreferredLocations', 'preferredLocationsPicker', 'preferredLocationsInput', 'preferredLocationsAdd',
+  'reviewRemoteRegions', 'remoteRegionsPicker', 'remoteRegionsInput', 'remoteRegionsAdd',
+  'reviewInternationalLocations', 'internationalLocationsPicker', 'internationalLocationsInput', 'internationalLocationsAdd',
   'internationalLocationsLabel', 'reviewRemoteEligibility',
   'reviewVisaRequired', 'reviewCurrency', 'reviewMinimumAnnual', 'reviewTargetAnnual',
   'reviewErrors', 'reviewStepErrors', 'reviewPreview', 'reviewPrevBtn', 'reviewNextBtn', 'validateReviewBtn',
@@ -45,6 +58,23 @@ const ids = [
   'refreshPanel', 'refreshPhaseName', 'refreshElapsed',
 ];
 const els = Object.fromEntries(ids.map((id) => [id, document.querySelector(`#${id}`)]));
+const listControls = [
+  ['reviewSkillsDemonstrated', 'skillsDemonstratedPicker', 'skillsDemonstratedInput', 'skillsDemonstratedAdd', 'multi', 'skills'],
+  ['reviewSkillsConfirmed', 'skillsConfirmedPicker', 'skillsConfirmedInput', 'skillsConfirmedAdd', 'multi', 'skills'],
+  ['reviewSkillsSupporting', 'skillsSupportingPicker', 'skillsSupportingInput', 'skillsSupportingAdd', 'multi', 'skills'],
+  ['reviewSkillsLearning', 'skillsLearningPicker', 'skillsLearningInput', 'skillsLearningAdd', 'multi', 'skills'],
+  ['reviewSkillsExcluded', 'skillsExcludedPicker', 'skillsExcludedInput', 'skillsExcludedAdd', 'multi', 'skills'],
+  ['reviewTargetRoles', 'targetRolesPicker', 'targetRolesInput', 'targetRolesAdd', 'multi', 'roles'],
+  ['reviewAdjacentRoles', 'adjacentRolesPicker', 'adjacentRolesInput', 'adjacentRolesAdd', 'multi', 'roles'],
+  ['reviewExcludedTitles', 'excludedTitlesPicker', 'excludedTitlesInput', 'excludedTitlesAdd', 'multi', 'roles'],
+  ['reviewIndustries', 'industriesPicker', 'industriesInput', 'industriesAdd', 'multi', 'industries'],
+  ['reviewHomeCountry', 'homeCountryPicker', 'homeCountryInput', 'homeCountryAdd', 'single', 'countries'],
+  ['reviewPreferredLocations', 'preferredLocationsPicker', 'preferredLocationsInput', 'preferredLocationsAdd', 'multi', 'locations'],
+  ['reviewRemoteRegions', 'remoteRegionsPicker', 'remoteRegionsInput', 'remoteRegionsAdd', 'multi', 'regions'],
+  ['reviewInternationalLocations', 'internationalLocationsPicker', 'internationalLocationsInput', 'internationalLocationsAdd', 'multi', 'countries'],
+].map(([sourceId, pickerId, inputId, addId, mode, catalog]) => ({
+  sourceId, pickerId, inputId, addId, mode, options: () => state.optionCatalog[catalog],
+}));
 
 els.refreshBtn.addEventListener('click', () => loadDashboard(true));
 els.changeProfileBtn.addEventListener('click', showReturningProfile);
@@ -72,6 +102,7 @@ els.activationConfirm.addEventListener('change', () => {
 for (const scope of [els.reviewScopeLocal, els.reviewScopeRemote, els.reviewScopeInternational]) {
   scope.addEventListener('change', updateScopeFields);
 }
+initializeListControls();
 els.confirmAndSearchBtn.addEventListener('click', confirmAndSearch);
 els.searchInput.addEventListener('input', (event) => {
   state.filterText = event.target.value.toLowerCase();
@@ -483,6 +514,7 @@ function populateReview(inference) {
   els.reviewSummary.value = inference.summary?.value || '';
   els.reviewYears.value = inference.experience?.total_years?.value ?? '';
   els.reviewSeniority.value = inference.seniority?.value || '';
+  ensureSelectOption(els.reviewNoticePeriod, inference.availability?.notice_period);
   els.reviewNoticePeriod.value = inference.availability?.notice_period || '';
   const demonstrated = inference.skills?.filter((skill) => skill.suggested_state === 'demonstrated') || [];
   const supporting = inference.skills?.filter((skill) => skill.suggested_state === 'supporting') || [];
@@ -511,6 +543,7 @@ function populateReview(inference) {
   els.reviewCurrency.value = '';
   els.reviewMinimumAnnual.value = '';
   els.reviewTargetAnnual.value = '';
+  buildOptionCatalog(inference, candidate);
 
   els.personalEvidence.textContent = [
     evidenceText('Name', candidate.full_name),
@@ -527,29 +560,35 @@ function populateReview(inference) {
   renderEvidenceList(els.rolesEvidence, inference.target_roles || [], (item) =>
     `${item.name} · ${percent(item.confidence)} · ${item.source}`
   );
+  renderAllListControls();
 }
 
 function updateScopeFields() {
   els.reviewRemoteRegions.disabled = !els.reviewScopeRemote.checked;
+  els.remoteRegionsInput.disabled = !els.reviewScopeRemote.checked;
+  els.remoteRegionsAdd.disabled = !els.reviewScopeRemote.checked;
   els.reviewRemoteEligibility.disabled = !els.reviewScopeRemote.checked;
   if (!els.reviewScopeRemote.checked) els.reviewRemoteEligibility.checked = false;
   els.reviewInternationalLocations.disabled = !els.reviewScopeInternational.checked;
+  els.internationalLocationsInput.disabled = !els.reviewScopeInternational.checked;
+  els.internationalLocationsAdd.disabled = !els.reviewScopeInternational.checked;
   els.internationalLocationsLabel.hidden = !els.reviewScopeInternational.checked;
 }
 
 function setReviewStep(step) {
   const steps = [...document.querySelectorAll('.review-step')];
-  state.reviewStep = Math.max(0, Math.min(steps.length - 1, step));
-  steps.forEach((section, index) => { section.hidden = index !== state.reviewStep; });
-  els.reviewProgress.textContent = `Step ${state.reviewStep + 1} of ${steps.length}`;
+  const maxStep = Math.max(...steps.map((section) => Number(section.dataset.step || 0)));
+  state.reviewStep = Math.max(0, Math.min(maxStep, step));
+  steps.forEach((section) => { section.hidden = Number(section.dataset.step) !== state.reviewStep; });
+  els.reviewProgress.textContent = `Step ${state.reviewStep + 1} of ${maxStep + 1}`;
   els.reviewPrevBtn.hidden = state.reviewStep === 0;
-  els.reviewNextBtn.hidden = state.reviewStep === steps.length - 1;
-  els.validateReviewBtn.hidden = state.reviewStep !== steps.length - 1;
+  els.reviewNextBtn.hidden = state.reviewStep === maxStep;
+  els.validateReviewBtn.hidden = state.reviewStep !== maxStep;
   els.confirmAndSearchBtn.hidden = true;
   els.activationConfirm.checked = false;
   els.activationPreview.hidden = true;
   els.reviewStepErrors.hidden = true;
-  if (state.reviewStep === steps.length - 1) {
+  if (state.reviewStep === maxStep) {
     els.reviewPreview.textContent = JSON.stringify(collectReview(), null, 2);
   }
 }
@@ -557,18 +596,16 @@ function setReviewStep(step) {
 function validateReviewStep(step) {
   const messages = [];
   if (step === 0 && !els.reviewName.value.trim()) messages.push('Full name is required.');
-  if (step === 1) {
+  if (step === 0) {
     if (els.reviewYears.value === '') messages.push('Enter years of experience. Use 0 if there is no employment experience.');
     if (!els.reviewSeniority.value) messages.push('Choose an experience level.');
-    if (!els.reviewNoticePeriod.value.trim()) messages.push('Enter the notice period.');
   }
-  if (step === 2 && csv(els.reviewSkillsDemonstrated.value).length < 5) {
-    messages.push('Confirm at least five demonstrated skills.');
+  if (step === 1) {
+    if (csv(els.reviewSkillsDemonstrated.value).length < 5) messages.push('Confirm at least five demonstrated skills.');
+    if (csv(els.reviewTargetRoles.value).length === 0) messages.push('Add at least one primary target role.');
   }
-  if (step === 3 && csv(els.reviewTargetRoles.value).length === 0) {
-    messages.push('Add at least one primary target role.');
-  }
-  if (step === 4) {
+  if (step === 2) {
+    if (!els.reviewNoticePeriod.value.trim()) messages.push('Choose the notice period.');
     if (!els.reviewHomeCountry.value.trim()) messages.push('Home country is required.');
     if (!els.reviewRelocation.value) messages.push('Choose a relocation preference.');
     if (selectedSearchScopes().length === 0) {
@@ -715,6 +752,134 @@ function selectedSearchScopes() {
   ].filter(Boolean);
 }
 
+function buildOptionCatalog(inference, candidate) {
+  state.optionCatalog = {
+    skills: uniqueValues([...BASE_OPTION_CATALOG.skills, ...(inference.skills || []).map((skill) => skill.name)]),
+    roles: uniqueValues([...BASE_OPTION_CATALOG.roles, ...(inference.target_roles || []).map((role) => role.name)]),
+    industries: [...BASE_OPTION_CATALOG.industries],
+    locations: uniqueValues([...BASE_OPTION_CATALOG.locations, ...splitLocationValue(candidate.location?.value)]),
+    countries: uniqueValues([...BASE_OPTION_CATALOG.countries, inferCountry(candidate.location?.value || '')]),
+    regions: [...BASE_OPTION_CATALOG.regions],
+  };
+}
+
+function initializeListControls() {
+  for (const control of listControls) {
+    const input = els[control.inputId];
+    const add = els[control.addId];
+    if (!input || !add) continue;
+    add.addEventListener('click', () => addListValue(control));
+    input.addEventListener('input', () => renderListOptions(control));
+    input.addEventListener('focus', () => renderListOptions(control));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        addListValue(control);
+      } else if (event.key === 'Escape') closeListOptions(control);
+    });
+    els[control.pickerId]?.addEventListener('click', (event) => {
+      const chip = event.target.closest('[data-chip-value]');
+      if (chip) setListValues(control, csv(els[control.sourceId].value).filter((value) => value !== chip.dataset.chipValue));
+    });
+  }
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('.chip-field')) listControls.forEach(closeListOptions);
+  });
+}
+
+function addListValue(control) {
+  const input = els[control.inputId];
+  const value = input.value.trim();
+  if (!value) return;
+  setListValues(control, control.mode === 'single' ? [value] : [...csv(els[control.sourceId].value), value]);
+  input.value = '';
+  closeListOptions(control);
+}
+
+function setListValues(control, values) {
+  els[control.sourceId].value = uniqueValues(values).join(', ');
+  renderListControl(control);
+}
+
+function renderAllListControls() {
+  listControls.forEach(renderListControl);
+}
+
+function renderListControl(control) {
+  const picker = els[control.pickerId];
+  if (!picker) return;
+  picker.textContent = '';
+  const values = csv(els[control.sourceId].value);
+  if (values.length === 0) {
+    const empty = document.createElement('span');
+    empty.className = 'chip-empty';
+    empty.textContent = 'No choices yet';
+    picker.append(empty);
+    return;
+  }
+  for (const value of values) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'choice-chip';
+    chip.dataset.chipValue = value;
+    chip.textContent = control.mode === 'single' ? value : `${value} ×`;
+    picker.append(chip);
+  }
+}
+
+function renderListOptions(control) {
+  const input = els[control.inputId];
+  if (!input || input.disabled) return closeListOptions(control);
+  let menu = input.parentElement.querySelector('.select-menu');
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.className = 'select-menu';
+    input.parentElement.append(menu);
+  }
+  const query = input.value.trim().toLowerCase();
+  const selected = new Set(csv(els[control.sourceId].value).map((value) => value.toLowerCase()));
+  const options = control.options()
+    .filter((option) => !selected.has(option.toLowerCase()))
+    .filter((option) => !query || option.toLowerCase().includes(query))
+    .slice(0, 18);
+  menu.textContent = '';
+  for (const option of options) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'select-option';
+    item.textContent = option;
+    item.addEventListener('click', () => {
+      setListValues(control, control.mode === 'single' ? [option] : [...csv(els[control.sourceId].value), option]);
+      input.value = '';
+      closeListOptions(control);
+    });
+    menu.append(item);
+  }
+  if (options.length === 0 && query) {
+    const custom = document.createElement('button');
+    custom.type = 'button';
+    custom.className = 'select-option';
+    custom.textContent = `Add "${input.value.trim()}"`;
+    custom.addEventListener('click', () => addListValue(control));
+    menu.append(custom);
+  }
+  menu.hidden = menu.childElementCount === 0 || document.activeElement !== input;
+}
+
+function closeListOptions(control) {
+  const menu = els[control.inputId]?.parentElement.querySelector('.select-menu');
+  if (menu) menu.hidden = true;
+}
+
+function ensureSelectOption(select, value) {
+  const clean = String(value || '').trim();
+  if (!select || !clean || [...select.options].some((option) => option.value === clean)) return;
+  const option = document.createElement('option');
+  option.value = clean;
+  option.textContent = clean;
+  select.append(option);
+}
+
 function renderEvidenceList(container, items, formatter) {
   container.textContent = '';
   for (const item of items) {
@@ -735,7 +900,17 @@ function percent(value) {
 }
 
 function csv(value) {
-  return [...new Set(String(value || '').split(',').map((item) => item.trim()).filter(Boolean))];
+  return uniqueValues(String(value || '').split(',').map((item) => item.trim()).filter(Boolean));
+}
+
+function uniqueValues(values) {
+  const seen = new Set();
+  return values.map((value) => String(value || '').trim()).filter((value) => {
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function inferCountry(locationValue) {
@@ -743,6 +918,10 @@ function inferCountry(locationValue) {
   if (!value) return '';
   const parts = value.split(',').map((part) => part.trim());
   return parts.length > 1 ? parts.at(-1) : '';
+}
+
+function splitLocationValue(locationValue) {
+  return String(locationValue || '').split(',').map((part) => part.trim()).filter(Boolean);
 }
 
 function renderSummary(payload) {
