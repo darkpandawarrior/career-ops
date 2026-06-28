@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { BASE_OPTION_CATALOG } from '../public/option-catalog.js';
+import { BASE_OPTION_CATALOG, ROLE_CATALOG } from '../public/option-catalog.js';
 
 const publicFile = (name) => new URL(`../public/${name}`, import.meta.url);
 
@@ -25,8 +25,21 @@ test('profile choices use searchable controls backed by local catalogs', async (
   assert.match(app, /initializeListControls\(\)/);
   assert.match(app, /renderListOptions\(control\)/);
   assert.ok(BASE_OPTION_CATALOG.skills.length >= 75);
-  assert.ok(BASE_OPTION_CATALOG.roles.length >= 40);
+  assert.ok(BASE_OPTION_CATALOG.roles.length >= 250);
   assert.ok(BASE_OPTION_CATALOG.countries.length >= 190);
+});
+
+test('role catalog covers technical and non-technical career families with aliases and levels', () => {
+  const categories = ROLE_CATALOG.map(({ category }) => category);
+  for (const expected of ['Data and AI', 'Healthcare and life sciences', 'Education and research',
+    'Construction, manufacturing, and skilled trades', 'Government, nonprofit, and public service']) {
+    assert.ok(categories.includes(expected), `missing ${expected}`);
+  }
+  for (const role of ['Senior Software Engineer', 'ML Engineer', 'Registered Nurse', 'Teacher',
+    'Accountant', 'Electrician', 'Store Manager', 'Policy Analyst']) {
+    assert.ok(BASE_OPTION_CATALOG.roles.includes(role), `missing ${role}`);
+  }
+  assert.equal(new Set(BASE_OPTION_CATALOG.roles).size, BASE_OPTION_CATALOG.roles.length);
 });
 
 test('onboarding presents the four-stage recommendation pipeline', async () => {

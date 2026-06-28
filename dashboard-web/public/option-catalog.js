@@ -1,3 +1,117 @@
+const withLevels = (title, levels = ['Junior', 'Senior', 'Lead']) => [title, ...levels.map((level) => `${level} ${title}`)];
+
+export const ROLE_CATALOG = Object.freeze([
+  { category: 'Engineering and technology', roles: [
+    ...withLevels('Software Engineer'), ...withLevels('Backend Engineer'), ...withLevels('Frontend Engineer'),
+    ...withLevels('Full Stack Engineer'), ...withLevels('Mobile Engineer'), 'Android Engineer', 'iOS Engineer',
+    'Embedded Systems Engineer', 'Firmware Engineer', 'QA Engineer', 'Test Automation Engineer',
+    'DevOps Engineer', 'Platform Engineer', 'Site Reliability Engineer', 'Cloud Engineer',
+    'Solutions Architect', 'Security Engineer', 'Network Engineer', 'Systems Administrator',
+    'Engineering Manager', 'Director of Engineering', 'VP of Engineering', 'Chief Technology Officer',
+  ], aliases: ['Developer', 'Programmer', 'Web Developer', 'Application Developer', 'SRE', 'CTO'] },
+  { category: 'Data and AI', roles: [
+    ...withLevels('Data Analyst'), ...withLevels('Data Engineer'), ...withLevels('Data Scientist'),
+    'Business Intelligence Analyst', 'Analytics Engineer', 'Database Administrator', 'Statistician',
+    'Machine Learning Engineer', 'AI Engineer', 'Research Scientist', 'Quantitative Analyst',
+    'Data Science Manager', 'Head of Data', 'Chief Data Officer',
+  ], aliases: ['BI Analyst', 'MIS Analyst', 'ML Engineer', 'AI Researcher', 'Quant Analyst'] },
+  { category: 'Product, program, and project', roles: [
+    'Associate Product Manager', ...withLevels('Product Manager', ['Senior', 'Group']), 'Product Owner',
+    'Technical Product Manager', 'Product Operations Manager', ...withLevels('Project Manager'),
+    'Program Manager', 'Technical Program Manager', 'Scrum Master', 'PMO Analyst', 'Delivery Manager',
+    'Business Analyst', 'Systems Analyst', 'Management Consultant', 'Chief of Staff',
+    'Director of Product', 'VP of Product', 'Chief Product Officer',
+  ], aliases: ['APM', 'TPM', 'Project Coordinator', 'Implementation Manager', 'CPO'] },
+  { category: 'Sales and business development', roles: [
+    'Sales Development Representative', 'Business Development Representative', 'Inside Sales Representative',
+    'Field Sales Representative', ...withLevels('Account Executive', ['Senior', 'Enterprise']),
+    'Account Manager', 'Key Account Manager', 'Partnerships Manager', 'Sales Engineer',
+    'Solutions Consultant', 'Channel Manager', 'Sales Operations Manager', 'Revenue Operations Manager',
+    'Sales Manager', 'Regional Sales Manager', 'Director of Sales', 'VP of Sales', 'Chief Revenue Officer',
+  ], aliases: ['SDR', 'BDR', 'Pre-Sales Consultant', 'Relationship Manager', 'CRO'] },
+  { category: 'Marketing, communications, and content', roles: [
+    'Marketing Coordinator', 'Marketing Manager', 'Product Marketing Manager', 'Brand Manager',
+    'Growth Marketing Manager', 'Performance Marketing Manager', 'Digital Marketing Manager',
+    'SEO Specialist', 'Content Writer', 'Copywriter', 'Content Strategist', 'Content Marketing Manager',
+    'Social Media Manager', 'Community Manager', 'Public Relations Manager', 'Communications Manager',
+    'Market Research Analyst', 'Demand Generation Manager', 'Marketing Operations Manager',
+    'Director of Marketing', 'VP of Marketing', 'Chief Marketing Officer',
+  ], aliases: ['Growth Manager', 'SEO Analyst', 'PR Manager', 'Communications Specialist', 'CMO'] },
+  { category: 'Finance, accounting, banking, and insurance', roles: [
+    'Accountant', 'Chartered Accountant', 'Staff Accountant', 'Tax Accountant', 'Auditor', 'Internal Auditor',
+    'Accounts Payable Specialist', 'Accounts Receivable Specialist', 'Bookkeeper', 'Financial Analyst',
+    'FP&A Analyst', 'Finance Manager', 'Financial Controller', 'Treasury Analyst', 'Investment Analyst',
+    'Credit Analyst', 'Equity Research Analyst', 'Investment Banker', 'Bank Teller', 'Branch Manager',
+    'Loan Officer', 'Mortgage Advisor', 'Insurance Agent', 'Underwriter', 'Actuary', 'Claims Adjuster',
+    'Risk Analyst', 'Portfolio Manager', 'Finance Director', 'Chief Financial Officer',
+  ], aliases: ['CA', 'CPA', 'FP&A Manager', 'Relationship Banker', 'Claims Examiner', 'CFO'] },
+  { category: 'People, HR, and administration', roles: [
+    'HR Coordinator', 'HR Generalist', 'HR Business Partner', 'People Operations Manager',
+    'Talent Acquisition Specialist', 'Recruiter', 'Technical Recruiter', 'Learning and Development Specialist',
+    'Compensation and Benefits Analyst', 'Payroll Specialist', 'Employee Relations Manager',
+    'Office Manager', 'Administrative Assistant', 'Executive Assistant', 'Personal Assistant',
+    'Receptionist', 'Data Entry Operator', 'HR Director', 'Chief People Officer',
+  ], aliases: ['HRBP', 'Talent Sourcer', 'People Partner', 'L&D Specialist', 'CPO People'] },
+  { category: 'Operations, supply chain, logistics, and procurement', roles: [
+    'Operations Analyst', 'Operations Manager', 'Business Operations Manager', 'Process Improvement Manager',
+    'Supply Chain Analyst', 'Supply Chain Manager', 'Logistics Coordinator', 'Logistics Manager',
+    'Warehouse Associate', 'Warehouse Manager', 'Inventory Controller', 'Procurement Analyst',
+    'Procurement Manager', 'Buyer', 'Category Manager', 'Vendor Manager', 'Fleet Manager',
+    'Import Export Coordinator', 'Quality Manager', 'Facilities Manager', 'COO',
+  ], aliases: ['Purchasing Manager', 'Sourcing Specialist', 'Dispatch Coordinator', 'Chief Operating Officer'] },
+  { category: 'Healthcare and life sciences', roles: [
+    'Registered Nurse', 'Nurse Practitioner', 'Physician', 'Medical Officer', 'Pharmacist',
+    'Pharmacy Technician', 'Dentist', 'Physiotherapist', 'Occupational Therapist', 'Psychologist',
+    'Medical Laboratory Technician', 'Radiologic Technologist', 'Healthcare Administrator',
+    'Clinical Research Associate', 'Clinical Research Coordinator', 'Clinical Data Manager',
+    'Regulatory Affairs Specialist', 'Medical Writer', 'Epidemiologist', 'Biostatistician',
+    'Biomedical Engineer', 'Biotechnologist', 'Microbiologist', 'Quality Assurance Specialist',
+  ], aliases: ['RN', 'Doctor', 'Physical Therapist', 'CRA', 'Clinical Trial Manager', 'Lab Technician'] },
+  { category: 'Legal, compliance, and risk', roles: [
+    'Lawyer', 'Legal Counsel', 'Corporate Counsel', 'Paralegal', 'Legal Assistant', 'Contract Manager',
+    'Compliance Analyst', 'Compliance Manager', 'AML Analyst', 'KYC Analyst', 'Fraud Analyst',
+    'Risk Manager', 'Operational Risk Analyst', 'Information Security Compliance Analyst',
+    'Privacy Officer', 'Data Protection Officer', 'Company Secretary', 'General Counsel',
+  ], aliases: ['Attorney', 'Solicitor', 'Advocate', 'Contracts Specialist', 'DPO', 'MLRO'] },
+  { category: 'Education and research', roles: [
+    'Teacher', 'Primary School Teacher', 'Secondary School Teacher', 'Special Education Teacher',
+    'Lecturer', 'Professor', 'Teaching Assistant', 'Tutor', 'Instructional Designer',
+    'Curriculum Developer', 'Academic Advisor', 'School Counselor', 'School Administrator',
+    'Principal', 'Research Assistant', 'Research Associate', 'Postdoctoral Researcher',
+    'Education Program Manager', 'Librarian',
+  ], aliases: ['Educator', 'Faculty Member', 'Trainer', 'Postdoc', 'Curriculum Designer'] },
+  { category: 'Design, creative, and media', roles: [
+    'Graphic Designer', 'Product Designer', 'UX Designer', 'UI Designer', 'UX Researcher',
+    'Interaction Designer', 'Service Designer', 'Industrial Designer', 'Illustrator', 'Animator',
+    'Motion Graphics Designer', 'Video Editor', 'Photographer', 'Art Director', 'Creative Director',
+    'Journalist', 'Editor', 'Producer', 'Sound Engineer', 'Content Designer',
+  ], aliases: ['UI/UX Designer', 'Visual Designer', 'Motion Designer', 'Videographer', 'Reporter'] },
+  { category: 'Construction, manufacturing, and skilled trades', roles: [
+    'Civil Engineer', 'Mechanical Engineer', 'Electrical Engineer', 'Chemical Engineer',
+    'Structural Engineer', 'Construction Manager', 'Site Engineer', 'Quantity Surveyor', 'Architect',
+    'Manufacturing Engineer', 'Production Engineer', 'Plant Manager', 'Production Supervisor',
+    'Maintenance Technician', 'Electrician', 'Plumber', 'Carpenter', 'Welder', 'Machinist',
+    'HVAC Technician', 'Automotive Technician', 'Safety Officer', 'Quality Inspector',
+  ], aliases: ['Site Manager', 'Estimator', 'CAD Technician', 'Fitter', 'Mechanic', 'HSE Officer'] },
+  { category: 'Hospitality, travel, retail, and customer service', roles: [
+    'Customer Service Representative', 'Customer Support Specialist', 'Technical Support Specialist',
+    'Customer Success Manager', 'Call Center Representative', 'Retail Sales Associate', 'Store Manager',
+    'Merchandiser', 'Cashier', 'Hotel Manager', 'Front Desk Agent', 'Concierge', 'Housekeeping Supervisor',
+    'Chef', 'Cook', 'Restaurant Manager', 'Food and Beverage Manager', 'Travel Consultant',
+    'Tour Guide', 'Flight Attendant', 'Event Coordinator', 'Event Manager',
+  ], aliases: ['CSR', 'Support Engineer', 'Guest Relations Executive', 'Travel Agent', 'Cabin Crew'] },
+  { category: 'Government, nonprofit, and public service', roles: [
+    'Civil Servant', 'Policy Analyst', 'Public Affairs Specialist', 'Government Relations Manager',
+    'Program Officer', 'Program Coordinator', 'Nonprofit Program Manager', 'Fundraising Manager',
+    'Grant Writer', 'Monitoring and Evaluation Specialist', 'Community Outreach Coordinator',
+    'Social Worker', 'Case Manager', 'Urban Planner', 'Environmental Officer', 'Public Health Officer',
+    'Police Officer', 'Firefighter', 'Emergency Management Specialist',
+  ], aliases: ['Public Administrator', 'Development Officer', 'M&E Specialist', 'NGO Program Manager'] },
+]);
+
+export const ROLE_OPTIONS = Object.freeze([...new Set(ROLE_CATALOG.flatMap(({ roles, aliases }) => [...roles, ...aliases]))]
+  .sort((a, b) => a.localeCompare(b)));
+
 export const BASE_OPTION_CATALOG = Object.freeze({
   skills: [
     'Accounting', 'Account Management', 'A/B Testing', 'Accessibility', 'Adobe Creative Suite',
@@ -15,19 +129,7 @@ export const BASE_OPTION_CATALOG = Object.freeze({
     'Stakeholder Management', 'Strategic Planning', 'Swift', 'Tableau', 'Terraform', 'TypeScript',
     'UI Design', 'Unit Testing', 'User Research', 'Vendor Management',
   ],
-  roles: [
-    'Account Executive', 'Account Manager', 'Administrative Assistant', 'Android Engineer',
-    'Backend Engineer', 'Brand Manager', 'Business Analyst', 'Business Development Representative',
-    'Chief of Staff', 'Clinical Research Associate', 'Content Designer', 'Content Marketer',
-    'Customer Success Manager', 'Data Analyst', 'Data Engineer', 'Data Scientist', 'DevOps Engineer',
-    'Digital Marketing Manager', 'Engineering Manager', 'Finance Manager', 'Financial Analyst',
-    'Frontend Engineer', 'Full Stack Engineer', 'Growth Manager', 'HR Business Partner',
-    'iOS Engineer', 'Machine Learning Engineer', 'Marketing Manager', 'Mobile Engineer',
-    'Operations Manager', 'Platform Engineer', 'Product Designer', 'Product Manager',
-    'Project Manager', 'QA Engineer', 'Recruiter', 'Sales Development Representative',
-    'Site Reliability Engineer', 'Software Engineer', 'Solutions Architect', 'Support Engineer',
-    'Technical Program Manager', 'UX Researcher',
-  ],
+  roles: ROLE_OPTIONS,
   locations: [
     'Ahmedabad', 'Amsterdam', 'Australia', 'Bangalore', 'Berlin', 'Brazil', 'Canada', 'Chennai',
     'Delhi NCR', 'Dubai', 'France', 'Germany', 'Gurgaon', 'Hyderabad', 'India', 'Ireland',
