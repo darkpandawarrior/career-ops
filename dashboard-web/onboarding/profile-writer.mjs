@@ -22,7 +22,7 @@ export async function previewProfileActivation(root, draftId) {
   };
 }
 
-export async function activateProfile(root, draftId) {
+export async function confirmProfile(root, draftId) {
   const context = await loadActivationContext(root, draftId);
   const generated = generateUserFiles(context.review, context.extraction);
   const validation = validateGeneratedFiles(generated);

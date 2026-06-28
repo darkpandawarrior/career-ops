@@ -36,7 +36,7 @@ const ids = [
   'internationalLocationsLabel', 'reviewRemoteEligibility',
   'reviewVisaRequired', 'reviewCurrency', 'reviewMinimumAnnual', 'reviewTargetAnnual',
   'reviewErrors', 'reviewStepErrors', 'reviewPreview', 'reviewPrevBtn', 'reviewNextBtn', 'validateReviewBtn',
-  'activationPreview', 'activationConfirm', 'activationProgress', 'activateProfileBtn',
+  'activationPreview', 'activationConfirm', 'activationProgress', 'confirmAndSearchBtn',
   'totalCount', 'excellentCount', 'sourceCount',
   'searchInput', 'scoreFilter', 'statusLine', 'recommendedCount', 'reviewCount',
   'sourceSectionCount', 'recommendedJobs', 'reviewJobs', 'sourceJobs',
@@ -66,12 +66,12 @@ els.reviewNextBtn.addEventListener('click', () => {
 });
 els.reviewForm.addEventListener('submit', validateReview);
 els.activationConfirm.addEventListener('change', () => {
-  els.activateProfileBtn.disabled = !els.activationConfirm.checked;
+  els.confirmAndSearchBtn.disabled = !els.activationConfirm.checked;
 });
 for (const scope of [els.reviewScopeLocal, els.reviewScopeRemote, els.reviewScopeInternational]) {
   scope.addEventListener('change', updateScopeFields);
 }
-els.activateProfileBtn.addEventListener('click', activateProfile);
+els.confirmAndSearchBtn.addEventListener('click', confirmAndSearch);
 els.searchInput.addEventListener('input', (event) => {
   state.filterText = event.target.value.toLowerCase();
   renderJobs();
@@ -544,7 +544,7 @@ function setReviewStep(step) {
   els.reviewPrevBtn.hidden = state.reviewStep === 0;
   els.reviewNextBtn.hidden = state.reviewStep === steps.length - 1;
   els.validateReviewBtn.hidden = state.reviewStep !== steps.length - 1;
-  els.activateProfileBtn.hidden = true;
+  els.confirmAndSearchBtn.hidden = true;
   els.activationConfirm.checked = false;
   els.activationPreview.hidden = true;
   els.reviewStepErrors.hidden = true;
@@ -598,8 +598,8 @@ async function validateReview(event) {
       body: JSON.stringify({ draftId: state.draft.draftId }),
     });
     renderActivationPreview(activation);
-    els.activateProfileBtn.hidden = false;
-    els.activateProfileBtn.disabled = !els.activationConfirm.checked;
+    els.confirmAndSearchBtn.hidden = false;
+    els.confirmAndSearchBtn.disabled = !els.activationConfirm.checked;
   } catch (error) {
     const errors = error.payload?.errors || [error.message];
     els.reviewErrors.textContent = errors.join(' ');
@@ -609,10 +609,10 @@ async function validateReview(event) {
   }
 }
 
-async function activateProfile() {
+async function confirmAndSearch() {
   if (!state.draft || !els.activationConfirm.checked) return;
-  els.activateProfileBtn.disabled = true;
-  els.activateProfileBtn.textContent = 'Searching jobs…';
+  els.confirmAndSearchBtn.disabled = true;
+  els.confirmAndSearchBtn.textContent = 'Searching jobs…';
   els.activationProgress.hidden = false;
   els.activationConfirm.disabled = true;
   els.reviewErrors.hidden = true;
@@ -639,8 +639,8 @@ async function activateProfile() {
   } finally {
     els.activationProgress.hidden = true;
     els.activationConfirm.disabled = false;
-    els.activateProfileBtn.disabled = !els.activationConfirm.checked;
-    els.activateProfileBtn.textContent = 'Search jobs';
+    els.confirmAndSearchBtn.disabled = !els.activationConfirm.checked;
+    els.confirmAndSearchBtn.textContent = 'Search jobs';
   }
 }
 

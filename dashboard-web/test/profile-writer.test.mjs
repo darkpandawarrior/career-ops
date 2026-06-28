@@ -7,7 +7,7 @@ import test from 'node:test';
 import yaml from 'js-yaml';
 
 import {
-  activateProfile,
+  confirmProfile,
   finalizeProfileReplacement,
   generateUserFiles,
   previewProfileActivation,
@@ -49,7 +49,7 @@ test('activation replaces the old profile and retains rollback data only until s
   assert.equal(preview.valid, true);
   assert.equal(preview.files.find((file) => file.path === 'data/applications.md').action, 'replace');
 
-  const result = await activateProfile(root, DRAFT_ID);
+  const result = await confirmProfile(root, DRAFT_ID);
   assert.equal(result.ok, true);
   assert.match(await readFile(path.join(root, 'cv.md'), 'utf8'), /Alex Morgan/);
   assert.match(await readFile(path.join(root, 'data', 'applications.md'), 'utf8'), /Applications Tracker/);
@@ -70,7 +70,7 @@ test('activation replaces the old profile and retains rollback data only until s
 test('failed post-activation search can restore the previous profile', async () => {
   const root = await setupRoot();
   await seedActiveProfile(root);
-  await activateProfile(root, DRAFT_ID);
+  await confirmProfile(root, DRAFT_ID);
   await rollbackProfileReplacement(root, DRAFT_ID);
   assert.equal(await readFile(path.join(root, 'cv.md'), 'utf8'), 'OLD CV');
   assert.equal(await readFile(path.join(root, 'data', 'applications.md'), 'utf8'), 'EXISTING TRACKER');
@@ -83,7 +83,7 @@ test('activation refuses an unreviewed draft without touching active files', asy
   await writeFile(path.join(root, 'cv.md'), 'UNCHANGED');
   await writeFile(path.join(draftPath, 'extraction.json'), JSON.stringify(extraction()));
   await assert.rejects(
-    activateProfile(root, DRAFT_ID),
+    confirmProfile(root, DRAFT_ID),
     (error) => error.code === 'review_required' && error.status === 409,
   );
   assert.equal(await readFile(path.join(root, 'cv.md'), 'utf8'), 'UNCHANGED');

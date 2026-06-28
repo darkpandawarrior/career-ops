@@ -15,7 +15,7 @@ import { acceptResumeUpload, discardDraft, readDraft } from './onboarding/upload
 import { extractResumeDraft, readExtraction } from './onboarding/resume-extractor.mjs';
 import { inferProfileDraft, readInference, saveReviewDraft } from './onboarding/profile-inference.mjs';
 import {
-  activateProfile,
+  confirmProfile,
   finalizeProfileReplacement,
   previewProfileActivation,
   rollbackProfileReplacement,
@@ -434,7 +434,7 @@ export async function route(req, res) {
     if (url.pathname === '/api/setup/confirm' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);
       const body = await readJsonBody(req);
-      const activation = await activateProfile(root, body.draftId);
+      const confirmation = await confirmProfile(root, body.draftId);
       let dashboard;
       try {
         dashboard = await refreshDashboard(root);
@@ -448,7 +448,7 @@ export async function route(req, res) {
       } catch (error) {
         cleanup = { ok: false, previousProfilesRemoved: false, error: error.message };
       }
-      return sendJson(res, { ok: true, activation, cleanup, dashboard });
+      return sendJson(res, { ok: true, confirmation, cleanup, dashboard });
     }
     if (url.pathname === '/api/setup/reset' && req.method === 'POST') {
       const body = await readJsonBody(req);
