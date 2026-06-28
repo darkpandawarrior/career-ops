@@ -121,6 +121,8 @@ function normalizeRawJob(rawJob = {}) {
     url: clean(rawJob.url),
     source,
     sourceCategory: clean(rawJob.sourceCategory),
+    discoveryQuery: clean(rawJob.discoveryQuery),
+    discoveryReason: clean(rawJob.discoveryReason),
     snippet,
     compensation: rawJob.compensation,
     salary: rawJob.salary,

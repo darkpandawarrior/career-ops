@@ -204,6 +204,48 @@ export async function findCachedJob(root, id) {
   }
 }
 
+export async function enrichDiscoveryLead(root, id, options = {}) {
+  const cachePath = path.join(root, 'data', 'job-dashboard.json');
+  const [cache, rawConfig] = await Promise.all([
+    readFile(cachePath, 'utf8').then(JSON.parse),
+    readYaml(path.join(root, 'config', 'job-search.yml')),
+  ]);
+  const validation = validateJobSearchConfig(rawConfig);
+  if (!validation.valid) throw searchError('invalid_search_config', validation.errors.join('; '), 422);
+  const lead = (cache.jobs || []).find((job) => job.id === id && job.type === 'searchLead');
+  if (!lead) throw searchError('lead_not_found', 'Discovery lead was not found', 404);
+  if (!lead.discoveryQuery) throw searchError('lead_query_missing', 'Run a fresh search before enriching this legacy lead', 409);
+
+  const errors = [];
+  const query = { name: lead.source || lead.title, category: lead.sourceCategory || 'search', query: lead.discoveryQuery };
+  const rawJobs = await searchConfiguredQueries([query], options.fetchImpl || globalThis.fetch, errors);
+  const jobs = rawJobs
+    .filter((job) => job.type !== 'searchLead')
+    .map((job) => normalizeJob(job, validation.config))
+    .filter((job) => job.score >= 4 && isRelevantJob(job));
+  const attemptedAt = new Date().toISOString();
+
+  if (jobs.length === 0) {
+    lead.enrichment = {
+      status: 'unverified', attemptedAt,
+      reason: errors[0] || rawJobs[0]?.discoveryReason || 'No job postings could be verified from this lead',
+    };
+    await writeFile(cachePath, JSON.stringify(cache, null, 2), 'utf8');
+    return { status: 'unverified', lead, jobs: [], errors };
+  }
+
+  const byId = new Map((cache.jobs || []).filter((job) => job.id !== lead.id).map((job) => [job.id, job]));
+  for (const job of jobs) {
+    const existing = byId.get(job.id);
+    if (!existing || job.score > existing.score || job.snippet.length > existing.snippet.length) byId.set(job.id, job);
+  }
+  cache.jobs = [...byId.values()].sort((a, b) => b.score - a.score || a.company.localeCompare(b.company));
+  cache.stats = summarizeJobs(cache.jobs);
+  cache.leadEnrichment = { lastAttempt: attemptedAt, leadId: lead.id, promotedJobs: jobs.length };
+  await writeFile(cachePath, JSON.stringify(cache, null, 2), 'utf8');
+  return { status: 'promoted', leadId: lead.id, jobs, errors };
+}
+
 async function fetchTrackedCompanyFeeds(portals, fetchImpl, errors) {
   const companies = (portals?.tracked_companies || []).filter((company) => company?.enabled !== false);
   const results = await Promise.allSettled(companies.map((company) => fetchCompany(company, fetchImpl)));
@@ -416,6 +458,8 @@ function searchLead(query, reason) {
     url: `https://duckduckgo.com/?q=${encodeURIComponent(query.query)}`,
     source: query.name,
     sourceCategory: query.category,
+    discoveryQuery: query.query,
+    discoveryReason: reason,
     snippet: reason,
   };
 }

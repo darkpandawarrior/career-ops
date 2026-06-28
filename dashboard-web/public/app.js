@@ -1074,6 +1074,17 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
     a.textContent = job.type === 'searchLead' ? 'Open lead ↗' : 'Open job ↗';
     actionsEl.append(a);
   }
+  if (job.type === 'searchLead' && job.discoveryQuery) {
+    const verifyBtn = document.createElement('button');
+    verifyBtn.type = 'button';
+    verifyBtn.className = 'jcard-btn';
+    verifyBtn.textContent = 'Verify & rank';
+    verifyBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      enrichLead(job, verifyBtn);
+    });
+    actionsEl.append(verifyBtn);
+  }
 
   const expandBtn = document.createElement('button');
   expandBtn.type = 'button';
@@ -1194,6 +1205,29 @@ async function tailorResume(job) {
     ].filter(Boolean).join('\n'));
   } catch (error) {
     showDialog('Resume tailoring failed', error.message);
+  }
+}
+
+async function enrichLead(job, button) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Verifying…';
+  try {
+    const payload = await request('/api/leads/enrich', {
+      method: 'POST',
+      body: JSON.stringify({ id: job.id }),
+    });
+    state.payload = payload.dashboard;
+    state.jobs = state.payload.jobs || [];
+    renderSummary(state.payload);
+    renderJobs();
+    els.statusLine.textContent = payload.enrichment.status === 'promoted'
+      ? `${payload.enrichment.jobs.length} verified job${payload.enrichment.jobs.length === 1 ? '' : 's'} promoted into Application Fit ranking.`
+      : payload.enrichment.lead?.enrichment?.reason || 'No verifiable job posting was found for this lead.';
+  } catch (error) {
+    showDialog('Lead verification failed', error.message);
+    button.disabled = false;
+    button.textContent = original;
   }
 }
 

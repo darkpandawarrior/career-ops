@@ -23,7 +23,7 @@ import {
 import { normalizeJob } from './scoring/scorer.mjs';
 import { validateJobSearchConfig } from './search/config-schema.mjs';
 import { buildSearchPlan } from './search/query-builder.mjs';
-import { findCachedJob, refreshJobSearch } from './search/job-search-runner.mjs';
+import { enrichDiscoveryLead, findCachedJob, refreshJobSearch } from './search/job-search-runner.mjs';
 import { createTailoredResume } from './resume-tailor.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -477,6 +477,13 @@ export async function route(req, res) {
       if (DEMO) return sendJson(res, { started: true, demo: true });
       if (!refreshState.running) refreshDashboard(root).catch(() => {});
       return sendJson(res, { started: true, running: refreshState.running });
+    }
+    if (url.pathname === '/api/leads/enrich' && req.method === 'POST') {
+      if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);
+      const body = await readJsonBody(req);
+      if (!body.id) return sendJson(res, { error: 'lead id is required' }, 400);
+      const enrichment = await enrichDiscoveryLead(root, body.id);
+      return sendJson(res, { enrichment, dashboard: await buildDashboardPayload(root) });
     }
     if (url.pathname === '/api/resume' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);

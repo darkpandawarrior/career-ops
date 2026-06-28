@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { parseDuckResults, refreshJobSearch } from '../search/job-search-runner.mjs';
+import { enrichDiscoveryLead, parseDuckResults, refreshJobSearch } from '../search/job-search-runner.mjs';
 
 test('fresh search uses active profile rules, scores results, and persists the cache', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
@@ -68,6 +68,29 @@ test('source telemetry records failures and skipped scopes without failing refre
   assert.equal(remote.status, 'skipped');
   assert.equal(search.status, 'partial');
   assert.ok(search.failures > 0);
+});
+
+test('a discovery lead can be verified and promoted into ranked jobs', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
+  await mkdir(path.join(root, 'config'), { recursive: true });
+  await mkdir(path.join(root, 'data'), { recursive: true });
+  await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig());
+  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  const initial = await refreshJobSearch(root, {
+    fetchImpl: async () => textResponse(''),
+    runScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+    runWideScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const lead = initial.jobs.find((job) => job.type === 'searchLead' && job.discoveryQuery);
+  assert.ok(lead);
+  const result = await enrichDiscoveryLead(root, lead.id, {
+    fetchImpl: async () => textResponse('<a class="result__a" href="https://jobs.example.test/promoted">Senior Backend Engineer Java PostgreSQL Docker Kafka - Promoted Co</a>'),
+  });
+  assert.equal(result.status, 'promoted');
+  assert.ok(result.jobs.some((job) => job.company === 'Promoted Co' && job.score >= 7));
+  const cache = JSON.parse(await readFile(path.join(root, 'data', 'job-dashboard.json'), 'utf8'));
+  assert.equal(cache.jobs.some((job) => job.id === lead.id), false);
+  assert.ok(cache.jobs.some((job) => job.company === 'Promoted Co'));
 });
 
 test('DuckDuckGo result parsing preserves source and job URL', () => {
