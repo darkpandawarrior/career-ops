@@ -45,6 +45,15 @@ export function scoreJob(rawJob, rawConfig) {
     reasons.push(`Recommended gaps: ${skillSignal.recommendedGaps.join(', ')}`);
   }
   if (gates.length > 0) reasons.push(`Gates: ${gates.join('; ')}`);
+  const explanation = buildExplanation({
+    skillSignal,
+    experienceSignal,
+    availabilitySignal,
+    educationSignal,
+    eligibility,
+    compensation,
+    gates,
+  });
 
   return {
     ...job,
@@ -82,6 +91,8 @@ export function scoreJob(rawJob, rawConfig) {
     },
     gates,
     reasons,
+    whyRanksHighly: explanation.positive,
+    potentialConcerns: explanation.concerns,
   };
 }
 
@@ -164,6 +175,45 @@ function scoreOtherSignals(job, compensation, preferences) {
   };
 }
 
+function buildExplanation({
+  skillSignal,
+  experienceSignal,
+  availabilitySignal,
+  educationSignal,
+  eligibility,
+  compensation,
+  gates,
+}) {
+  const positive = [];
+  const concerns = [];
+
+  if (skillSignal.ratio >= 0.8) positive.push('Strong match across the role’s required skills');
+  else if (skillSignal.ratio >= 0.55) positive.push('Good overlap with the role’s core skills');
+  else concerns.push('Verified skill overlap is limited');
+
+  if (experienceSignal.status === 'aligned') positive.push(`Experience aligns with ${experienceSignal.reason.replace(/^Experience aligns at\s*/i, '')}`);
+  else if (experienceSignal.status === 'unknown') concerns.push('The posting does not state a clear experience requirement');
+  else concerns.push(experienceSignal.reason);
+
+  if (eligibility.status === 'open') positive.push(eligibility.reason);
+  else if (eligibility.status === 'relocation') positive.push(eligibility.reason);
+  else concerns.push(eligibility.reason);
+
+  if (availabilitySignal.status === 'aligned') positive.push(availabilitySignal.reason);
+  else if (!['unknown'].includes(availabilitySignal.status)) concerns.push(availabilitySignal.reason);
+
+  if (educationSignal.status === 'matched') positive.push(educationSignal.reason);
+  else if (['verify', 'gap'].includes(educationSignal.status)) concerns.push(educationSignal.reason);
+
+  if (compensation.status === 'meets_minimum') positive.push(compensation.label);
+  else if (['unknown', 'below_minimum', 'currency_mismatch'].includes(compensation.status)) concerns.push(compensation.label);
+
+  for (const skill of skillSignal.recommendedGaps) concerns.push(`${skill} is requested but not confirmed`);
+  for (const gate of gates) if (!concerns.includes(gate)) concerns.push(gate);
+
+  return { positive: uniqueText(positive), concerns: uniqueText(concerns) };
+}
+
 function scoreAvailability(text, availability) {
   const noticeDays = parseNoticeDays(availability?.notice_period);
   const requiredDays = parseRequiredJoiningDays(text);
@@ -234,6 +284,16 @@ function matchedTerms(value, terms) {
 }
 
 function roundSignal(value) { return Math.round(value * 10) / 10; }
+
+function uniqueText(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = String(value).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 function inferCompany(url) {
   try {

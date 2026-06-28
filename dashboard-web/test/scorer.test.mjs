@@ -100,6 +100,8 @@ test('the application fit score exposes all five weighted categories', () => {
   assert.deepEqual(Object.keys(job.scoreBreakdown), ['skills', 'experience', 'eligibility', 'noticeEducation', 'other']);
   assert.equal(job.reasons.some((reason) => reason.startsWith('Title:')), false);
   assert.equal(job.reasons.some((reason) => reason.startsWith('Preferences:')), false);
+  assert.ok(job.whyRanksHighly.some((reason) => /skills/i.test(reason)));
+  assert.ok(Array.isArray(job.potentialConcerns));
 });
 
 test('education is neutral unless the posting explicitly requires it', () => {
@@ -193,4 +195,19 @@ test('international roles without required sponsorship are blocked', () => {
     },
   });
   assert.equal(job.eligibility.status, 'blocked');
+});
+
+test('unclear eligibility lowers fit without creating a hard gate', () => {
+  const unclear = normalizeJob({
+    title: 'Senior Backend Engineer', company: 'Unclear', location: '',
+    url: 'https://example.test/unclear', description: 'Java Spring Boot PostgreSQL Docker. 5 years.',
+  }, config);
+  const open = normalizeJob({
+    title: 'Senior Backend Engineer', company: 'Open', location: 'Bengaluru, India',
+    url: 'https://example.test/open', description: 'Java Spring Boot PostgreSQL Docker. 5 years.',
+  }, config);
+  assert.equal(unclear.eligibility.status, 'verify');
+  assert.deepEqual(unclear.gates, []);
+  assert.ok(unclear.scoreRaw < open.scoreRaw);
+  assert.ok(unclear.potentialConcerns.some((reason) => /Location fit requires review/i.test(reason)));
 });

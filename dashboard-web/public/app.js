@@ -998,24 +998,13 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
     card.append(skillsEl);
   }
 
-  // ── Signal chips: reasons + rejected warning ───────────────────────────
-  const signals = [];
-  for (const r of (job.reasons || []).slice(0, 3)) {
-    const label = formatReason(r);
-    if (label) signals.push({ text: label, cls: 'jreason' });
-  }
-  if (isRejCo) signals.push({ text: '⛔ Previously rejected', cls: 'jreason jreason--rejected' });
-  if (signals.length) {
-    const sigRow = document.createElement('div');
-    sigRow.className = 'jcard-signals';
-    signals.forEach((s) => {
-      const c = document.createElement('span');
-      c.className = s.cls;
-      c.textContent = s.text;
-      sigRow.append(c);
-    });
-    card.append(sigRow);
-  }
+  const explanation = document.createElement('div');
+  explanation.className = 'jcard-explanation';
+  appendExplanation(explanation, 'Why this ranks highly', job.whyRanksHighly || [], 'positive');
+  const concerns = [...(job.potentialConcerns || [])];
+  if (isRejCo) concerns.unshift('Previously rejected by this company');
+  appendExplanation(explanation, 'Potential concerns', concerns, 'concern');
+  if (explanation.childElementCount) card.append(explanation);
 
   // ── Footer: liveness + action buttons ─────────────────────────────────
   const footer = document.createElement('div');
@@ -1201,6 +1190,23 @@ function addField(container, label, value) {
   const description = document.createElement('dd');
   description.textContent = value;
   container.append(term, description);
+}
+
+function appendExplanation(container, heading, items, kind) {
+  const visible = items.filter(Boolean).slice(0, 2);
+  if (visible.length === 0) return;
+  const section = document.createElement('section');
+  section.className = `jfit jfit--${kind}`;
+  const title = document.createElement('strong');
+  title.textContent = heading;
+  const list = document.createElement('ul');
+  visible.forEach((item) => {
+    const row = document.createElement('li');
+    row.textContent = cleanText(item);
+    list.append(row);
+  });
+  section.append(title, list);
+  container.append(section);
 }
 
 function actionButton(label, action, className = '') {
@@ -1482,23 +1488,6 @@ function cleanLocation(s) {
   return stripped;
 }
 
-function formatReason(r) {
-  if (!r) return null;
-  const s = String(r);
-  // "Skills: 6 verified, 1 supporting" → "6 skills matched"
-  const skillM = s.match(/Skills?:\s*(\d+)\s*verified/i);
-  if (skillM) return `${skillM[1]} skills matched`;
-  // "Experience: Experience aligns at 5-9 years" → "exp: 5-9 yrs"
-  const expAligns = s.match(/Experience.*aligns.*?(\d[\d-–+]*\s*(?:years?|yrs?))/i);
-  if (expAligns) return `exp: ${expAligns[1].replace('years', 'yrs').replace('year', 'yr')}`;
-  // "Experience: Role starts at 30 years" → skip
-  if (/Experience.*role starts/i.test(s)) return null;
-  // "Joining availability" → skip verbose
-  if (/joining|availability/i.test(s)) return null;
-  // Otherwise truncate to 35 chars
-  const clean = stripHtml(s.replace(/^[^:]+:\s*/, ''));
-  return clean.length > 35 ? clean.slice(0, 33) + '…' : clean;
-}
 function tattr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 function ttoast(msg) {
   let t = document.getElementById('t-toast');

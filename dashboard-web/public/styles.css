@@ -2897,23 +2897,15 @@ header.topbar {
   border: 1px solid var(--border);
 }
 
-/* Signal / reason chips */
-.jcard-signals { display: flex; flex-wrap: wrap; gap: 4px; }
-.jreason {
-  display: inline-block;
-  padding: 2px 7px;
-  background: #f0fdf4;
-  color: #15803d;
-  border: 1px solid #bbf7d0;
-  border-radius: 100px;
-  font-size: 10px;
-  font-weight: 500;
-}
-.jreason--rejected {
-  background: #fee2e2;
-  color: #b91c1c;
-  border-color: #fca5a5;
-}
+/* Structured Application Fit explanation */
+.jcard-explanation { display: grid; gap: 7px; }
+.jfit { border-left: 3px solid; padding-left: 8px; }
+.jfit strong { display: block; margin-bottom: 2px; font-size: 10.5px; }
+.jfit ul { margin: 0; padding-left: 15px; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+.jfit--positive { border-color: #16a34a; }
+.jfit--positive strong { color: #15803d; }
+.jfit--concern { border-color: #f59e0b; }
+.jfit--concern strong { color: #b45309; }
 
 /* Card footer */
 .jcard-footer {
