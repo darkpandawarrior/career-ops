@@ -394,6 +394,7 @@ async function uploadResume(event) {
     const body = new FormData();
     body.append('resume', file, file.name);
     const payload = await request('/api/setup/upload', { method: 'POST', body }, false);
+    resetCandidateDraftUi();
     state.draft = payload.draft;
     history.replaceState({}, '', `?draft=${encodeURIComponent(state.draft.draftId)}`);
     renderDraft();
@@ -416,6 +417,7 @@ async function discardDraft() {
       body: JSON.stringify({ draftId: state.draft.draftId }),
     });
     state.draft = null;
+    resetCandidateDraftUi();
     history.replaceState({}, '', location.pathname);
     els.draftPanel.hidden = true;
     els.extractionPanel.hidden = true;
@@ -425,6 +427,22 @@ async function discardDraft() {
   } finally {
     els.discardDraftBtn.disabled = false;
   }
+}
+
+function resetCandidateDraftUi() {
+  state.inference = null;
+  state.reviewStep = 0;
+  els.reviewForm.reset();
+  els.reviewErrors.hidden = true;
+  els.reviewStepErrors.hidden = true;
+  els.activationPreview.hidden = true;
+  els.activationProgress.hidden = true;
+  els.confirmAndSearchBtn.hidden = true;
+  els.extractionPanel.hidden = true;
+  els.extractionSections.textContent = '';
+  els.extractionPreview.textContent = '';
+  updateScopeFields();
+  renderAllListControls();
 }
 
 function renderDraft() {

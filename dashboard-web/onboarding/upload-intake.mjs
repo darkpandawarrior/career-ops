@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import Busboy from 'busboy';
@@ -35,6 +35,7 @@ export async function acceptResumeUpload(request, root) {
       nextStep: 'extract',
     };
     await writeFile(path.join(draftPath, 'metadata.json'), JSON.stringify(metadata, null, 2), { flag: 'wx' });
+    await discardOtherDrafts(root, draftId);
     return publicDraft(metadata);
   } catch (error) {
     await rm(draftPath, { recursive: true, force: true });
@@ -55,6 +56,21 @@ export async function readDraft(root, draftId) {
 export async function discardDraft(root, draftId) {
   const safeId = validateDraftId(draftId);
   await rm(path.join(draftsRoot(root), safeId), { recursive: true, force: true });
+}
+
+export async function discardOtherDrafts(root, keepDraftId) {
+  const keep = validateDraftId(keepDraftId);
+  const rootPath = draftsRoot(root);
+  let entries = [];
+  try {
+    entries = await readdir(rootPath, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  await Promise.all(entries
+    .filter((entry) => entry.isDirectory() && entry.name !== keep)
+    .map((entry) => rm(path.join(rootPath, entry.name), { recursive: true, force: true })));
 }
 
 export function sanitizeFilename(value) {
