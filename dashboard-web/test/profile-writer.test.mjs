@@ -27,6 +27,10 @@ test('generates valid career-ops user files from a reviewed draft', async () => 
   assert.ok(yaml.load(files['portals.yml']).tracked_companies.length >= 15);
   assert.deepEqual(yaml.load(files['config/job-search.yml']).titles.strong, ['Senior Backend Engineer']);
   assert.deepEqual(yaml.load(files['config/job-search.yml']).location.search_scopes, ['local', 'remote']);
+  assert.deepEqual(yaml.load(files['config/job-search.yml']).education, {
+    levels: ["Bachelor's degree"],
+    certifications: ['AWS Certified Developer'],
+  });
   assert.deepEqual(yaml.load(files['portals.yml']).title_filter.positive, []);
   assert.deepEqual(yaml.load(files['portals.yml']).content_filter.positive.slice(0, 2), [
     'Java',
@@ -168,6 +172,8 @@ function extraction() {
       { key: 'summary', title: 'Summary', text: 'Backend engineer building reliable platforms.' },
       { key: 'experience', title: 'Experience', text: 'Senior Backend Engineer\n2020 - Current' },
       { key: 'skills', title: 'Skills', text: 'Java, PostgreSQL, Docker' },
+      { key: 'education', title: 'Education', text: 'Bachelor of Technology in Computer Science' },
+      { key: 'certifications', title: 'Certifications', text: 'AWS Certified Developer' },
     ],
   };
 }

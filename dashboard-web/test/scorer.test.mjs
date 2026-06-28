@@ -90,18 +90,19 @@ test('international target locations are scored separately from local and remote
   assert.equal(job.eligibility.label, 'International target location');
 });
 
-test('skills, experience, and availability form the complete relevance score', () => {
+test('the application fit score exposes all five weighted categories', () => {
   const job = normalizeJob(jobs[0], {
     ...config,
     weights: undefined,
   });
   assert.ok(job.score >= 8);
-  assert.match(job.reasons.join(' '), /Joining availability:/);
+  assert.match(job.reasons.join(' '), /Notice period:/);
+  assert.deepEqual(Object.keys(job.scoreBreakdown), ['skills', 'experience', 'eligibility', 'noticeEducation', 'other']);
   assert.equal(job.reasons.some((reason) => reason.startsWith('Title:')), false);
   assert.equal(job.reasons.some((reason) => reason.startsWith('Preferences:')), false);
 });
 
-test('summary, employer, education, projects, and industry do not affect score', () => {
+test('education is neutral unless the posting explicitly requires it', () => {
   const base = {
     title: 'Unrelated wording',
     company: 'Example',
@@ -109,13 +110,22 @@ test('summary, employer, education, projects, and industry do not affect score',
     url: 'https://example.test/facts',
     description: 'Java PostgreSQL Docker. 5 years.',
   };
-  const enriched = normalizeJob({
-    ...base,
-    company: 'Fintech Education Projects Employer',
-    description: `${base.description} MBA university award fintech healthcare project leadership summary.`,
-  }, config);
   const plain = normalizeJob(base, config);
-  assert.equal(enriched.scoreRaw, plain.scoreRaw);
+  assert.equal(plain.educationStatus, 'neutral');
+  const required = normalizeJob({ ...base, description: `${base.description} Bachelor's degree required.` }, config);
+  assert.equal(required.educationStatus, 'verify');
+  assert.ok(required.scoreRaw < plain.scoreRaw);
+});
+
+test('mandatory, preferred, related, and transferable skills are parsed from job text', () => {
+  const job = normalizeJob({
+    title: 'Backend Engineer', company: 'Layers', location: 'India', url: 'https://example.test/layers',
+    description: 'Java and Spring Boot are required. AWS is preferred. Kafka powers the platform. Kubernetes exposure helps.',
+  }, config);
+  assert.deepEqual(job.skillRequirements.mandatory, ['Java', 'Spring Boot']);
+  assert.deepEqual(job.skillRequirements.preferred, ['AWS']);
+  assert.deepEqual(job.skillRequirements.related, ['Kafka']);
+  assert.deepEqual(job.skillRequirements.transferable, ['Kubernetes']);
 });
 
 test('joining availability penalizes urgent roles when notice period is too long', () => {

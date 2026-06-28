@@ -2,6 +2,8 @@ import { normalizeJobSearchConfig } from '../search/config-schema.mjs';
 import { classifyCompensation } from './compensation.mjs';
 import { classifyEligibility } from './eligibility.mjs';
 import { extractExperience, scoreExperience } from './experience.mjs';
+import { scoreEducation } from './education.mjs';
+import { containsTerm, parseSkillRequirements } from './requirements.mjs';
 
 export function scoreJob(rawJob, rawConfig) {
   const config = normalizeJobSearchConfig(rawConfig);
@@ -12,17 +14,20 @@ export function scoreJob(rawJob, rawConfig) {
   const availabilitySignal = scoreAvailability(job.text, config.availability);
   const eligibility = classifyEligibility(job, config);
   const compensation = classifyCompensation(job, eligibility, config);
+  const educationSignal = scoreEducation(job.text, config.education);
+  const otherSignal = scoreOtherSignals(job, compensation, config.preferences);
   const weights = config.weights;
 
   let rawScore =
     skillSignal.ratio * weights.skills
     + experienceSignal.ratio * weights.experience
-    + availabilitySignal.ratio * weights.availability;
+    + eligibility.ratio * weights.eligibility
+    + ((availabilitySignal.ratio + educationSignal.ratio) / 2) * weights.notice_education
+    + otherSignal.ratio * weights.other;
 
   const gates = [];
   if (skillSignal.excluded.length > 0) gates.push(`Excluded skills: ${skillSignal.excluded.join(', ')}`);
   if (eligibility.status === 'blocked') gates.push(eligibility.reason);
-  if (compensation.gate) gates.push(compensation.label);
 
   if (gates.length > 0) rawScore = Math.min(rawScore, 35);
   const scoreRaw = Math.max(0, Math.min(100, Math.round(rawScore * 10) / 10));
@@ -31,9 +36,10 @@ export function scoreJob(rawJob, rawConfig) {
   const reasons = [
     `Skills: ${skillSignal.reason}`,
     `Experience: ${experienceSignal.reason}`,
-    `Joining availability: ${availabilitySignal.reason}`,
-    `Location: ${eligibility.reason}`,
-    `Compensation: ${compensation.label}`,
+    `Eligibility: ${eligibility.reason}`,
+    `Notice period: ${availabilitySignal.reason}`,
+    `Education: ${educationSignal.reason}`,
+    `Other signals: ${otherSignal.reason}`,
   ];
   if (skillSignal.recommendedGaps.length > 0) {
     reasons.push(`Recommended gaps: ${skillSignal.recommendedGaps.join(', ')}`);
@@ -53,6 +59,7 @@ export function scoreJob(rawJob, rawConfig) {
     supportingSkills: skillSignal.supporting,
     learningSkills: skillSignal.learning,
     recommendedSkillGaps: skillSignal.recommendedGaps,
+    skillRequirements: skillSignal.requirements,
     excludedSkillMatches: skillSignal.excluded,
     skillMatchCount: skillSignal.fullCredit.length + skillSignal.supporting.length,
     yearsRequired: experience.label,
@@ -60,10 +67,19 @@ export function scoreJob(rawJob, rawConfig) {
     yearsMax: experience.max,
     experienceStatus: experienceSignal.status,
     availabilityStatus: availabilitySignal.status,
+    educationStatus: educationSignal.status,
+    educationRequirements: educationSignal.requirements,
     locationLabel: eligibility.label,
     remoteStatus: eligibility.status,
     eligibility,
     compensation,
+    scoreBreakdown: {
+      skills: roundSignal(skillSignal.ratio * weights.skills),
+      experience: roundSignal(experienceSignal.ratio * weights.experience),
+      eligibility: roundSignal(eligibility.ratio * weights.eligibility),
+      noticeEducation: roundSignal(((availabilitySignal.ratio + educationSignal.ratio) / 2) * weights.notice_education),
+      other: roundSignal(otherSignal.ratio * weights.other),
+    },
     gates,
     reasons,
   };
@@ -102,14 +118,22 @@ function normalizeRawJob(rawJob = {}) {
 }
 
 function scoreSkills(job, skills) {
+  const requirements = parseSkillRequirements(job.snippet, skills);
   const fullCredit = matchedTerms(job.text, [...skills.demonstrated, ...skills.confirmed_unlisted]);
   const supporting = matchedTerms(job.text, skills.supporting);
   const learning = matchedTerms(job.text, skills.learning);
   const recommendedGaps = matchedTerms(job.text, skills.recommended_gaps);
   const excluded = matchedTerms(job.text, skills.excluded);
-  const totalWeight = skills.demonstrated.length + skills.confirmed_unlisted.length + skills.supporting.length * 0.6;
-  const earned = fullCredit.length + supporting.length * 0.6;
-  const ratio = totalWeight > 0 ? Math.min(1, earned / Math.min(totalWeight, 6)) : 0;
+  const evidence = [...skills.demonstrated, ...skills.confirmed_unlisted];
+  const candidateHas = (skill) => matchedTerms(skill, evidence).length > 0;
+  const mandatoryRatio = requirements.mandatory.length
+    ? requirements.mandatory.filter(candidateHas).length / requirements.mandatory.length
+    : Math.min(1, fullCredit.length / 3);
+  const preferredRatio = requirements.preferred.length
+    ? requirements.preferred.filter(candidateHas).length / requirements.preferred.length
+    : Math.min(1, (supporting.length + fullCredit.length) / 4);
+  const adjacentCredit = Math.min(1, (requirements.related.length * 0.65 + requirements.transferable.length * 0.35) / 2);
+  const ratio = Math.min(1, mandatoryRatio * 0.7 + preferredRatio * 0.2 + adjacentCredit * 0.1);
   const parts = [];
   if (fullCredit.length > 0) parts.push(`${fullCredit.length} verified`);
   if (supporting.length > 0) parts.push(`${supporting.length} supporting`);
@@ -122,7 +146,21 @@ function scoreSkills(job, skills) {
     learning,
     recommendedGaps,
     excluded,
+    requirements,
     reason: parts.join(', ') || 'No configured skill evidence found',
+  };
+}
+
+function scoreOtherSignals(job, compensation, preferences) {
+  const domainMatch = matchedTerms(job.text, preferences.domains).length > 0;
+  const negative = matchedTerms(job.text, preferences.negative_keywords).length > 0;
+  const compensationRatio = compensation.status === 'below_minimum' ? 0.1
+    : compensation.status === 'meets_minimum' ? 1 : 0.7;
+  const sourceRatio = job.source ? 1 : 0.6;
+  const preferenceRatio = negative ? 0 : domainMatch || preferences.domains.length === 0 ? 1 : 0.6;
+  return {
+    ratio: compensationRatio * 0.5 + sourceRatio * 0.2 + preferenceRatio * 0.3,
+    reason: [compensation.label, domainMatch ? 'preferred industry' : '', negative ? 'excluded preference found' : '', job.source ? `source: ${job.source}` : 'source unclear'].filter(Boolean).join('; '),
   };
 }
 
@@ -195,15 +233,7 @@ function matchedTerms(value, terms) {
   return terms.filter((term) => containsTerm(value, term));
 }
 
-function containsTerm(value, term) {
-  const haystack = String(value).toLowerCase();
-  const needle = String(term).toLowerCase().trim();
-  if (!needle) return false;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const left = /^[a-z0-9]/i.test(needle) ? '(?<![a-z0-9])' : '';
-  const right = /[a-z0-9]$/i.test(needle) ? '(?![a-z0-9])' : '';
-  return new RegExp(`${left}${escaped}${right}`, 'i').test(haystack);
-}
+function roundSignal(value) { return Math.round(value * 10) / 10; }
 
 function inferCompany(url) {
   try {

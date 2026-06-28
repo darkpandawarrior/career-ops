@@ -113,6 +113,7 @@ export async function rollbackProfileReplacement(root, draftId) {
 export function generateUserFiles(review, extraction) {
   const minimumYears = review.experience_years == null ? null : Math.max(0, Math.floor(review.experience_years));
   const maximumYears = review.experience_years == null ? null : Math.max(minimumYears, Math.ceil(review.experience_years + 3));
+  const education = extractEducationEvidence(extraction);
   const profile = {
     candidate: {
       full_name: review.candidate.full_name,
@@ -179,6 +180,7 @@ export function generateUserFiles(review, extraction) {
     availability: {
       notice_period: review.availability.notice_period,
     },
+    education,
     location: review.location,
     compensation: {
       home_country: {
@@ -194,9 +196,11 @@ export function generateUserFiles(review, extraction) {
       negative_keywords: [],
     },
     weights: {
-      skills: 60,
+      skills: 45,
       experience: 25,
-      availability: 15,
+      eligibility: 15,
+      notice_education: 10,
+      other: 5,
     },
   };
   return {
@@ -300,6 +304,28 @@ function renderCanonicalCv(extraction) {
     })
     .join('\n\n')
     .trim() + '\n';
+}
+
+function extractEducationEvidence(extraction) {
+  const sections = extraction?.sections || [];
+  const educationText = sections
+    .filter((section) => section.key === 'education')
+    .map((section) => section.text || '')
+    .join('\n');
+  const certificationLines = sections
+    .filter((section) => section.key === 'certifications')
+    .flatMap((section) => String(section.text || '').split('\n'))
+    .map((line) => line.replace(/^[-•*]\s*/, '').trim())
+    .filter(Boolean);
+  const levels = [];
+  if (/\b(?:bachelor(?:'s)?|b\.?\s?tech|b\.?\s?e\.?|b\.?\s?sc)\b/i.test(educationText)) levels.push("Bachelor's degree");
+  if (/\b(?:master(?:'s)?|m\.?\s?tech|m\.?\s?e\.?|m\.?\s?sc|mba)\b/i.test(educationText)) levels.push("Master's degree");
+  if (/\b(?:ph\.?d|doctorate)\b/i.test(educationText)) levels.push('Doctorate');
+  if (/\bdiploma\b/i.test(educationText)) levels.push('Diploma');
+  return {
+    levels,
+    certifications: [...new Set(certificationLines)],
+  };
 }
 
 function renderProfileNarrative(review) {

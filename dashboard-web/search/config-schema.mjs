@@ -1,7 +1,9 @@
 const DEFAULT_WEIGHTS = Object.freeze({
-  skills: 60,
+  skills: 45,
   experience: 25,
-  availability: 15,
+  eligibility: 15,
+  notice_education: 10,
+  other: 5,
 });
 
 const SKILL_KEYS = [
@@ -36,6 +38,10 @@ export function normalizeJobSearchConfig(input = {}) {
     },
     availability: {
       notice_period: cleanString(source.availability?.notice_period),
+    },
+    education: {
+      levels: cleanStrings(source.education?.levels),
+      certifications: cleanStrings(source.education?.certifications),
     },
     location: {
       home_country: cleanString(source.location?.home_country),
@@ -100,6 +106,8 @@ function normalizeSearchScopes(location = {}) {
 }
 
 function normalizeWeights(value = {}) {
+  const keys = Object.keys(DEFAULT_WEIGHTS);
+  if (!keys.every((key) => Number.isFinite(Number(value?.[key])))) return { ...DEFAULT_WEIGHTS };
   const candidate = Object.fromEntries(
     Object.entries(DEFAULT_WEIGHTS).map(([key, fallback]) => [
       key,
