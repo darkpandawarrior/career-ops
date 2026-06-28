@@ -702,7 +702,7 @@ function securityHeaders(extra = {}) {
     'access-control-allow-origin': `http://${HOST}:${PORT}`,
     'access-control-allow-methods': 'GET,POST,OPTIONS',
     'access-control-allow-headers': 'content-type',
-    'content-security-policy': "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     'referrer-policy': 'no-referrer',
     'x-content-type-options': 'nosniff',
     'x-frame-options': 'DENY',

@@ -9,7 +9,10 @@ const state = {
   inference: null,
   reviewStep: 0,
   liveness: {},
+  rejectedCompanies: new Set(),
+  hideRejected: true,
 };
+let _scoreChart = null;
 
 const ids = [
   'refreshBtn', 'changeProfileBtn', 'profileLine', 'topbarProfileBlock',
@@ -77,6 +80,40 @@ els.scoreFilter.addEventListener('change', (event) => {
   state.minScore = Number(event.target.value);
   renderJobs();
 });
+
+// Job section tabs (Recommended / Review / Sources)
+document.querySelector('.job-section-nav')?.addEventListener('click', (e) => {
+  const tab = e.target.closest('.jsec-tab');
+  if (!tab) return;
+  const sec = tab.dataset.sec;
+  document.querySelectorAll('.jsec-tab').forEach((t) => t.classList.toggle('active', t === tab));
+  document.querySelectorAll('.job-section[data-section]').forEach((s) => {
+    s.classList.toggle('active-sec', s.dataset.section === sec);
+  });
+});
+
+// Score pill tabs
+document.getElementById('scoreTabs')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.stab[data-min]');
+  if (!btn) return;
+  document.querySelectorAll('#scoreTabs .stab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.minScore = Number(btn.dataset.min);
+  renderJobs();
+});
+
+// Rejected toggle — init state: hiding=true, button shows "Rejected off"
+const _rejBtn = document.getElementById('rejectedToggle');
+if (_rejBtn) {
+  _rejBtn.textContent = '⛔ Rejected off';
+  _rejBtn.classList.add('hiding');
+  _rejBtn.addEventListener('click', () => {
+    state.hideRejected = !state.hideRejected;
+    _rejBtn.textContent = state.hideRejected ? '⛔ Rejected off' : '✅ Rejected on';
+    _rejBtn.classList.toggle('hiding', state.hideRejected);
+    renderJobs();
+  });
+}
 for (const eventName of ['dragenter', 'dragover']) {
   els.dropZone.addEventListener(eventName, (event) => {
     event.preventDefault();
@@ -104,6 +141,15 @@ async function initialize() {
   renderHeader();
   renderSummary(state.payload);
   loadProfileSwitcher();
+  // Pre-load tracker data to build rejected-company set before rendering jobs
+  try {
+    const tdata = await request('/api/data');
+    const rejected = (tdata.apps || [])
+      .filter(a => a.status === 'Rejected')
+      .map(a => (a.company || '').toLowerCase().trim())
+      .filter(Boolean);
+    state.rejectedCompanies = new Set(rejected);
+  } catch { /* tracker data optional — rejected filter stays empty */ }
   renderJobs();
   const draftId = new URLSearchParams(location.search).get('draft');
   if (draftId) {
@@ -183,9 +229,18 @@ function showView(view) {
 
 function renderHeader() {
   const profile = state.payload?.profile;
-  els.profileLine.textContent = profile
-    ? [profile.name, profile.headline, profile.location].filter(Boolean).join(' · ')
-    : 'No active profile yet';
+  if (profile) {
+    const nameEl = document.getElementById('profileSwitcherName');
+    if (nameEl) nameEl.textContent = profile.name || '';
+    // Trim headline to core role only (before " — "), shorten location
+    const headline = (profile.headline || '').split(' — ')[0];
+    const loc = (profile.location || '').replace(', Maharashtra', '').replace(', Karnataka', '');
+    const subtitle = [headline, loc].filter(Boolean).join(' · ');
+    els.profileLine.textContent = subtitle;
+    els.profileLine.title = [profile.headline, profile.location].filter(Boolean).join(' · ');
+  } else {
+    els.profileLine.textContent = 'No active profile yet';
+  }
 }
 
 async function loadProfileSwitcher() {
@@ -198,7 +253,7 @@ async function loadProfileSwitcher() {
     const initials = active.display_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
     els.profileAvatar.textContent = initials;
     els.profileAvatar.style.background = active.color || 'var(--accent)';
-    els.profileSwitcherName.textContent = active.display_name.split(' ')[0];
+    els.profileSwitcherName.textContent = active.display_name;
     els.profileSwitcherMenu.innerHTML = profiles.map((p) => `
       <a class="profile-menu-item${p.active ? ' is-active' : ''}" href="${p.url}" role="menuitem">
         <span class="profile-menu-avatar" style="background:${p.color || 'var(--accent)'}">
@@ -708,15 +763,63 @@ function renderJobs() {
   renderList(els.reviewJobs, review);
   renderList(els.sourceJobs, sourceJobs);
   startLivenessCheck(realJobs.filter((j) => j.url).slice(0, 15));
+  renderScoreChart(state.jobs.filter((j) => j.type !== 'searchLead'));
+}
+
+function renderScoreChart(allRealJobs) {
+  const canvas = document.getElementById('scoreChart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  const tiers = [
+    { label: 'Excellent 9+', min: 9, max: 11, color: '#0f766e' },
+    { label: 'Strong 7–8',   min: 7, max: 9,  color: '#3b82f6' },
+    { label: 'Good 5–6',     min: 5, max: 7,  color: '#f59e0b' },
+    { label: 'Weak <5',      min: 0, max: 5,  color: '#e2e8f0' },
+  ];
+  const counts = tiers.map(t => allRealJobs.filter(j => {
+    const s = Number(j.score || 0);
+    return s >= t.min && s < t.max;
+  }).length);
+
+  if (_scoreChart) { _scoreChart.destroy(); _scoreChart = null; }
+  _scoreChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: tiers.map(t => t.label),
+      datasets: [{ data: counts, backgroundColor: tiers.map(t => t.color), borderRadius: 4, borderSkipped: false }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.raw} jobs` } } },
+      scales: {
+        x: { display: false, grid: { display: false } },
+        y: { display: false, grid: { display: false } }
+      },
+      animation: false
+    }
+  });
+
+  const legend = document.getElementById('scoreChartLegend');
+  if (legend) {
+    legend.innerHTML = tiers.map((t, i) =>
+      `<div class="leg-row"><span class="leg-dot" style="background:${t.color}"></span>${t.label}: <strong>${counts[i]}</strong></div>`
+    ).join('');
+  }
 }
 
 function matchesFilter(job) {
   if (Number(job.score || 0) < state.minScore) return false;
+  if (state.hideRejected && isRejectedCompany(job)) return false;
   if (!state.filterText) return true;
   return [
     job.title, job.company, job.location, job.source,
     ...(job.reasons || []), ...(job.matchedSkills || []),
   ].join(' ').toLowerCase().includes(state.filterText);
+}
+
+function isRejectedCompany(job) {
+  const co = (job.company || '').toLowerCase().trim();
+  return state.rejectedCompanies.has(co);
 }
 
 function normalizeTitle(title) {
@@ -798,11 +901,11 @@ function renderList(container, jobs) {
 
 function renderCompanyGroup(company, jobs) {
   const section = document.createElement('div');
-  section.className = 'co-section';
+  section.className = 'co-section co-open';
 
   const hdr = document.createElement('div');
   hdr.className = 'co-hdr';
-  hdr.innerHTML = `<span class="co-name">${tesc(company)}</span><span class="co-line"></span><span class="co-count">${jobs.length}</span>`;
+  hdr.innerHTML = `<span class="co-name">${tesc(company)}</span><span class="co-line"></span><span class="co-count">${jobs.length} job${jobs.length > 1 ? 's' : ''}</span>`;
   section.append(hdr);
 
   const rows = document.createElement('div');
@@ -824,126 +927,170 @@ function scoreTier(s) {
 function renderJob(job, defaultExpanded = false, inGroup = false) {
   const scoreVal = Number(job.score) || 0;
   const tier = scoreTier(scoreVal);
+  const isRejCo = isRejectedCompany(job);
 
-  const row = document.createElement('div');
-  row.className = `jr${defaultExpanded ? ' jr-open' : ''}`;
-  row.dataset.tier = tier;
-  if (job.id) row.dataset.jobId = job.id;
+  const card = document.createElement('div');
+  card.className = `jcard${isRejCo ? ' jcard--rejected' : ''}`;
+  card.dataset.tier = tier;
+  if (job.id) card.dataset.jobId = job.id;
 
-  // Left score badge
-  const scoreBadge = document.createElement('span');
-  scoreBadge.className = 'jr-score';
-  scoreBadge.textContent = scoreVal || '–';
+  // ── Header: company label (if not in group) + score pill ──────────────
+  const hdr = document.createElement('div');
+  hdr.className = 'jcard-hdr';
+  if (!inGroup && job.company) {
+    const coEl = document.createElement('span');
+    coEl.className = 'jcard-co';
+    coEl.textContent = cleanText(job.company);
+    hdr.append(coEl);
+  }
+  const scorePill = document.createElement('span');
+  scorePill.className = `jcard-score jcard-score--${tier}`;
+  scorePill.textContent = scoreVal || '–';
+  hdr.append(scorePill);
+  card.append(hdr);
 
-  // Body (title + meta chips)
-  const body = document.createElement('div');
-  body.className = 'jr-body';
+  // ── Job title ──────────────────────────────────────────────────────────
+  const titleEl = document.createElement('div');
+  titleEl.className = 'jcard-title';
+  titleEl.textContent = cleanText(job.title) || 'Untitled';
+  titleEl.title = job.title || '';
+  card.append(titleEl);
 
-  const title = document.createElement('span');
-  title.className = 'jr-title';
-  title.textContent = cleanText(job.title) || 'Untitled';
-
+  // ── Meta: location · experience · remote ──────────────────────────────
   const rawLoc = job.locationLabel || job.location || '';
   const cleanLoc = cleanLocation(rawLoc);
   const metaParts = [];
-  if (!inGroup && job.company) metaParts.push(`<span class="jr-co">${tesc(cleanText(job.company))}</span>`);
-  if (cleanLoc) metaParts.push(`<span class="jr-loc">${tesc(cleanLoc)}</span>`);
-  if (job.yearsRequired) metaParts.push(`<span class="jr-exp">${tesc(cleanText(job.yearsRequired))}</span>`);
-
-  const meta = document.createElement('div');
-  meta.className = 'jr-meta';
-  meta.innerHTML = metaParts.join('<span class="jr-dot">·</span>');
-  body.append(title, meta);
-
-  // Signal chips (skills + reasons)
-  const chips = document.createElement('div');
-  chips.className = 'jr-chips';
-  let chipCount = 0;
-  for (const skill of (job.matchedSkills || []).slice(0, 3)) {
-    const c = document.createElement('span');
-    c.className = 'jchip jchip-skill';
-    c.textContent = skill;
-    chips.append(c); chipCount++;
+  if (cleanLoc) metaParts.push(cleanLoc);
+  if (job.yearsRequired) metaParts.push(cleanText(job.yearsRequired));
+  if (job.remoteStatus === 'open' || job.remoteStatus === 'required') metaParts.push('Remote ok');
+  if (metaParts.length) {
+    const meta = document.createElement('div');
+    meta.className = 'jcard-meta';
+    meta.textContent = metaParts.join(' · ');
+    card.append(meta);
   }
-  for (const reason of (job.reasons || [])) {
-    if (chipCount >= 4) break;
-    const label = formatReason(reason);
-    if (!label) continue;
-    const c = document.createElement('span');
-    c.className = 'jchip';
-    c.textContent = label;
-    chips.append(c); chipCount++;
+
+  // ── Skills chips ──────────────────────────────────────────────────────
+  const allSkills = job.matchedSkills || [];
+  if (allSkills.length) {
+    const skillsEl = document.createElement('div');
+    skillsEl.className = 'jcard-skills';
+    allSkills.slice(0, 5).forEach((s) => {
+      const c = document.createElement('span');
+      c.className = 'jskill';
+      c.textContent = s;
+      skillsEl.append(c);
+    });
+    if (allSkills.length > 5) {
+      const more = document.createElement('span');
+      more.className = 'jskill jskill--more';
+      more.textContent = `+${allSkills.length - 5}`;
+      skillsEl.append(more);
+    }
+    card.append(skillsEl);
   }
-  // Liveness badge (hidden placeholder)
+
+  // ── Signal chips: reasons + rejected warning ───────────────────────────
+  const signals = [];
+  for (const r of (job.reasons || []).slice(0, 3)) {
+    const label = formatReason(r);
+    if (label) signals.push({ text: label, cls: 'jreason' });
+  }
+  if (isRejCo) signals.push({ text: '⛔ Previously rejected', cls: 'jreason jreason--rejected' });
+  if (signals.length) {
+    const sigRow = document.createElement('div');
+    sigRow.className = 'jcard-signals';
+    signals.forEach((s) => {
+      const c = document.createElement('span');
+      c.className = s.cls;
+      c.textContent = s.text;
+      sigRow.append(c);
+    });
+    card.append(sigRow);
+  }
+
+  // ── Footer: liveness + action buttons ─────────────────────────────────
+  const footer = document.createElement('div');
+  footer.className = 'jcard-footer';
+
+  // Liveness badge
   if (job.type !== 'searchLead' && job.url && job.id) {
     const lv = document.createElement('span');
     lv.className = `liveness-badge liveness-${state.liveness[job.id] || 'unknown'}`;
     lv.dataset.jobId = job.id;
     const st = state.liveness[job.id];
-    if (st === 'live' || st === 'dead') { lv.textContent = st === 'live' ? '● live' : '○ closed'; lv.hidden = false; }
-    else { lv.hidden = true; }
-    chips.append(lv);
+    if (st === 'live') { lv.textContent = '● live'; lv.hidden = false; }
+    else if (st === 'dead') { lv.textContent = '○ closed'; lv.hidden = false; }
+    else lv.hidden = true;
+    footer.append(lv);
   }
 
-  // Actions (shown on hover)
-  const actions = document.createElement('div');
-  actions.className = 'jr-actions';
-  if (job.type === 'searchLead') {
-    if (job.url) {
-      const a = document.createElement('a');
-      a.href = job.url; a.target = '_blank'; a.rel = 'noopener'; a.className = 'jr-link'; a.textContent = '↗';
-      actions.append(a);
-    }
-  } else {
-    if (job.url) {
-      const a = document.createElement('a');
-      a.href = job.url; a.target = '_blank'; a.rel = 'noopener'; a.className = 'jr-link'; a.textContent = '↗';
-      actions.append(a);
-    }
-    const evalBtn = document.createElement('button');
-    evalBtn.type = 'button'; evalBtn.className = 'jr-eval'; evalBtn.textContent = 'Eval';
-    evalBtn.addEventListener('click', () => queueEval(job));
-    actions.append(evalBtn);
+  const actionsEl = document.createElement('div');
+  actionsEl.className = 'jcard-actions';
+
+  if (job.url) {
+    const a = document.createElement('a');
+    a.href = job.url; a.target = '_blank'; a.rel = 'noopener';
+    a.className = 'jcard-btn jcard-btn--apply';
+    a.textContent = 'Apply ↗';
+    actionsEl.append(a);
   }
-
-  // Expand toggle
-  const expandBtn = document.createElement('button');
-  expandBtn.type = 'button'; expandBtn.className = 'jr-expand'; expandBtn.textContent = '…';
-  expandBtn.setAttribute('aria-label', 'Details');
-  actions.append(expandBtn);
-
-  row.append(scoreBadge, body, chips, actions);
-
-  // Expanded detail panel
-  const detail = document.createElement('div');
-  detail.className = 'jr-detail';
-  const grid = document.createElement('dl');
-  grid.className = 'job-fields';
-  if (!inGroup) addField(grid, 'Organization', cleanText(job.company));
-  addField(grid, 'Job site', cleanText(job.source));
-  addField(grid, 'Location', cleanLocation(job.locationLabel || job.location));
-  addField(grid, 'Experience', cleanText(job.yearsRequired));
-  addField(grid, 'Matched skills', (job.matchedSkills || []).map(cleanText).join(', '));
-  addField(grid, 'Supporting skills', (job.supportingSkills || []).map(cleanText).join(', '));
-  addField(grid, 'Skill gaps', (job.recommendedSkillGaps || []).map(cleanText).join(', '));
-  addField(grid, 'Eligibility', cleanText(job.eligibility?.label || job.remoteStatus));
-  addField(grid, 'Compensation', cleanText(job.compensation?.label || job.salaryBand));
-
-  const detailActions = document.createElement('div');
-  detailActions.className = 'job-actions';
   if (job.type !== 'searchLead') {
-    detailActions.append(
+    const evalBtn = document.createElement('button');
+    evalBtn.type = 'button'; evalBtn.className = 'jcard-btn';
+    evalBtn.textContent = 'Eval';
+    evalBtn.addEventListener('click', (e) => { e.stopPropagation(); queueEval(job); });
+    actionsEl.append(evalBtn);
+  }
+
+  const expandBtn = document.createElement('button');
+  expandBtn.type = 'button';
+  expandBtn.className = 'jcard-btn jcard-expand-btn';
+  expandBtn.setAttribute('aria-expanded', defaultExpanded ? 'true' : 'false');
+  expandBtn.innerHTML = 'Details <span class="expand-arrow">▼</span>';
+  actionsEl.append(expandBtn);
+  footer.append(actionsEl);
+  card.append(footer);
+
+  // ── Detail panel (hidden by default) ──────────────────────────────────
+  const detail = document.createElement('div');
+  detail.className = 'jcard-detail';
+  detail.hidden = !defaultExpanded;
+
+  const fg = document.createElement('dl');
+  fg.className = 'job-fields';
+  if (!inGroup) addField(fg, 'Organization', cleanText(job.company));
+  addField(fg, 'Job site', cleanText(job.source));
+  addField(fg, 'Location', cleanLocation(job.locationLabel || job.location));
+  addField(fg, 'Experience', cleanText(job.yearsRequired));
+  addField(fg, 'Matched skills', (job.matchedSkills || []).map(cleanText).join(', '));
+  addField(fg, 'Supporting skills', (job.supportingSkills || []).map(cleanText).join(', '));
+  addField(fg, 'Skill gaps', (job.recommendedSkillGaps || []).map(cleanText).join(', '));
+  addField(fg, 'Eligibility', cleanText(job.eligibility?.label || job.remoteStatus));
+  addField(fg, 'Compensation', cleanText(job.compensation?.label || job.salaryBand));
+  detail.append(fg);
+
+  const detailActs = document.createElement('div');
+  detailActs.className = 'job-actions';
+  if (job.type !== 'searchLead') {
+    detailActs.append(
       actionButton('Tailor resume', () => tailorResume(job), 'secondary'),
       actionButton('Fill with AI', () => fillWithAi(job), 'secondary'),
     );
-    if (job.url) detailActions.append(actionButton('Open job ↗', () => window.open(job.url, '_blank', 'noopener'), 'primary'));
+    if (job.url) detailActs.append(actionButton('Open job ↗', () => window.open(job.url, '_blank', 'noopener'), 'primary'));
   }
-  detail.append(grid, detailActions);
-  row.append(detail);
+  detail.append(detailActs);
+  card.append(detail);
 
-  expandBtn.addEventListener('click', () => row.classList.toggle('jr-open'));
+  expandBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const opening = detail.hidden;
+    detail.hidden = !opening;
+    expandBtn.setAttribute('aria-expanded', String(opening));
+    expandBtn.querySelector('.expand-arrow').textContent = opening ? '▲' : '▼';
+  });
 
-  return row;
+  return card;
 }
 
 async function startLivenessCheck(jobs) {
@@ -1208,6 +1355,7 @@ document.getElementById('livenessBannerDismiss').addEventListener('click', () =>
 });
 document.getElementById('healthBtn').addEventListener('click', runHealth);
 document.getElementById('sc-filter').addEventListener('change', renderScanRows);
+document.getElementById('sc-search')?.addEventListener('input', renderScanRows);
 
 // Event delegation for dynamically rendered inbox unqueue buttons
 document.getElementById('inbox').addEventListener('click', (e) => {
@@ -1373,11 +1521,13 @@ function tmd(text) {
 }
 
 // ── Tracker tab ───────────────────────────────────────────────────────────────
+let _trackerStatusFilter = null;
+
 function renderTracker() {
   if (!trackerData) return;
   const { apps, pipeline, reports, states } = trackerData;
 
-  // Pipeline funnel
+  // ── Stage counts ─────────────────────────────────────────────────
   const funnelStages = ['Applied', 'Screening', 'Interview', 'Offer', 'Rejected', 'Withdrawn'];
   const counts = {};
   for (const st of funnelStages) counts[st] = 0;
@@ -1385,46 +1535,49 @@ function renderTracker() {
     const s = (a.status || '').trim();
     if (counts[s] !== undefined) counts[s]++;
     else {
-      const match = funnelStages.find(f => s.toLowerCase().includes(f.toLowerCase()));
+      const match = funnelStages.find((f) => s.toLowerCase().includes(f.toLowerCase()));
       if (match) counts[match]++;
     }
   }
-  const funnelColors = { Applied: 'var(--accent)', Screening: '#8b5cf6', Interview: '#2563eb', Offer: 'var(--good)', Rejected: 'var(--bad)', Withdrawn: 'var(--muted)' };
+  const total = apps.length || 1;
+
+  const stageSlug = { Applied: 'applied', Screening: 'screening', Interview: 'interview', Offer: 'offer', Rejected: 'rejected', Withdrawn: 'withdrawn' };
+
+  // ── Visual pipeline bar (clickable stages) ────────────────────────
   const funnelEl = document.getElementById('tracker-funnel');
   if (funnelEl) {
-    funnelEl.innerHTML = funnelStages.map(st => `
-      <div class="funnel-stage">
-        <span class="funnel-num" style="color:${funnelColors[st]}">${counts[st]}</span>
-        <span class="funnel-lbl">${st}</span>
-      </div>`).join('<span class="funnel-arrow">›</span>');
+    funnelEl.className = 'tracker-pipeline';
+    funnelEl.innerHTML = funnelStages.map((st) => {
+      const pct = Math.round((counts[st] / total) * 100);
+      return `<div class="pipeline-stage ps-${stageSlug[st]}" data-stage="${tesc(st)}" title="Show only ${st}">
+        <span class="ps-num">${counts[st]}</span>
+        <span class="ps-lbl">${st}</span>
+        <div class="ps-bar"><div class="ps-bar-fill" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join('');
+    funnelEl.querySelectorAll('.pipeline-stage').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const isActive = btn.classList.contains('ps-active');
+        funnelEl.querySelectorAll('.pipeline-stage').forEach((b) => b.classList.remove('ps-active'));
+        _trackerStatusFilter = isActive ? null : btn.dataset.stage;
+        if (!isActive) btn.classList.add('ps-active');
+        renderAppsCards(apps, states, _trackerStatusFilter);
+      });
+    });
   }
 
-  document.querySelector('#apps-table tbody').innerHTML = apps.map((a) => {
-    const statusSlug = (a.status || '').replace(/\s+/g, '-');
-    const opts = states.map((st) => `<option${st === a.status ? ' selected' : ''}>${tesc(st)}</option>`).join('');
-    const rep = a.report && a.report !== '—'
-      ? a.report.replace(/\[([^\]]+)\]\(([^)]+)\)/, `<a href="#" onclick="openReport('${tattr((a.report.match(/\(([^)]+)\)/) || [])[1] || '')}');return false">$1</a>`)
-      : '—';
-    const notesRaw = a.notes || '';
-    const notesShort = notesRaw.length > 60 ? notesRaw.slice(0, 58) + '…' : notesRaw;
-    return `<tr class="apps-table-row">
-      <td><strong>${tesc(a.company)}</strong></td>
-      <td><div class="t-role-cell" title="${tattr(a.role)}">${tesc(a.role)}</div></td>
-      <td class="t-muted">${new Date(a.date + 'T00:00').toLocaleDateString('en-US', {month:'short',day:'numeric'})}</td>
-      <td>${tesc(a.score)}</td>
-      <td>
-        <select class="t-select-sm t-select-status t-b-${tesc(statusSlug)}" onchange="setStatus(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${opts}</select>
-      </td>
-      <td><span class="t-report-link">${rep}</span></td>
-      <td class="t-muted t-notes-cell"><span class="t-editnote" title="${tattr(notesRaw)}" onclick="editNote(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${tesc(notesShort)}</span></td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="7" class="t-muted">No applications yet.</td></tr>';
+  // ── Updated stamp ─────────────────────────────────────────────────
+  const upd = document.getElementById('tracker-updated');
+  if (upd) upd.textContent = 'Updated just now';
 
+  // ── Application cards ─────────────────────────────────────────────
+  renderAppsCards(apps, states, _trackerStatusFilter);
+
+  // ── Pending Offers Inbox ──────────────────────────────────────────
   function truncateUrl(url, max = 55) {
     if (!url || url.length <= max) return url;
     return url.slice(0, max) + '…';
   }
-
   document.getElementById('apps-pipeline').innerHTML = pipeline.length
     ? pipeline.map((p) => `<div class="pipeline-card${p.done ? ' pipeline-card-done' : ''}">
         <input type="checkbox" ${p.done ? 'checked' : ''} onchange="togglePipe(this)" data-u="${tattr(p.url)}" class="pipeline-checkbox">
@@ -1442,6 +1595,62 @@ function renderTracker() {
   document.getElementById('apps-reports').innerHTML = reports.length
     ? reports.map((r) => `<span class="t-pill" style="cursor:pointer" onclick="openReport('${tattr(r)}')">${tesc(r)}</span>`).join('')
     : '<p class="t-muted">No reports yet.</p>';
+}
+
+function renderAppsCards(apps, states, statusFilter) {
+  const filtered = statusFilter
+    ? apps.filter((a) => (a.status || '').trim() === statusFilter || (a.status || '').toLowerCase().includes(statusFilter.toLowerCase()))
+    : apps;
+
+  const listEl = document.getElementById('apps-list');
+  if (!listEl) return;
+
+  if (!filtered.length) {
+    listEl.innerHTML = `<p class="t-muted" style="padding:16px 0">No applications match this filter. <button class="jcard-btn" onclick="document.querySelectorAll('.pipeline-stage').forEach(b=>b.classList.remove('ps-active')); renderAppsCards(window._trackerApps, window._trackerStates, null);" style="margin-left:8px">Clear filter</button></p>`;
+    return;
+  }
+
+  listEl.innerHTML = filtered.map((a) => {
+    const statusSlug = (a.status || 'unknown').toLowerCase().replace(/\s+/g, '-');
+    const opts = states.map((st) => `<option${st === a.status ? ' selected' : ''}>${tesc(st)}</option>`).join('');
+    const date = new Date((a.date || '2024-01-01') + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const notesRaw = a.notes || '';
+    const notesPreview = notesRaw.slice(0, 150);
+    const repUrl = (a.report || '').match(/\(([^)]+)\)/)?.[1] || '';
+    const repLabel = (a.report || '').match(/\[([^\]]+)\]/)?.[1] || '';
+    const hasReport = repUrl && a.report !== '—';
+    const scoreHtml = a.score && a.score !== 'N/A'
+      ? `<span class="acard-score-badge">${tesc(a.score)}</span>` : '';
+    const repHtml = hasReport
+      ? `<a href="#" class="acard-report-btn" onclick="openReport('${tattr(repUrl)}');return false">${tesc(repLabel || 'Report')} ↗</a>` : '';
+    const hasBottom = notesRaw || hasReport;
+    return `<div class="acard" data-status="${tattr(a.status)}">
+        <div class="acard-accent"></div>
+        <div class="acard-main">
+          <div class="acard-top">
+            <div class="acard-identity">
+              <span class="acard-company">${tesc(a.company)}</span>
+              <span class="acard-role">${tesc(a.role)}</span>
+            </div>
+            <div class="acard-controls">
+              <span class="acard-date">${date}</span>
+              ${scoreHtml}
+              <select class="acard-status-select status-${tesc(statusSlug)}" onchange="setStatus(this)" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}">${opts}</select>
+            </div>
+          </div>
+          ${hasBottom ? `<div class="acard-bottom">
+            <div class="acard-notes${notesRaw ? '' : ' acard-notes-empty'}" onclick="showNote(this)" data-notes="${tattr(notesRaw)}" data-c="${tattr(a.company)}" data-r="${tattr(a.role)}" title="${notesRaw ? 'Click to view/edit notes' : 'Click to add notes'}">
+              ${notesRaw ? tesc(notesPreview) + (notesRaw.length > 150 ? '<span class="acard-notes-expand"> ↗ more</span>' : '') : '+ Add notes'}
+            </div>
+            ${repHtml}
+          </div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Store refs for clear-filter button
+  window._trackerApps = apps;
+  window._trackerStates = states;
 }
 
 window.clearCompletedInbox = async function clearCompletedInbox() {
@@ -1469,6 +1678,54 @@ async function setStatus(el) {
   trackerData = null; await loadTrackerData();
 }
 
+async function showNote(cell) {
+  const company = cell.dataset.c;
+  const role = cell.dataset.r;
+  const notes = cell.dataset.notes || '';
+
+  // Create/reuse a note popover
+  let popover = document.getElementById('notes-popover');
+  if (!popover) {
+    popover = document.createElement('div');
+    popover.id = 'notes-popover';
+    popover.className = 'notes-popover';
+    popover.innerHTML = `
+      <div class="np-header">
+        <div class="np-title"></div>
+        <div class="np-actions">
+          <button class="jcard-btn np-edit-btn">Edit</button>
+          <button class="jcard-btn np-close-btn">✕</button>
+        </div>
+      </div>
+      <div class="np-body"></div>`;
+    document.body.append(popover);
+    popover.querySelector('.np-close-btn').addEventListener('click', () => { popover.hidden = true; });
+    popover.querySelector('.np-edit-btn').addEventListener('click', async () => {
+      const v = prompt(`Notes for ${popover._company}:`, popover._notes);
+      if (v === null || v === popover._notes) return;
+      try {
+        await request('/api/notes', { method: 'POST', body: JSON.stringify({ company: popover._company, role: popover._role, notes: v }) });
+        ttoast('Note saved');
+      } catch (e) { ttoast('Error: ' + e.message); }
+      popover.hidden = true;
+      trackerData = null; await loadTrackerData();
+    });
+  }
+
+  popover._company = company;
+  popover._role = role;
+  popover._notes = notes;
+  popover.querySelector('.np-title').textContent = `${company} — ${role}`;
+  popover.querySelector('.np-body').textContent = notes || '(no notes yet)';
+
+  // Position near the clicked cell
+  const rect = cell.getBoundingClientRect();
+  const top = Math.min(rect.bottom + 6 + window.scrollY, document.documentElement.scrollHeight - 180);
+  popover.style.top = top + 'px';
+  popover.style.left = Math.max(8, rect.left + window.scrollX - 60) + 'px';
+  popover.hidden = false;
+}
+
 async function editNote(el) {
   const cur = el.textContent;
   const v = prompt(`Notes for ${el.dataset.c}:`, cur);
@@ -1494,14 +1751,28 @@ function renderCoach() {
     return;
   }
   const co = trackerData.coach;
-  document.getElementById('co-stories').innerHTML = co.stories.map((st) => {
+  const storiesEl = document.getElementById('co-stories');
+  storiesEl.innerHTML = co.stories.map((st) => {
     const det = co.details[st.id];
     const retired = /RETIRED/.test(st.strength + st.title);
-    return `<details${retired ? ' style="opacity:.5"' : ''}>
-      <summary><span><code class="t-code-id">${tesc(st.id)}</code> ${tesc(st.title)}</span><strong class="t-strength">${tesc(st.strength)}</strong></summary>
-      <div class="t-detail"><p class="t-muted">${tesc(st.skill)} · ${tesc(st.skill2)}</p>${det ? tmd(det.body) : '<em>no details</em>'}</div>
-    </details>`;
+    return `<div class="story-card${retired ? ' story-retired' : ''}" data-story-id="${tesc(st.id)}">
+      <div class="story-card-hdr">
+        <span class="story-id">${tesc(st.id)}</span>
+        <span class="story-title">${tesc(st.title)}</span>
+        <span class="story-strength">${tesc(st.strength)}</span>
+        <span class="story-chevron">▸</span>
+      </div>
+      <div class="story-card-body">
+        <div class="story-skills">${tesc(st.skill)}${st.skill2 ? ' · ' + tesc(st.skill2) : ''}</div>
+        ${det ? tmd(det.body) : '<em class="t-muted">No details yet.</em>'}
+      </div>
+    </div>`;
   }).join('') || '<p class="t-muted">No stories yet.</p>';
+
+  storiesEl.addEventListener('click', (e) => {
+    const hdr = e.target.closest('.story-card-hdr');
+    if (hdr) hdr.closest('.story-card').classList.toggle('open');
+  });
 
   document.getElementById('co-stage').textContent = `(stage ${co.drillStage} · gates: ${co.gatesPassed})`;
   document.getElementById('co-drills').innerHTML = (co.drillQueue || '').split(';').filter(Boolean).map((x) => `<span class="t-pill">${tesc(x.trim())}</span>`).join('');
@@ -1672,7 +1943,17 @@ function renderScanner() {
 
 function renderScanRows() {
   const f = document.getElementById('sc-filter').value;
-  const rows = scanRows.filter((r) => !f || r.status === f).slice(0, 80);
+  const q = (document.getElementById('sc-search')?.value || '').toLowerCase().trim();
+  const filtered = scanRows.filter((r) => {
+    if (f && r.status !== f) return false;
+    if (q && !`${r.company || ''} ${r.title || ''} ${r.portal || ''} ${r.location || ''}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const rows = filtered.slice(0, q || f ? 300 : 80);
+  const countEl = document.getElementById('sc-result-count');
+  if (countEl) {
+    countEl.textContent = (q || f) ? `Showing ${rows.length} of ${filtered.length} matching rows` : `Showing ${rows.length} of ${scanRows.length} total`;
+  }
   document.querySelector('#sc-table tbody').innerHTML = rows.map((r) => {
     const good = r.status === 'added'; const bad = /expired|no_apply|blocked|invalid/.test(r.status);
     return `<tr>
@@ -1751,8 +2032,34 @@ async function runHealth() {
 // Every function referenced from innerHTML onclick= attributes must be on window.
 window.setStatus    = setStatus;
 window.editNote     = editNote;
+window.showNote     = showNote;
 window.togglePipe   = togglePipe;
 window.openReport   = openReport;
 window.composeCopy  = composeCopy;
 window.composeQueue = composeQueue;
 window.unqueue      = unqueue;
+
+// ── Dark mode toggle ──────────────────────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem('co-theme');
+  if (saved === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  const btn = document.getElementById('themeToggleBtn');
+  if (!btn) return;
+  function syncBtn() {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    btn.textContent = dark ? '☀️' : '🌙';
+    btn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  }
+  syncBtn();
+  btn.addEventListener('click', () => {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (dark) {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('co-theme', 'light');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      localStorage.setItem('co-theme', 'dark');
+    }
+    syncBtn();
+  });
+})();
