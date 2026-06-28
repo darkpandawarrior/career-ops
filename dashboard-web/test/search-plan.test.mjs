@@ -17,6 +17,35 @@ test('validates and normalizes a reviewed profile', () => {
   assert.equal(result.valid, true);
   assert.equal(Math.round(Object.values(result.config.weights).reduce((sum, value) => sum + value, 0)), 100);
   assert.deepEqual(result.config.skills.learning, ['Kubernetes']);
+  assert.deepEqual(result.config.interested_roles, [
+    ...config.titles.strong,
+    ...config.titles.adjacent,
+  ]);
+  assert.ok(result.config.skills.all.includes('Kubernetes'));
+});
+
+test('normalizes unified profile fields and migrates legacy role and skill buckets', () => {
+  const unified = validateJobSearchConfig({
+    interested_roles: ['Registered Nurse', 'Clinical Research Coordinator'],
+    skills: { all: ['Patient Care', 'Clinical Documentation'] },
+    location: { home_country: 'India', search_scopes: ['local'] },
+  });
+  assert.equal(unified.valid, true);
+  assert.deepEqual(unified.config.titles.interested, ['Registered Nurse', 'Clinical Research Coordinator']);
+  assert.deepEqual(unified.config.titles.strong, unified.config.interested_roles);
+  assert.deepEqual(unified.config.skills.all, ['Patient Care', 'Clinical Documentation']);
+  assert.deepEqual(unified.config.skills.confirmed_unlisted, unified.config.skills.all);
+
+  const legacy = validateJobSearchConfig({
+    titles: { strong: ['Accountant'], adjacent: ['Auditor'] },
+    skills: {
+      demonstrated: ['Financial Reporting'], supporting: ['Tax'], learning: ['SAP'], excluded: ['COBOL'],
+    },
+    location: { home_country: 'India', search_scopes: ['local'] },
+  });
+  assert.deepEqual(legacy.config.interested_roles, ['Accountant', 'Auditor']);
+  assert.deepEqual(legacy.config.skills.all, ['Financial Reporting', 'Tax', 'SAP']);
+  assert.deepEqual(legacy.config.skills.demonstrated, ['Financial Reporting']);
 });
 
 test('builds discovery queries only from skills, experience stage, and location', () => {

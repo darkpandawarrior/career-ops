@@ -18,18 +18,42 @@ const SKILL_KEYS = [
 export function normalizeJobSearchConfig(input = {}) {
   const source = input && typeof input === 'object' ? input : {};
   const legacyCore = cleanStrings(source.skills?.core);
+  const unifiedSkills = cleanStrings(source.skills?.all);
   const skills = Object.fromEntries(
     SKILL_KEYS.map((key) => [key, cleanStrings(source.skills?.[key])]),
   );
   skills.demonstrated = unique([...skills.demonstrated, ...legacyCore]);
+  const classifiedSkills = unique(SKILL_KEYS.flatMap((key) => skills[key]));
+  skills.confirmed_unlisted = unique([
+    ...skills.confirmed_unlisted,
+    ...unifiedSkills.filter((skill) => !includesIgnoreCase(classifiedSkills, skill)),
+  ]);
+  skills.all = unique([
+    ...unifiedSkills,
+    ...skills.demonstrated,
+    ...skills.confirmed_unlisted,
+    ...skills.supporting,
+    ...skills.learning,
+  ].filter((skill) => !includesIgnoreCase(skills.excluded, skill)));
+
+  const legacyStrong = cleanStrings(source.titles?.strong);
+  const legacyAdjacent = cleanStrings(source.titles?.adjacent);
+  const interestedRoles = unique([
+    ...cleanStrings(source.interested_roles),
+    ...cleanStrings(source.titles?.interested),
+    ...legacyStrong,
+    ...legacyAdjacent,
+  ]);
 
   const weights = normalizeWeights(source.weights);
   return {
     titles: {
-      strong: cleanStrings(source.titles?.strong),
-      adjacent: cleanStrings(source.titles?.adjacent),
+      interested: interestedRoles,
+      strong: legacyStrong.length ? legacyStrong : interestedRoles,
+      adjacent: legacyAdjacent,
       exclude: cleanStrings(source.titles?.exclude),
     },
+    interested_roles: interestedRoles,
     skills,
     seniority: {
       minimum_years: finiteOrNull(source.seniority?.minimum_years),
@@ -72,8 +96,8 @@ export function validateJobSearchConfig(input) {
   const config = normalizeJobSearchConfig(input);
   const errors = [];
   const warnings = [];
-  if (config.skills.demonstrated.length === 0 && config.skills.confirmed_unlisted.length === 0) {
-    errors.push('skills must contain at least one demonstrated or confirmed_unlisted skill');
+  if (config.skills.all.length === 0) {
+    errors.push('skills must contain at least one skill');
   }
   if (!config.location.home_country) warnings.push('location.home_country is empty');
   if (config.location.search_scopes.length === 0) {
@@ -150,4 +174,9 @@ function unique(values) {
     seen.add(key);
     return true;
   });
+}
+
+function includesIgnoreCase(values, candidate) {
+  const key = String(candidate).toLowerCase();
+  return values.some((value) => String(value).toLowerCase() === key);
 }
