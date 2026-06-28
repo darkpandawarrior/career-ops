@@ -40,6 +40,7 @@ const ids = [
   'totalCount', 'excellentCount', 'sourceCount',
   'searchInput', 'scoreFilter', 'statusLine', 'recommendedCount', 'reviewCount',
   'sourceSectionCount', 'recommendedJobs', 'reviewJobs', 'sourceJobs',
+  'discoveryTelemetry', 'telemetrySummary', 'telemetryMeta', 'telemetrySources',
   'actionDialog', 'dialogTitle', 'dialogBody',
   'refreshPanel', 'refreshPhaseName', 'refreshElapsed',
 ];
@@ -748,6 +749,47 @@ function renderSummary(payload) {
   els.totalCount.textContent = payload.stats?.total || 0;
   els.excellentCount.textContent = payload.stats?.excellent || 0;
   els.sourceCount.textContent = payload.stats?.sources || 0;
+  renderTelemetry(payload.telemetry);
+}
+
+function renderTelemetry(telemetry) {
+  const sources = telemetry?.sources || [];
+  els.discoveryTelemetry.hidden = sources.length === 0;
+  if (sources.length === 0) return;
+  const succeeded = sources.filter((source) => source.status === 'success').length;
+  const failed = sources.filter((source) => ['failed', 'partial'].includes(source.status)).length;
+  els.telemetrySummary.textContent = `${succeeded} healthy${failed ? ` · ${failed} with issues` : ''}`;
+  const refreshed = telemetry.lastRefresh ? new Date(telemetry.lastRefresh) : null;
+  els.telemetryMeta.textContent = [
+    refreshed && !Number.isNaN(refreshed.getTime()) ? `Last refresh ${refreshed.toLocaleString()}` : '',
+    Number.isFinite(telemetry.durationMs) ? `${formatDuration(telemetry.durationMs)}` : '',
+  ].filter(Boolean).join(' · ');
+  els.telemetrySources.textContent = '';
+  sources.forEach((source) => {
+    const row = document.createElement('div');
+    row.className = `telemetry-source telemetry-source--${source.status}`;
+    const name = document.createElement('strong');
+    name.textContent = source.label;
+    const counts = document.createElement('span');
+    counts.textContent = `${source.jobs || 0} jobs · ${source.leads || 0} leads`;
+    const status = document.createElement('span');
+    status.className = 'telemetry-status';
+    status.textContent = source.status === 'partial'
+      ? `${source.failures || 0} failures`
+      : source.status;
+    const duration = document.createElement('span');
+    duration.textContent = source.status === 'skipped'
+      ? 'Not selected'
+      : `${source.freshness || 'fresh'} · ${formatDuration(source.durationMs || 0)}`;
+    row.append(name, counts, status, duration);
+    els.telemetrySources.append(row);
+  });
+}
+
+function formatDuration(milliseconds) {
+  if (milliseconds < 1000) return `${Math.max(0, Math.round(milliseconds))} ms`;
+  const seconds = Math.round(milliseconds / 100) / 10;
+  return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
 }
 
 function renderJobs() {

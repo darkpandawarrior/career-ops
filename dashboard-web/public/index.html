@@ -342,6 +342,15 @@
 
           <section class="statusline" id="statusLine">Loading dashboard...</section>
 
+          <details id="discoveryTelemetry" class="discovery-telemetry" hidden>
+            <summary>
+              <span>Discovery source health</span>
+              <span id="telemetrySummary" class="telemetry-summary"></span>
+            </summary>
+            <div id="telemetryMeta" class="telemetry-meta"></div>
+            <div id="telemetrySources" class="telemetry-sources"></div>
+          </details>
+
           <nav class="job-section-nav" aria-label="Job sections">
             <button class="jsec-tab active" data-sec="recommended">
               High application fit <span class="tab-count" id="recommendedCount">0</span>

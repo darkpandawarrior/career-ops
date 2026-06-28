@@ -2880,6 +2880,43 @@ header.topbar {
   overflow: auto;
 }
 
+.discovery-telemetry {
+  margin: 10px 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.discovery-telemetry summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.telemetry-summary, .telemetry-meta { color: var(--muted); font-weight: 500; }
+.telemetry-meta { padding: 0 14px 9px; font-size: 11px; }
+.telemetry-sources { border-top: 1px solid var(--border); }
+.telemetry-source {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.4fr) repeat(3, minmax(75px, auto));
+  gap: 10px;
+  align-items: center;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.telemetry-source:last-child { border-bottom: 0; }
+.telemetry-source span { color: var(--muted); }
+.telemetry-source--success .telemetry-status { color: #15803d; }
+.telemetry-source--partial .telemetry-status,
+.telemetry-source--failed .telemetry-status { color: #b91c1c; }
+.telemetry-source--skipped { opacity: 0.65; }
+@media (max-width: 700px) {
+  .telemetry-source { grid-template-columns: 1fr 1fr; }
+}
+
 /* Skill chips */
 .jcard-skills { display: flex; flex-wrap: wrap; gap: 4px; }
 .jskill {

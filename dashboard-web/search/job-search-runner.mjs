@@ -40,20 +40,28 @@ export async function refreshJobSearch(root, options = {}) {
   const runWideScan = options.runWideScan || (() => runReverseAtsScan(root, validation.config));
   const plan = buildSearchPlan(validation.config);
   const errors = [];
+  const telemetry = [];
+  const refreshStartedAt = new Date().toISOString();
+  let started = Date.now();
   const scan = await runScan();
   if (scan.code !== 0) errors.push(`career-ops scan: ${scan.stderr || `exit ${scan.code}`}`);
+  telemetry.push(commandTelemetry('career-ops-scan', 'Career-ops portal scan', scan, started));
+  started = Date.now();
   const wideScan = await runWideScan();
   if (wideScan.code !== 0) errors.push(`career-ops reverse ATS scan: ${wideScan.stderr || `exit ${wideScan.code}`}`);
+  telemetry.push(commandTelemetry('reverse-ats', 'Reverse ATS discovery', wideScan, started));
 
-  const batches = await Promise.all([
-    readPipelineJobs(root),
-    readScanHistoryJobs(root),
-    fetchTrackedCompanyFeeds(portals, fetchImpl, errors),
+  const sources = await Promise.all([
+    measureSource('pipeline', 'Saved pipeline', 'local', () => readPipelineJobs(root), errors),
+    measureSource('scan-history', 'Scan history', 'local', () => readScanHistoryJobs(root), errors),
+    measureSource('tracked-companies', 'Tracked company feeds', 'provider', () => fetchTrackedCompanyFeeds(portals, fetchImpl, errors), errors),
     validation.config.location.search_scopes.includes('remote')
-      ? fetchRemoteFeeds(fetchImpl, errors)
-      : Promise.resolve([]),
-    searchConfiguredQueries(plan.queries, fetchImpl, errors),
+      ? measureSource('remote-feeds', 'Remote job feeds', 'provider', () => fetchRemoteFeeds(fetchImpl, errors), errors)
+      : Promise.resolve(skippedSource('remote-feeds', 'Remote job feeds', 'provider')),
+    measureSource('generated-search', 'Generated web discovery', 'search', () => searchConfiguredQueries(plan.queries, fetchImpl, errors), errors),
   ]);
+  telemetry.push(...sources.map((source) => source.telemetry));
+  const batches = sources.map((source) => source.results);
   const byId = new Map();
   for (const raw of batches.flat()) {
     if (!raw?.url || !raw?.title) continue;
@@ -69,10 +77,11 @@ export async function refreshJobSearch(root, options = {}) {
   }
   const jobs = [...byId.values()]
     .sort((a, b) => b.score - a.score || a.company.localeCompare(b.company));
+  const generatedAt = new Date().toISOString();
   const payload = {
-    version: 1,
+    version: 2,
     scored: true,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     jobs,
     stats: summarizeJobs(jobs),
     scan: {
@@ -86,6 +95,13 @@ export async function refreshJobSearch(root, options = {}) {
       },
     },
     searchPlan: plan.summary,
+    telemetry: {
+      refreshStartedAt,
+      lastRefresh: generatedAt,
+      durationMs: new Date(generatedAt).getTime() - new Date(refreshStartedAt).getTime(),
+      sources: telemetry,
+      contributors: summarizeContributors(batches.flat()),
+    },
     diagnostics: {
       feedErrors: errors.slice(0, 20),
       note: errors.length
@@ -96,6 +112,81 @@ export async function refreshJobSearch(root, options = {}) {
   await mkdir(path.join(root, 'data'), { recursive: true });
   await writeFile(path.join(root, 'data', 'job-dashboard.json'), JSON.stringify(payload, null, 2), 'utf8');
   return payload;
+}
+
+async function measureSource(id, label, kind, runner, errors) {
+  const startedAt = Date.now();
+  const errorCount = errors.length;
+  try {
+    const results = await runner();
+    const newErrors = errors.length - errorCount;
+    return {
+      results,
+      telemetry: resultTelemetry(id, label, kind, results, startedAt, newErrors),
+    };
+  } catch (error) {
+    errors.push(`${label}: ${error.message}`);
+    return {
+      results: [],
+      telemetry: {
+        id, label, kind, status: 'failed', jobs: 0, leads: 0,
+        failures: 1, durationMs: Date.now() - startedAt,
+        refreshedAt: new Date().toISOString(), freshness: 'fresh',
+      },
+    };
+  }
+}
+
+function resultTelemetry(id, label, kind, results, startedAt, failures) {
+  return {
+    id,
+    label,
+    kind,
+    status: failures > 0 ? 'partial' : 'success',
+    jobs: results.filter((item) => item?.type !== 'searchLead').length,
+    leads: results.filter((item) => item?.type === 'searchLead').length,
+    failures,
+    durationMs: Date.now() - startedAt,
+    refreshedAt: new Date().toISOString(),
+    freshness: 'fresh',
+  };
+}
+
+function skippedSource(id, label, kind) {
+  return {
+    results: [],
+    telemetry: {
+      id, label, kind, status: 'skipped', jobs: 0, leads: 0,
+      failures: 0, durationMs: 0, refreshedAt: null, freshness: 'not-run',
+    },
+  };
+}
+
+function commandTelemetry(id, label, result, startedAt) {
+  return {
+    id,
+    label,
+    kind: 'scanner',
+    status: result.code === 0 ? 'success' : 'failed',
+    jobs: 0,
+    leads: 0,
+    failures: result.code === 0 ? 0 : 1,
+    durationMs: Date.now() - startedAt,
+    refreshedAt: new Date().toISOString(),
+    freshness: 'fresh',
+  };
+}
+
+function summarizeContributors(items) {
+  const sources = new Map();
+  for (const item of items) {
+    const label = item?.source || 'Unknown source';
+    const current = sources.get(label) || { source: label, jobs: 0, leads: 0 };
+    if (item?.type === 'searchLead') current.leads += 1;
+    else current.jobs += 1;
+    sources.set(label, current);
+  }
+  return [...sources.values()].sort((a, b) => b.jobs - a.jobs || b.leads - a.leads || a.source.localeCompare(b.source));
 }
 
 function isRelevantJob(job) {

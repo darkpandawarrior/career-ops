@@ -40,6 +40,34 @@ test('fresh search uses active profile rules, scores results, and persists the c
   const cached = JSON.parse(await readFile(path.join(root, 'data', 'job-dashboard.json'), 'utf8'));
   assert.equal(cached.generatedAt, payload.generatedAt);
   assert.equal(cached.scored, true);
+  assert.equal(payload.telemetry.lastRefresh, payload.generatedAt);
+  assert.ok(payload.telemetry.durationMs >= 0);
+  assert.deepEqual(payload.telemetry.sources.map((source) => source.id), [
+    'career-ops-scan', 'reverse-ats', 'pipeline', 'scan-history',
+    'tracked-companies', 'remote-feeds', 'generated-search',
+  ]);
+  assert.ok(payload.telemetry.sources.some((source) => source.jobs > 0));
+  assert.ok(payload.telemetry.sources.filter((source) => source.status !== 'skipped').every((source) => source.freshness === 'fresh'));
+  assert.ok(payload.telemetry.contributors.some((source) => source.source && source.jobs > 0));
+});
+
+test('source telemetry records failures and skipped scopes without failing refresh', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
+  await mkdir(path.join(root, 'config'), { recursive: true });
+  await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig().replace('preferred_locations: [India, Remote]', 'preferred_locations: [India]').replace('remote_regions: [Worldwide]', 'remote_regions: []').replace('visa_sponsorship_required: false', 'search_scopes: [local]\n  visa_sponsorship_required: false'));
+  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  const payload = await refreshJobSearch(root, {
+    fetchImpl: async () => { throw new Error('source unavailable'); },
+    runScan: async () => ({ code: 1, stdout: '', stderr: 'scan failed' }),
+    runWideScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const scan = payload.telemetry.sources.find((source) => source.id === 'career-ops-scan');
+  const remote = payload.telemetry.sources.find((source) => source.id === 'remote-feeds');
+  const search = payload.telemetry.sources.find((source) => source.id === 'generated-search');
+  assert.equal(scan.status, 'failed');
+  assert.equal(remote.status, 'skipped');
+  assert.equal(search.status, 'partial');
+  assert.ok(search.failures > 0);
 });
 
 test('DuckDuckGo result parsing preserves source and job URL', () => {

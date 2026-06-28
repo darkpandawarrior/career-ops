@@ -325,6 +325,7 @@ export async function buildDashboardPayload(root = DEFAULT_ROOT) {
     },
     searchPlan: searchPlan?.summary || null,
     generatedAt: cached?.generatedAt || null,
+    telemetry: cached?.telemetry || null,
     jobs,
     stats: {
       total: jobs.filter((job) => job.type !== 'searchLead').length,
