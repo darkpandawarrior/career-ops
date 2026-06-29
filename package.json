@@ -30,6 +30,7 @@
     "openai:eval": "node openai-eval.mjs",
     "star": "node match-star.mjs",
     "archive": "node archive-posting.mjs",
+    "trust:test": "node test-trust-validator.mjs",
     "dashboard:web": "node dashboard-web/server.mjs",
     "dashboard:check": "node --test dashboard-web/test/*.test.mjs",
     "dashboard:audit": "node dashboard-web/private-data-audit.mjs",

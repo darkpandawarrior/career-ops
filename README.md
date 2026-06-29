@@ -1,16 +1,31 @@
-# HireSignal
+<div align="center">
 
-<p align="center">
-  <strong>Local-first career intelligence for focused job discovery, resume onboarding, and evidence-based fit scoring.</strong>
-</p>
+```
+██╗  ██╗██╗██████╗ ███████╗███████╗██╗ ██████╗ ███╗   ██╗ █████╗ ██╗
+██║  ██║██║██╔══██╗██╔════╝██╔════╝██║██╔════╝ ████╗  ██║██╔══██╗██║
+███████║██║██████╔╝█████╗  ███████╗██║██║  ███╗██╔██╗ ██║███████║██║
+██╔══██║██║██╔══██╗██╔══╝  ╚════██║██║██║   ██║██║╚██╗██║██╔══██║██║
+██║  ██║██║██║  ██║███████╗███████║██║╚██████╔╝██║ ╚████║██║  ██║███████╗
+╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝
+```
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Node.js-339933?style=flat&logo=node.js&logoColor=white" alt="Node.js">
-  <img src="https://img.shields.io/badge/Playwright-2EAD33?style=flat&logo=playwright&logoColor=white" alt="Playwright">
-  <img src="https://img.shields.io/badge/Local--first-111827?style=flat" alt="Local-first">
-  <img src="https://img.shields.io/badge/Built_on-career--ops-blue?style=flat" alt="Built on career-ops">
-  <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT">
-</p>
+**Local-first career intelligence — evidence-backed scoring, not spray-and-pray.**
+
+---
+
+![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
+![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript_6-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind_4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=node.js&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square&logo=playwright&logoColor=white)
+![Local-first](https://img.shields.io/badge/local--first-111827?style=flat-square)
+![Built on career-ops](https://img.shields.io/badge/built_on-career--ops-6366f1?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)
+
+</div>
+
+---
 
 ## What Is This
 
@@ -18,7 +33,7 @@ HireSignal is a focused career dashboard built on top of the open-source [career
 
 career-ops provides the foundation: the job-search pipeline, AI-agent workflow, scanner architecture, tracker conventions, PDF generation flow, liveness checks, and the philosophy of quality applications over spray-and-pray automation.
 
-HireSignal extends that foundation with a local web dashboard that helps a candidate:
+HireSignal extends that foundation with a **local web dashboard** that helps a candidate:
 
 - upload and review a resume locally
 - convert resume evidence into a structured search profile
@@ -27,29 +42,306 @@ HireSignal extends that foundation with a local web dashboard that helps a candi
 - generate evidence-preserving tailored resumes
 - keep career-ops compatibility for scans, reports, trackers, modes, and templates
 
-The intent is simple: fewer random applications, more informed decisions.
+> **The intent is simple: fewer random applications, more informed decisions.**
+
+### Two dashboards
+
+HireSignal ships **two** dashboards over the same local data and the same engine:
+
+| | `web/` — **the 2.0 dashboard** (recommended) | `dashboard-web/` — legacy |
+|---|---|---|
+| Stack | Next.js 16 · React 19 · TypeScript 6 · Tailwind 4 (SSR/App Router) | vanilla Node `http` + vanilla JS |
+| Multi-profile | ✅ `?profile=slug` registry + switcher | ✅ `?profile=slug` |
+| Scoring | in-process (pure functions, deterministic) | in-process |
+| Surface | Today command center · Board · Pipeline · Ops · Intel · Portals · Analytics · CV · Onboarding · ⌘K palette | Jobs · Tracker · Ops · Intel tabs |
+
+The `web/` app is the **fusion**: it takes the modern career-ops 2.0 web experience and ports HireSignal's superior features (multi-profile routing, the scoring engine as a library, resume onboarding, branding) onto it — then builds past the legacy dashboard. The legacy `dashboard-web/` remains for reference. **The rest of this README's "modern dashboard" notes describe `web/`.**
+
+---
 
 ## Why HireSignal Exists
 
-Most job tools either track applications after the fact or encourage volume. HireSignal is designed for the earlier decision point: should this role deserve your attention at all?
+Most job tools either track applications after the fact or encourage volume. HireSignal is designed for the earlier decision point: **should this role deserve your attention at all?**
 
 It treats your resume and preferences as the source of truth, then searches and ranks opportunities by signals that matter:
 
-- demonstrated skills
-- adjacent and excluded skills
-- experience range
-- location and remote eligibility
-- compensation gates
-- joining availability
-- candidate-controlled preferences
+| Signal | What it gates |
+|--------|--------------|
+| Demonstrated skills | Direct evidence from your CV |
+| Adjacent & excluded skills | Avoid roles you'd hate or underqualify for |
+| Experience range | Seniority match — not just title match |
+| Location & remote eligibility | Automatically applied to every result |
+| Compensation gates | Flags anything below your target range |
+| Joining availability | Matched against notice-period language in postings |
+| Candidate-controlled preferences | Your call, not the algorithm's |
 
-It does not submit applications. It helps you decide what is worth applying to.
+**It does not submit applications. It helps you decide what is worth applying to.**
+
+---
+
+## Features
+
+| Feature | What it does |
+|---------|-------------|
+| Local resume onboarding | Upload a PDF resume, extract text locally, and review inferred profile facts before activation |
+| Evidence-backed profile review | Converts resume sections into editable candidate facts: target roles, skills, seniority, location policy, and compensation preferences |
+| Profile-driven search | Builds discovery queries from candidate facts, combining ATS providers, remote feeds, configured portals, scan history, and pipeline entries |
+| Fit scoring | Scores roles using skills, experience, eligibility, compensation, availability, and preferences — not title-only matching |
+| Tailored resumes | Generates tailored HTML/PDF resumes while preserving factual claims from the canonical CV |
+| Privacy audit | Verifies local dashboard code does not leak private resume/profile data into system-layer files |
+| career-ops compatibility | Keeps core tracker files, reports, scanner scripts, modes, templates, and data contract available |
+
+---
+
+## The 2.0 Dashboard (`web/`)
+
+A single, profile-aware command center over your local career-ops data. Every
+view reads (and edits) the **active profile's** files; switching profiles
+re-scopes the whole app.
+
+### Multi-profile
+
+One checkout can host several candidates. A `profiles.yml` registry maps a slug
+to a data root; the app resolves it per request (`?profile=slug`, made sticky by
+a cookie). A sidebar/mobile **switcher** lists profiles and can **create** a new
+one. With no registry, the app behaves exactly as a single-profile install.
+
+```yaml
+# profiles.yml (gitignored — private)
+profiles:
+  - name: alice
+    display_name: Alice A
+    root: profiles/alice      # relative to the data root
+    color: "#dd7627"
+```
+
+`node migrate-profile.mjs <slug> --display-name "Name"` migrates an existing
+single-profile install into a named profile (copy-by-default, idempotent,
+`--dry-run`). See [`docs/MULTI_PROFILE.md`](docs/MULTI_PROFILE.md).
+
+### Surfaces
+
+| View | What it does |
+|------|-------------|
+| **Today** | A command center: KPI hero (interviews / actions due / decisions awaiting), a "needs action today" follow-up queue, an interview snapshot (active loops + drills + recent outcomes), a job-board snapshot, and a coaching callout — all from your real data, self-hiding when empty. |
+| **Board** | The scored job board over the cached feed: score-distribution donut, score tabs (All / Good+ / Strong+ / Excellent), section tabs (Recommended / Review / Sources), a "previously-rejected" filter, per-card **Evaluate** + an expandable detail (eligibility, comp, years, reasons, matched / supporting / learning / gap skills), optional group-by-company, and **Run search** (a real ATS/feed crawl streamed with a 4-stage progress animation). CSV export. |
+| **Pipeline** | The application tracker + inbox: inline status dropdown, click-to-edit notes, an inbox done-checkbox, a status funnel mini-viz, sorting/filtering, and per-row links to the evaluation report. |
+| **Ops** | Operations + discovery: run scan / scan+verify / liveness / pipeline-health (the real `.mjs`), an ad-hoc liveness URL check, the agent inbox (queue / remove / quick-tasks), the career-ops + interview-coach command grids, tracked companies + queries, and the full scan-history table. |
+| **Intel** | Interview coaching: a profile banner (target comp / archetypes / superpowers + a live health check), storybank (STAR expansion), outcome log, question bank, company patterns, drills, follow-up cadence, rejection-pattern analysis, and a collapsible CV viewer. |
+| **Onboarding** | Resume → profile: **upload a PDF** (or paste text) → the real inference engine drafts your targets/skills/seniority → a multi-step review wizard → activate (writes the canonical user files, archiving any existing ones first). |
+| **⌘K palette** | One control surface: navigate anywhere, run real ops (search / scan / health / liveness), and copy career-ops / interview-coach CLI commands. |
+| Portals · Analytics · CV | Tracked-company health, the outcome funnel + score distribution, and the canonical CV. |
+
+### Under the hood
+
+- **Scoring as a library** — the pure A–G scoring functions run **in-process**
+  (no subprocess), so a web evaluation is byte-identical to a CLI one. Exposed at
+  `/api/jobs/{score,search-plan,cache,refresh,export}`.
+- **Engine, not reimplementation** — long-running work (job search, onboarding,
+  scans, follow-up cadence, pattern analysis) spawns the **real** career-ops
+  `.mjs`, scoped to the active profile via `CAREER_OPS_ROOT`, streaming progress.
+- **Data contract intact** — the web app is read-only over your data except the
+  sanctioned writes (profile edits, the managed memory block in
+  `modes/_profile.md`, and onboarding activation, which archives before writing).
+
+---
+
+## Quick Start
+
+### The 2.0 dashboard (`web/`, recommended)
+
+```bash
+# from the repo root
+npm install                 # engine deps (scanner, providers, pdf, …)
+
+cd web
+npm install                 # dashboard deps
+npm run dev                 # Next.js dev server → http://localhost:3000
+# or: npm run build && npm start   (production)
+```
+
+In development, point the app at your real data with `CAREER_OPS_ROOT`
+(otherwise it reads the parent checkout):
+
+```bash
+cd web
+CAREER_OPS_ROOT=/path/to/your/career-ops npm run dev
+```
+
+`npm run typecheck` and `npm run build` validate the app. A throwaway build dir is
+available via `BUILD_DIST=.next-prod npm run build` (won't clobber a live dev `.next`).
+
+### The legacy dashboard (`dashboard-web/`)
+
+```bash
+npm install
+npm run dashboard:web       # → http://127.0.0.1:4173
+```
+
+Either dashboard guides you through: upload a resume PDF → review the extracted
+evidence → activate a local profile → run a first job search → review ranked
+opportunities.
+
+---
+
+## Commands
+
+```bash
+# 2.0 dashboard (from web/)
+cd web && npm run dev       # Next.js dev server (http://localhost:3000)
+cd web && npm run build     # production build  ·  npm start to serve
+cd web && npm run typecheck # tsc --noEmit
+
+# engine / legacy (from the repo root)
+npm run doctor              # Check required career-ops setup files
+npm run dashboard:web       # Start the legacy web dashboard (port 4173)
+npm run dashboard:check     # Run dashboard tests
+npm run dashboard:audit     # Check private-data boundaries
+npm run scan                # Run the zero-token career-ops scanner
+npm run scan:full           # Reverse-discover jobs from public ATS APIs
+npm run tracker             # Open the career-ops tracker
+npm run pdf                 # Generate a career-ops PDF resume
+
+# multi-profile
+node migrate-profile.mjs <slug> --display-name "Name" [--dry-run]
+```
+
+---
+
+## Architecture
+
+```
+Resume PDF
+  └─▶ onboarding draft (ignored local storage)
+        └─▶ PDF extraction  ──────────────────────────────────────┐
+              └─▶ resume-normalizer.mjs                           │
+                    └─▶ profile-inference.mjs                     │
+                          └─▶ [user reviews facts]                │
+                                └─▶ profile-writer.mjs            │
+                                      ├─▶ cv.md                   │
+                                      ├─▶ config/profile.yml      │ user-layer
+                                      ├─▶ config/job-search.yml   │ career-ops
+                                      ├─▶ modes/_profile.md       │ files
+                                      └─▶ portals.yml             │
+                                                                   │
+query-builder.mjs ◀────────────────────────────────────────────────┘
+  └─▶ job-search-runner.mjs
+        ├─▶ scan.mjs + scan-ats-full.mjs  (zero-token ATS feeds)
+        ├─▶ provider feeds + remote boards
+        ├─▶ pipeline entries + scan history
+        └─▶ search leads
+              └─▶ scorer.mjs  (skills × experience × availability)
+                    └─▶ data/job-dashboard.json
+                          └─▶ dashboard review
+                                └─▶ resume-tailor.mjs
+                                      └─▶ output/tailored-resumes/
+```
+
+Private candidate data stays in the local user layer throughout. System-layer code and public docs never contain real resume details, salary targets, or application history.
+
+---
+
+## Project Structure
+
+```text
+web/                      The 2.0 dashboard (Next.js 16 / React 19 / TS 6 / Tailwind 4)
+  src/app/                App Router pages + API routes (/api/jobs, /api/onboarding, …)
+  src/components/         board · home · ops · intel · onboarding · ui · command palette
+  src/lib/                profile-registry · career-ops readers · jobs/scoring · coach …
+  middleware? → src/proxy.ts   ?profile=slug → x-co-profile (Next 16 proxy convention)
+  docs/hiresignal-fusion.md    the migration log
+
+dashboard-web/            Legacy dashboard (vanilla Node http + JS)
+  public/  onboarding/  scoring/  search/  test/
+
+onboarding-cli.mjs        Bridge: resume infer / extract (pdf) / activate
+job-search-cli.mjs        Bridge: real ATS/feed crawl → scored job-dashboard.json
+migrate-profile.mjs       Single-profile → named profile migration
+
+profiles.yml              Multi-profile registry (gitignored — private)
+config/
+  job-search.example.yml  Example search profile structure
+data/
+  applications.md         career-ops tracker
+  pipeline.md             pending job URLs
+  job-dashboard.json      generated dashboard cache
+docs/
+  MULTI_PROFILE.md        Multi-profile registry, migration, deploy
+  PUBLIC_DASHBOARD_*.md    Design, privacy, setup, scoring, and search notes
+```
+
+---
+
+## Workflow
+
+| Step | Module | What happens |
+|------|--------|-------------|
+| 1. Resume upload | `upload-intake.mjs` | PDF validated (type, size, filename), staged in ignored draft storage — active profile unchanged |
+| 2. Local extraction | `resume-extractor.mjs`, `pdf-layout.mjs`, `resume-normalizer.mjs` | Text extracted locally; sections identified (summary, experience, projects, education, skills); warnings shown for image-heavy PDFs |
+| 3. Profile inference | `profile-inference.mjs` | Proposes candidate facts: target roles, skills, seniority, location, compensation, availability, exclusions — user reviews before activation |
+| 4. Activation | `profile-writer.mjs` | Writes reviewed data into career-ops user-layer files; validates YAML; keeps rollback data; clears stale caches |
+| 5. Search | `query-builder.mjs`, `job-search-runner.mjs` | Builds search plan from profile; combines career-ops scanner, ATS discovery, provider feeds, pipeline entries, scan history |
+| 6. Scoring | `scorer.mjs` | Every job normalized and scored; results cached in `data/job-dashboard.json`; displayed as Recommended / Review / Source searches |
+| 7. Resume tailoring | `resume-tailor.mjs` | Reorders existing CV evidence around job keywords; produces HTML, PDF, notes, editing prompt in `output/tailored-resumes/`; never invents bullets |
+
+---
+
+## Scoring
+
+The main relevance score uses three evidence signals:
+
+| Signal | How it's measured |
+|--------|-----------------|
+| **Skills** | Demonstrated and supporting skills from reviewed profile matched against job text |
+| **Experience** | Extracted job seniority and years compared with candidate's reviewed experience band |
+| **Availability** | Joining-window language compared with candidate's notice period |
+
+Scores are on a **1–10 scale**. A strong score can still be gated by compensation, eligibility, exclusions, or missing verification.
+
+| Group | Threshold |
+|-------|----------|
+| Recommended | Score 7+ with no hard gates |
+| Review | Lower score or jobs with caveats |
+| Source searches | Search-result leads requiring manual opening before treatment as real postings |
+
+### Filtering
+
+Applied before and during scoring:
+- title filters from reviewed target roles and adjacent roles
+- excluded titles and excluded skills cap or block a role
+- search scopes decide local, remote, and international eligibility
+- international search requires explicit target countries or regions
+- compensation gates flag roles below the reviewed target
+- eligibility gates flag work authorization or sponsorship uncertainty
+- stale or duplicate results reduced via career-ops scan history and tracker conventions
+
+### Extraction Rules
+
+- selectable PDF text preferred; layout recovery handles single-column, sidebar, and multi-column layouts
+- only resume evidence used for demonstrated skills — gaps surfaced as gaps, not counted as experience
+- tailored resumes reuse existing claims; no bullets invented
+
+---
+
+## How HireSignal Uses career-ops
+
+HireSignal is not a separate job-search engine bolted next to career-ops. It is a dashboard layer over the parts of career-ops that are useful for a local, candidate-specific workflow.
+
+| career-ops capability | How HireSignal uses it |
+|----------------------|----------------------|
+| Data contract | Candidate data kept in user-layer files: `cv.md`, `config/profile.yml`, `config/job-search.yml`, `modes/_profile.md`, `portals.yml`, `data/`, `reports/`, `output/` |
+| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, provider feeds, scan history, and pipeline conventions — no hosted service needed |
+| Tracker model | `data/applications.md`, `data/pipeline.md`, status normalization, deduplication, and report links remain career-ops compatible |
+| Modes and templates | Role evaluation prompts, profile narrative, resume templates, and PDF generation flow remain available for agent-assisted review |
+| Liveness and quality rules | Job links checked, low-fit roles discouraged, no automatic submission |
+
+HireSignal removed upstream files that do not affect this local dashboard: upstream release automation, GitHub community workflows, Docker/Nix packaging, old demo assets, example packs, the npm scaffolder, the old Go dashboard, and non-Codex CLI adapter bundles.
+
+---
 
 ## Built On career-ops
 
 This project uses [santifer/career-ops](https://github.com/santifer/career-ops) as its upstream base.
-
-Credit where it is due:
 
 - career-ops created the original AI job-search command center
 - career-ops established the scanner, tracker, report, PDF, and agent-skill workflow
@@ -58,253 +350,66 @@ Credit where it is due:
 
 The original code is MIT licensed. The `career-ops` name and brand belong to the upstream project; HireSignal is a distinct project that describes its lineage without implying official endorsement.
 
-## Features
+---
 
-| Feature | What it does |
-| --- | --- |
-| Local resume onboarding | Upload a PDF resume, extract text locally, and review inferred profile facts before activation. |
-| Evidence-backed profile review | Converts resume sections into editable candidate facts, target roles, skills, seniority, location policy, and compensation preferences. |
-| Profile-driven search | Builds discovery queries from candidate facts and combines ATS providers, remote feeds, configured portals, scan history, and pipeline entries. |
-| Fit scoring | Scores roles using skills, experience, eligibility, compensation, availability, and preferences rather than title-only matching. |
-| Tailored resumes | Generates tailored HTML/PDF resumes while preserving factual claims from the canonical CV. |
-| Privacy audit | Checks that local dashboard code does not leak private resume/profile data into system-layer files. |
-| career-ops compatibility | Keeps the core tracker files, reports, scanner scripts, modes, templates, and data contract available. |
+## Relationship to Upstream Updates
 
-## Quick Start
+This repository keeps `upstream` pointed at `https://github.com/santifer/career-ops.git` to periodically inspect new scanner, provider, mode, and safety improvements — without treating this repo as a direct mirror.
 
-Install dependencies:
-
-```bash
-npm install
-```
-
-Run the dashboard:
-
-```bash
-npm run dashboard:web
-```
-
-Open:
-
-```text
-http://127.0.0.1:4173
-```
-
-The dashboard will guide you through:
-
-1. Uploading a resume PDF
-2. Extracting and reviewing resume evidence
-3. Activating a local profile
-4. Running a first job search
-5. Reviewing ranked opportunities
-
-## Useful Commands
-
-```bash
-npm run doctor              # Check required career-ops setup files
-npm run dashboard:web       # Start the HireSignal web dashboard
-npm run dashboard:check     # Run dashboard tests
-npm run dashboard:audit     # Check private-data boundaries
-npm run scan                # Run the zero-token career-ops scanner
-npm run scan:full           # Reverse-discover jobs from public ATS APIs
-npm run tracker             # Open the career-ops tracker
-npm run pdf                 # Generate a career-ops PDF resume
-```
-
-## Project Structure
-
-```text
-dashboard-web/
-  public/                 Web dashboard UI
-  onboarding/             Resume extraction, profile inference, activation
-  scoring/                Candidate-fit scoring
-  search/                 Query generation and job discovery
-  test/                   Dashboard-focused tests
-
-config/
-  job-search.example.yml  Example search profile structure
-
-data/
-  applications.md         career-ops tracker
-  pipeline.md             pending job URLs
-  job-dashboard.json      generated dashboard cache
-
-docs/
-  PUBLIC_DASHBOARD_*.md   Design, privacy, setup, scoring, and search notes
-```
-
-## How HireSignal Uses career-ops
-
-HireSignal is not a separate job-search engine bolted next to career-ops. It is a dashboard layer over the parts of career-ops that are useful for a local, candidate-specific workflow.
-
-| career-ops capability | How HireSignal uses it |
-| --- | --- |
-| Data contract | Keeps candidate data in user-layer files such as `cv.md`, `config/profile.yml`, `config/job-search.yml`, `modes/_profile.md`, `portals.yml`, `data/`, `reports/`, and `output/`. |
-| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, provider feeds, scan history, and pipeline conventions to discover jobs without relying on a hosted service. |
-| Tracker model | Keeps `data/applications.md`, `data/pipeline.md`, status normalization, deduplication, and report links compatible with career-ops workflows. |
-| Modes and templates | Keeps role evaluation prompts, profile narrative, resume templates, and PDF generation flow available for agent-assisted review. |
-| Liveness and quality rules | Preserves the idea that job links should be checked, low-fit roles should be discouraged, and applications should never be submitted automatically. |
-
-HireSignal removed upstream files that do not affect this local dashboard: upstream release automation, GitHub community workflows, Docker/Nix packaging, old demo assets, example packs, the npm scaffolder, the old Go dashboard, and non-Codex CLI adapter bundles.
-
-## Workflow
-
-The normal dashboard flow is:
-
-1. **Resume upload**
-   The browser sends a PDF to the local Node server. `dashboard-web/onboarding/upload-intake.mjs` validates the file type, size, and filename, then stages it in ignored draft storage. The active profile is not changed.
-
-2. **Local extraction**
-   `dashboard-web/onboarding/resume-extractor.mjs` and `pdf-layout.mjs` extract selectable PDF text locally. `resume-normalizer.mjs` identifies sections such as summary, experience, projects, education, and skills. Extraction warnings are shown when the PDF is image-heavy or too sparse.
-
-3. **Profile inference and review**
-   `profile-inference.mjs` proposes candidate facts from resume evidence: target roles, demonstrated skills, supporting skills, seniority, location preferences, compensation expectations, joining availability, and exclusions. The user reviews these facts before activation.
-
-4. **Activation**
-   `profile-writer.mjs` writes reviewed data into career-ops user-layer files:
-   `cv.md`, `config/profile.yml`, `config/job-search.yml`, `modes/_profile.md`, `portals.yml`, and starter tracker/pipeline files when needed. It validates YAML and search rules before replacing active files, keeps rollback data during the first search, and clears stale dashboard caches after a successful activation.
-
-5. **Search**
-   `query-builder.mjs` builds a search plan from the reviewed profile. `job-search-runner.mjs` combines career-ops scanner output, reverse ATS discovery, configured provider feeds, board-wide feeds, pipeline entries, scan history, and search leads.
-
-6. **Scoring and dashboard review**
-   Every discovered job is normalized and scored by `dashboard-web/scoring/scorer.mjs`. Results are cached in `data/job-dashboard.json` and displayed as recommended roles, review roles, or source searches.
-
-7. **Resume tailoring**
-   For a selected real posting, `dashboard-web/resume-tailor.mjs` reorders existing CV evidence around job keywords and creates HTML, PDF, notes, and an editing prompt in `output/tailored-resumes/`. It does not invent new claims.
-
-## Dataflow
-
-```text
-Resume PDF
-  -> ignored onboarding draft
-  -> local PDF extraction
-  -> normalized resume sections
-  -> reviewed profile facts
-  -> career-ops user files
-       cv.md
-       config/profile.yml
-       config/job-search.yml
-       modes/_profile.md
-       portals.yml
-  -> generated search plan
-  -> career-ops scanners + provider feeds + ATS discovery + search leads
-  -> normalized jobs
-  -> fit scoring and gates
-  -> data/job-dashboard.json
-  -> dashboard review + tailored resume output
-```
-
-Private candidate data stays in the local user layer. System-layer code and public docs should not contain real resume details, salary targets, private job notes, or application history.
-
-## Decision Logic
-
-HireSignal decisions are profile-driven. The dashboard does not score a role just because the title looks attractive.
-
-### Filtering
-
-Filtering happens before and during scoring:
-
-- title filters come from reviewed target roles and adjacent roles
-- excluded titles and excluded skills can cap or block a role
-- search scopes decide whether local, remote, and international roles are considered
-- international search requires explicit target countries or regions
-- compensation gates flag roles below the reviewed target range
-- eligibility gates flag work authorization or sponsorship uncertainty
-- stale or duplicate scan results are reduced through career-ops scan history and tracker conventions
-
-### Scoring
-
-The main relevance score is based on three evidence signals:
-
-- **skills:** demonstrated and supporting skills from the reviewed profile are matched against the job text
-- **experience:** extracted job seniority and years are compared with the candidate's reviewed experience band
-- **availability:** joining-window language is compared with the candidate's notice period or availability
-
-The final dashboard score is shown on a 1-10 scale. A strong score can still be gated by compensation, eligibility, exclusions, or missing verification. Jobs are grouped roughly as:
-
-- `Recommended`: score of 7+ with no hard gates
-- `Review`: lower score or jobs with caveats
-- `Source searches`: search-result leads that need opening before they can be treated as real postings
-
-### Extraction Rules
-
-Resume extraction is intentionally conservative:
-
-- selectable PDF text is preferred
-- layout recovery handles single-column, sidebar, and multi-column resumes
-- only resume evidence is used for demonstrated skills
-- recommended gaps are surfaced as gaps, not counted as existing experience
-- generated tailored resumes reuse existing claims instead of inventing bullets
-
-## Data And Privacy
-
-HireSignal is local-first.
-
-- Resume uploads are staged in ignored local draft storage.
-- Profile activation writes to user-layer career-ops files such as `cv.md`, `config/profile.yml`, `config/job-search.yml`, `modes/_profile.md`, and `portals.yml`.
-- Generated search caches live under `data/`.
-- The dashboard avoids committing private candidate data.
-
-Run:
-
-```bash
-npm run dashboard:audit
-```
-
-## Relationship To Upstream Updates
-
-This repository keeps `upstream` pointed at:
-
-```text
-https://github.com/santifer/career-ops.git
-```
-
-That lets HireSignal periodically inspect new career-ops scanner, provider, mode, and safety improvements without treating this repository as a direct mirror.
-
-Because HireSignal is now a separate project, do not blindly merge or rebase upstream into `main`. A normal upstream merge can reintroduce files that HireSignal intentionally removed if those files changed upstream or if Git sees them as newly added again.
+**Do not blindly merge or rebase upstream into `main`.** A normal upstream merge can reintroduce intentionally removed files.
 
 Use a review branch instead:
 
 ```bash
 git fetch upstream
 git checkout -b upstream-review upstream/main
-```
 
-Then compare the upstream update against HireSignal:
-
-```bash
+# Compare
 git log --oneline dev..upstream-review
 git diff --name-status dev..upstream-review
-```
 
-Port only useful runtime changes back into `dev`. Prefer scanner, provider, liveness, mode, template, parser, and safety fixes. Avoid reintroducing upstream-only project files such as GitHub workflows, Release Please config, Docker/Nix packaging, demo assets, examples, scaffolder files, and non-Codex CLI adapters.
-
-Useful selective commands:
-
-```bash
+# Port only useful runtime changes
 git checkout dev
 git checkout upstream-review -- scan.mjs scan-ats-full.mjs providers modes templates
 npm run dashboard:check
 npm run dashboard:audit
 ```
 
-If an upstream change touches the same area as HireSignal dashboard code, review it manually instead of copying the file wholesale. The dashboard should remain the product boundary; career-ops should remain the upstream engine and data-contract source.
+Prefer scanner, provider, liveness, mode, template, parser, and safety fixes. Avoid reintroducing: GitHub workflows, Release Please config, Docker/Nix packaging, demo assets, examples, scaffolder files, non-Codex CLI adapters.
+
+---
+
+## Data & Privacy
+
+HireSignal is local-first. Nothing leaves the machine.
+
+- Resume uploads staged in ignored local draft storage
+- Profile activation writes to user-layer career-ops files only
+- Generated search caches live under `data/`
+- Dashboard code must not commit private candidate data
+
+```bash
+npm run dashboard:audit   # verify data boundaries are intact
+```
+
+---
 
 ## Ethics
 
-HireSignal inherits career-ops' core principle: use automation to improve judgment, not to spam employers.
+HireSignal inherits career-ops' core principle: **use automation to improve judgment, not to spam employers.**
 
-- Do not auto-submit applications.
-- Review every generated resume and application answer.
-- Avoid low-fit applications unless there is a strong human reason to override the score.
-- Optimize for a smaller number of thoughtful applications.
+- Do not auto-submit applications
+- Review every generated resume and application answer
+- Avoid low-fit applications unless there is a strong human reason to override
+- Optimize for fewer, more thoughtful applications
+
+---
 
 ## Attribution
 
 HireSignal is derived from and built on [career-ops](https://github.com/santifer/career-ops), created by Santiago Fernandez de Valderrama and contributors.
 
-The upstream project made the dashboard possible by providing the core job-search pipeline, agent instructions, scanner ecosystem, tracker model, PDF tooling, and update-safe data contract.
+The upstream project made this dashboard possible by providing the core job-search pipeline, agent instructions, scanner ecosystem, tracker model, PDF tooling, and update-safe data contract.
 
 ## License
 

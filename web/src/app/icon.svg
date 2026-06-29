@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+  <title>HireSignal</title>
+  <rect width="96" height="96" rx="14" fill="#dd7627"/>
+  <rect x="20" y="54" width="14" height="26" rx="4" fill="#ffffff" opacity="0.55"/>
+  <rect x="41" y="36" width="14" height="44" rx="4" fill="#ffffff" opacity="0.8"/>
+  <rect x="62" y="16" width="14" height="64" rx="4" fill="#ffffff"/>
+</svg>
