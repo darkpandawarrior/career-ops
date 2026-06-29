@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { careerOpsRoot, rootScript } from "@/lib/career-ops";
+import { engineRoot, engineScript } from "@/lib/career-ops";
 
 /**
  * Spawn the engine's onboarding bridge (onboarding-cli.mjs at the career-ops
@@ -17,8 +17,8 @@ export function runOnboarding(
   input: unknown,
 ): Promise<{ ok: boolean; error?: string; errors?: string[]; [k: string]: unknown }> {
   return new Promise((resolve) => {
-    const child = spawn("node", [rootScript("onboarding-cli"), step, ...extraArgs], {
-      cwd: careerOpsRoot(),
+    const child = spawn("node", [engineScript("onboarding-cli"), step, ...extraArgs], {
+      cwd: engineRoot(),
       env: process.env,
     });
     let out = "";

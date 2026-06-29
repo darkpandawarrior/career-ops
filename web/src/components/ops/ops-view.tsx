@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
-  Search, Radar, ShieldCheck, Activity, HeartPulse, Loader2, ExternalLink, Inbox, Terminal,
+  Search, Radar, ShieldCheck, Activity, HeartPulse, Loader2, ExternalLink, Inbox, Terminal, Plus, X,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { ScanHistory, AgentInboxItem } from "@/lib/career-ops";
@@ -27,6 +28,20 @@ export function OpsView({ scans, inbox }: { scans: ScanHistory; inbox: AgentInbo
   const [q, setQ] = useState("");
   const [running, setRunning] = useState<string | null>(null);
   const [out, setOut] = useState<{ label: string; output: string; code: number | null } | null>(null);
+  const [task, setTask] = useState("");
+  const router = useRouter();
+
+  const queueTask = async () => {
+    const text = task.trim();
+    if (!text) return;
+    setTask("");
+    await fetch("/api/queue", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+    router.refresh();
+  };
+  const removeTask = async (text: string) => {
+    await fetch("/api/queue", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+    router.refresh();
+  };
 
   const runOp = async (op: string, label: string) => {
     setRunning(op);
@@ -111,22 +126,43 @@ export function OpsView({ scans, inbox }: { scans: ScanHistory; inbox: AgentInbo
         </div>
       )}
 
-      {/* agent inbox */}
-      {inbox.length > 0 && (
-        <section className="mt-6">
-          <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-            <Inbox className="size-3.5" /> Agent inbox
-          </h2>
+      {/* agent inbox — queue tasks for the agent to run */}
+      <section className="mt-6">
+        <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+          <Inbox className="size-3.5" /> Agent inbox
+        </h2>
+        <div className="mt-2 flex gap-2">
+          <input
+            value={task}
+            onChange={(e) => setTask(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && queueTask()}
+            placeholder="Queue a task for the agent…"
+            className="flex-1 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm outline-none focus:border-brand/50"
+          />
+          <button
+            onClick={queueTask}
+            disabled={!task.trim()}
+            className="inline-flex items-center gap-1 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground hover:bg-brand-200 disabled:opacity-50"
+          >
+            <Plus className="size-3.5" /> Queue
+          </button>
+        </div>
+        {inbox.length > 0 && (
           <ul className="mt-2 space-y-1">
             {inbox.map((it, i) => (
-              <li key={i} className={cn("flex items-start gap-2 rounded-md bg-surface/50 px-3 py-1.5 text-sm", it.done && "text-faint line-through")}>
+              <li key={i} className={cn("group flex items-start gap-2 rounded-md bg-surface/50 px-3 py-1.5 text-sm", it.done && "text-faint line-through")}>
                 <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", it.done ? "bg-emerald-500" : "bg-brand")} />
-                {it.text}
+                <span className="flex-1">{it.text}</span>
+                {!it.done && (
+                  <button onClick={() => removeTask(it.text)} className="text-faint opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100" aria-label="Remove">
+                    <X className="size-3.5" />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
-        </section>
-      )}
+        )}
+      </section>
 
       {/* scan history */}
       <section className="mt-8">

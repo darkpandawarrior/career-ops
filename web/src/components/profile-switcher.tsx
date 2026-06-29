@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Check, ChevronsUpDown, UserRound } from "lucide-react";
+import { Check, ChevronsUpDown, UserRound, Plus } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 type Profile = {
@@ -108,8 +108,85 @@ export function ProfileSwitcher() {
               onClick={() => switchTo(p.name)}
             />
           ))}
+          <div className="my-1 border-t border-border" />
+          <CreateProfile
+            onCreated={(slug) => {
+              setProfiles(null); // force a refetch on next open
+              switchTo(slug);
+            }}
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+function CreateProfile({ onCreated }: { onCreated: (slug: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+  const create = async () => {
+    if (!slug) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/profiles/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, display_name: name.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        setErr(d.error || "Could not create profile");
+        return;
+      }
+      onCreated(slug);
+    } catch {
+      setErr("Network error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left text-sm text-muted transition-colors hover:bg-surface-hover"
+      >
+        <Plus className="size-4" /> New profile
+      </button>
+    );
+  }
+  return (
+    <div className="px-2.5 py-2">
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && create()}
+        placeholder="Candidate name…"
+        className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-sm outline-none focus:border-brand/50"
+      />
+      {slug && <p className="mt-1 text-[11px] text-faint">slug: {slug}</p>}
+      {err && <p className="mt-1 text-[11px] text-red-500">{err}</p>}
+      <div className="mt-1.5 flex gap-1.5">
+        <button
+          onClick={create}
+          disabled={busy || !slug}
+          className="flex-1 rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-foreground hover:bg-brand-200 disabled:opacity-50"
+        >
+          {busy ? "Creating…" : "Create"}
+        </button>
+        <button onClick={() => setOpen(false)} className="rounded-md border border-border px-2 py-1 text-xs text-muted hover:bg-surface-hover">
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

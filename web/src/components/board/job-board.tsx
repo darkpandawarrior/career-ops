@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Search, RefreshCw, Download, ExternalLink, AlertTriangle,
-  Sparkles, SlidersHorizontal, Inbox,
+  Sparkles, SlidersHorizontal, Inbox, Radar, Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +33,8 @@ export function JobBoard({ initial }: { initial: JobDashboard }) {
   const [minScore, setMinScore] = useState(0);
   const [section, setSection] = useState<SectionKey>("all");
   const [busy, setBusy] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchLog, setSearchLog] = useState<string[]>([]);
 
   const reScore = async () => {
     setBusy(true);
@@ -41,6 +43,42 @@ export function JobBoard({ initial }: { initial: JobDashboard }) {
       if (r.ok) setData(await r.json());
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Run a real job-search refresh (crawls portals + feeds), streaming progress.
+  const runSearch = async () => {
+    setSearching(true);
+    setSearchLog(["Connecting…"]);
+    try {
+      const res = await fetch("/api/jobs/refresh", { method: "POST" });
+      const reader = res.body?.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      while (reader) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const ev = JSON.parse(line);
+            if (ev.type === "log") setSearchLog((l) => [...l, ev.message]);
+            else if (ev.type === "error") setSearchLog((l) => [...l, `⚠ ${ev.message}`]);
+            else if (ev.type === "done")
+              setSearchLog((l) => [...l, `✓ Done — ${ev.stats?.total ?? 0} roles scored.`]);
+          } catch {
+            /* ignore non-JSON */
+          }
+        }
+      }
+      await reScore(); // reload the freshly-written board
+    } catch {
+      setSearchLog((l) => [...l, "⚠ Search failed (network)."]);
+    } finally {
+      setSearching(false);
     }
   };
 
@@ -77,6 +115,13 @@ export function JobBoard({ initial }: { initial: JobDashboard }) {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={runSearch}
+            disabled={searching}
+            className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-50"
+          >
+            {searching ? <Loader2 className="size-3.5 animate-spin" /> : <Radar className="size-3.5" />} Run search
+          </button>
+          <button
             onClick={reScore}
             disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
@@ -91,6 +136,26 @@ export function JobBoard({ initial }: { initial: JobDashboard }) {
           </a>
         </div>
       </div>
+
+      {/* live search progress */}
+      {(searching || searchLog.length > 0) && (
+        <div className="mt-4 overflow-hidden rounded-xl border border-border bg-surface/60">
+          <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-muted">
+            <Radar className="size-3.5" /> Job search
+            {searching && <Loader2 className="size-3 animate-spin text-brand" />}
+            {!searching && (
+              <button onClick={() => setSearchLog([])} className="ml-auto text-faint hover:text-foreground">
+                dismiss
+              </button>
+            )}
+          </div>
+          <div className="max-h-40 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground/80">
+            {searchLog.map((l, i) => (
+              <div key={i}>{l}</div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* stat strip */}
       <div className="mt-5 grid grid-cols-3 gap-3">

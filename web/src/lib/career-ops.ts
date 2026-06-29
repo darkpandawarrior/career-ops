@@ -26,6 +26,23 @@ export function rootScript(nameNoExt: string): string {
 }
 
 /**
+ * The engine CODE root — the career-ops checkout the web app ships inside
+ * (`<checkout>/web`), resolved from the server's launch cwd (always `web/`), NOT
+ * from CAREER_OPS_ROOT. This is where the web's own bridge scripts live
+ * (onboarding-cli.mjs, job-search-cli.mjs + dashboard-web/). It matters in dev,
+ * where CAREER_OPS_ROOT points at a SEPARATE data checkout that does not carry
+ * these web-only scripts; in production code and data are the same checkout.
+ */
+export function engineRoot(): string {
+  return path.resolve(process.cwd(), "..");
+}
+
+/** Absolute path to a web-shipped bridge script, resolved against the code root. */
+export function engineScript(nameNoExt: string): string {
+  return path.join(engineRoot(), `${nameNoExt}.mjs`);
+}
+
+/**
  * Profile-awareness: every reader takes an optional `root` (the resolved data
  * directory for the active `?profile`). It defaults to `careerOpsRoot()`, so a
  * single-profile install behaves exactly as before. Request-scoped callers pass

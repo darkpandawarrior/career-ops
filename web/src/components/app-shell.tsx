@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { BrandLockup } from "@/components/brand";
 import { ProfileSwitcher } from "@/components/profile-switcher";
+import { CommandPalette } from "@/components/command-palette";
 import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -33,7 +35,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <BrandLockup size={32} />
           </Link>
           <ProfileSwitcher />
-          <nav className="mt-5 flex flex-col gap-1">
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new Event("co:command-palette"))}
+            className="mt-3 flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-2 text-sm text-muted transition-colors hover:bg-surface-hover"
+          >
+            <Search className="size-4" />
+            <span className="flex-1 text-left">Search & run…</span>
+            <kbd className="rounded border border-border px-1.5 py-0.5 text-[10px] text-faint">⌘K</kbd>
+          </button>
+          <nav className="mt-4 flex flex-col gap-1">
             {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
               const active = isActivePath(href, pathname);
               return (
@@ -70,6 +81,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
         <main className="flex-1 overflow-x-hidden">{children}</main>
+        <CommandPalette />
         <AssistantConsole />
         <FirstScoreView />
         <BetaBanner />
