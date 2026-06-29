@@ -6,7 +6,7 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles } from "lucide-react";
-import { HireSignalMark } from "@/components/brand";
+import { CoMark } from "@/components/co-mark";
 import { useJobs } from "@/components/jobs/job-store";
 import { usePipeline } from "@/components/pipeline/pipeline-provider";
 import { useApply } from "@/components/apply/apply-provider";
@@ -477,7 +477,7 @@ export function AssistantConsole() {
           className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover"
           aria-label="Open assistant"
         >
-          <HireSignalMark size={26} />
+          <CoMark size={26} />
           <span className="text-sm font-medium">Ask</span>
         </button>
       )}
@@ -485,7 +485,7 @@ export function AssistantConsole() {
       {open && (
         <div className="fixed bottom-5 right-5 z-50 flex h-[600px] max-h-[80vh] w-[400px] max-w-[calc(100vw-2.5rem)] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
           <header className="flex items-center gap-2.5 border-b border-border px-4 py-3">
-            <HireSignalMark size={26} />
+            <CoMark size={26} />
             <div className="flex-1">
               <div className="text-sm font-semibold tracking-tight">Assistant</div>
               <div className="text-xs text-faint">{cliId ? `via ${cliId}` : "no CLI configured"}</div>
