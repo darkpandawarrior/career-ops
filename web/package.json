@@ -13,24 +13,24 @@
     "@paper-design/shaders-react": "^0.0.76",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "js-yaml": "^4.2.0",
-    "lucide-react": "^1.8.0",
-    "next": "16.2.3",
-    "playwright-core": "^1.61.0",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "react-markdown": "^9.0.1",
-    "remark-gfm": "^4.0.0",
-    "tailwind-merge": "^3.5.0"
+    "js-yaml": "^4.3.0",
+    "lucide-react": "^1.22.0",
+    "next": "^16.2.9",
+    "playwright-core": "^1.61.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.2.2",
+    "@tailwindcss/postcss": "^4.3.1",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.6.0",
-    "@types/react": "^19.2.14",
+    "@types/node": "^26.0.1",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "postcss": "^8.5.9",
-    "tailwindcss": "^4.2.2",
-    "typescript": "^6.0.2"
+    "postcss": "^8.5.16",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^6.0.3"
   }
 }
