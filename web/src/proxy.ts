@@ -14,16 +14,19 @@ import { NextResponse, type NextRequest } from "next/server";
  * invalid `?profile=` clears the cookie → back to the single-profile root.
  *
  * The registry lookup (filesystem) happens in `requestRoot()` on the Node
- * runtime; middleware only sanitizes the slug grammar (it runs on the edge
+ * runtime; the proxy only sanitizes the slug grammar (it runs on the edge
  * runtime and must not touch the filesystem). No/invalid slug → header not set
  * → the data layer falls back to the single-profile root, exactly as before.
+ *
+ * This is Next 16's `proxy` convention (the former `middleware`); the file lives
+ * in `src/` because the app dir is under `src/` (a root-level proxy is ignored).
  */
 
 const SLUG_RE = /^[a-z0-9_-]+$/;
 export const PROFILE_HEADER = "x-co-profile";
 const PROFILE_COOKIE = "co-profile";
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const hasParam = req.nextUrl.searchParams.has("profile");
   const param = req.nextUrl.searchParams.get("profile");
   const cookie = req.cookies.get(PROFILE_COOKIE)?.value;
