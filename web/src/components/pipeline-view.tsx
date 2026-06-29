@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ExternalLink, ChevronsUpDown, Sparkles, Loader2, X } from "lucide-react";
+import { Search, ExternalLink, ChevronsUpDown, Sparkles, Loader2, X, Check } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { useJobs } from "@/components/jobs/job-store";
 import { CompanyLogo } from "@/components/company-logo";
-import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
+import { canonStatus, scoreNum, scoreTone, statusDot, CANONICAL_STATES } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
 // INBOX (the action queue) is the default tab; the rest filter the tracker.
@@ -222,6 +222,7 @@ export function PipelineView({
                   )}
                 >
                   <div className="flex min-w-0 items-center gap-2.5">
+                    <ToggleDone url={j.url} onDone={() => router.refresh()} />
                     <CompanyLogo name={j.company} size={20} />
                     <span className="shrink-0 text-sm font-medium">{j.company}</span>
                     <span className="truncate text-sm text-muted">{j.role}</span>
@@ -289,6 +290,7 @@ export function PipelineView({
                     </span>
                   </th>
                 ))}
+                <th className="px-4 py-2.5 font-medium">notes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -307,12 +309,12 @@ export function PipelineView({
                     <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
                   </td>
                   <td className="px-4 py-3 text-muted">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(r.status))} />
-                      {r.status}
-                    </span>
+                    <StatusCell n={r.n} status={r.status} onSaved={() => router.refresh()} />
                   </td>
                   <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                  <td className="px-4 py-3 text-muted">
+                    <NotesCell n={r.n} notes={r.notes} onSaved={() => router.refresh()} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -325,6 +327,123 @@ export function PipelineView({
         </div>
       )}
     </div>
+  );
+}
+
+/** Inbox done-checkbox → marks the pipeline.md URL `- [x]` (profile-aware). */
+function ToggleDone({ url, onDone }: { url: string; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await fetch("/api/pipeline-toggle", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url, done: true }),
+      });
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={busy}
+      aria-label="Mark processed"
+      title="Mark this inbox item done"
+      className="grid size-4 shrink-0 place-items-center rounded border border-border text-transparent transition-colors hover:border-brand hover:text-brand"
+    >
+      {busy ? <Loader2 className="size-3 animate-spin text-brand" /> : <Check className="size-3" />}
+    </button>
+  );
+}
+
+/** Inline status editor → POST /api/status {n,status}. */
+function StatusCell({ n, status, onSaved }: { n: string; status: string; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const save = async (value: string) => {
+    if (value === status) return;
+    setBusy(true);
+    try {
+      await fetch("/api/status", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ n, status: value }),
+      });
+      onSaved();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(status))} />
+      <select
+        defaultValue={status.trim()}
+        onChange={(e) => save(e.target.value)}
+        disabled={busy}
+        className="cursor-pointer rounded border border-transparent bg-transparent py-0.5 pl-0.5 pr-4 text-muted outline-none transition-colors hover:border-border hover:bg-surface focus:border-brand/50"
+      >
+        {!CANONICAL_STATES.includes(status.trim() as (typeof CANONICAL_STATES)[number]) && (
+          <option value={status.trim()}>{status.trim() || "—"}</option>
+        )}
+        {CANONICAL_STATES.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+      {busy && <Loader2 className="size-3 animate-spin text-brand" />}
+    </span>
+  );
+}
+
+/** Inline notes editor → POST /api/notes {n,notes}. Click to edit, Enter/blur saves. */
+function NotesCell({ n, notes, onSaved }: { n: string; notes: string; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(notes);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      if (value !== notes) {
+        await fetch("/api/notes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ n, notes: value }),
+        });
+        onSaved();
+      }
+    } finally {
+      setBusy(false);
+      setEditing(false);
+    }
+  };
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") { setValue(notes); setEditing(false); }
+        }}
+        disabled={busy}
+        className="w-full min-w-40 rounded border border-brand/40 bg-surface px-2 py-1 text-xs outline-none"
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
+      className="line-clamp-2 max-w-xs text-left text-xs text-faint transition-colors hover:text-foreground"
+      title="Click to edit notes"
+    >
+      {notes?.trim() || <span className="italic opacity-60">add note…</span>}
+    </button>
   );
 }
 

@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { HireSignalMark } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WorkerPills } from "@/components/jobs/worker-pills";
+import { ProfileSwitcher } from "@/components/profile-switcher";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
 import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
@@ -149,6 +150,10 @@ export function MobileNav() {
           >
             <X className="size-5" />
           </button>
+        </div>
+
+        <div className="px-3 pb-2">
+          <ProfileSwitcher />
         </div>
 
         <nav className="flex flex-col gap-1 px-3">
