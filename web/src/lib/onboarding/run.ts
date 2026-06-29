@@ -12,7 +12,7 @@ import { engineRoot, engineScript } from "@/lib/career-ops";
  * requestRoot()), keeping multi-profile correct.
  */
 export function runOnboarding(
-  step: "infer" | "activate",
+  step: "infer" | "extract" | "activate",
   extraArgs: string[],
   input: unknown,
 ): Promise<{ ok: boolean; error?: string; errors?: string[]; [k: string]: unknown }> {

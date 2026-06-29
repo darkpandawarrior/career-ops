@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { structureResume } from "./dashboard-web/onboarding/resume-normalizer.mjs";
 import { inferProfile, validateReviewDraft } from "./dashboard-web/onboarding/profile-inference.mjs";
 import { generateUserFiles, validateGeneratedFiles } from "./dashboard-web/onboarding/profile-writer.mjs";
+import { extractFile } from "./dashboard-web/onboarding/resume-extractor.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,19 +92,38 @@ async function exists(p) {
   }
 }
 
-async function runInfer(input) {
-  const text = String(input.text || "");
+function inferFromText(text, extraWarnings = []) {
   const extraction = structureResume(text);
   if (!extraction.text || extraction.text.length < 40) {
-    return { ok: false, error: "Paste more of your resume — too little text to infer a profile." };
+    return { ok: false, error: "Too little text to infer a profile — paste more, or upload a text-based PDF." };
   }
   const inferred = inferProfile({ ...extraction, draftId: "web-preview" });
   return {
     ok: true,
     diagnostics: extraction.diagnostics,
-    warnings: extraction.warnings,
+    warnings: [...extraWarnings, ...(extraction.warnings || [])],
     prefill: toPrefill(inferred),
   };
+}
+
+async function runInfer(input) {
+  return inferFromText(String(input.text || ""));
+}
+
+/** Extract a resume FILE (pdf) → text → the same inferred prefill as paste. */
+async function runExtract(filePath, extension) {
+  if (!filePath) return { ok: false, error: "no file provided" };
+  let extracted;
+  try {
+    extracted = await extractFile(filePath, extension || ".pdf");
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+  const text = String(extracted?.text || "");
+  if (!text.trim()) {
+    return { ok: false, error: "No selectable text found — this PDF may be a scan/image (needs OCR). Paste the text instead." };
+  }
+  return inferFromText(text, extracted?.warnings || []);
 }
 
 async function runActivate(root, input) {
@@ -155,6 +175,7 @@ async function main() {
   try {
     let out;
     if (step === "infer") out = await runInfer(input);
+    else if (step === "extract") out = await runExtract(process.argv[3], process.argv[4]);
     else if (step === "activate") out = await runActivate(root, input);
     else out = { ok: false, error: `unknown step: ${step}` };
     process.stdout.write(JSON.stringify(out));

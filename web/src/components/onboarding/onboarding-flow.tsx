@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { FileText, Sparkles, Check, AlertTriangle, Loader2, ArrowRight, ArrowLeft } from "lucide-react";
+import { useRef } from "react";
+import { FileText, Sparkles, Check, AlertTriangle, Loader2, ArrowRight, ArrowLeft, UploadCloud } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 // Mirrors onboarding-cli.mjs `prefill` shape (the review form's working state).
@@ -68,6 +69,28 @@ export function OnboardingFlow() {
     }
   };
 
+  const extractFromFile = async (file: File) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/onboarding/extract", { method: "POST", body: fd });
+      const d = await r.json();
+      if (!d.ok) {
+        setError(d.error || "Could not read that PDF.");
+        return;
+      }
+      setReview(d.prefill as Review);
+      setWarnings(Array.isArray(d.warnings) ? d.warnings : []);
+      setStep("review");
+    } catch {
+      setError("Network error reading the file.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const activate = async () => {
     if (!review) return;
     setBusy(true);
@@ -100,9 +123,16 @@ export function OnboardingFlow() {
         <section className="mt-8">
           <h1 className="font-display text-2xl tracking-tight text-landing">Set up your profile</h1>
           <p className="mt-1 text-sm text-muted">
-            Paste your resume text. HireSignal&rsquo;s inference engine drafts your targets, skills and
-            seniority — you review before anything is written.
+            Upload your resume PDF (or paste the text). HireSignal&rsquo;s inference engine drafts your
+            targets, skills and seniority — you review before anything is written.
           </p>
+
+          <ResumeDropZone busy={busy} onFile={extractFromFile} />
+
+          <div className="my-4 flex items-center gap-3 text-xs text-faint">
+            <span className="h-px flex-1 bg-border" /> or paste text <span className="h-px flex-1 bg-border" />
+          </div>
+
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -142,26 +172,14 @@ export function OnboardingFlow() {
             </div>
           )}
 
-          <ReviewForm review={review} setReview={setReview} />
-
-          {error && <ErrorNote msg={error} />}
-
-          <div className="mt-6 flex items-center justify-between">
-            <button
-              onClick={() => setStep("paste")}
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-sm text-muted hover:bg-surface-hover"
-            >
-              <ArrowLeft className="size-4" /> Back
-            </button>
-            <button
-              onClick={activate}
-              disabled={busy}
-              className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-50"
-            >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-              Activate profile
-            </button>
-          </div>
+          <ReviewForm
+            review={review}
+            setReview={setReview}
+            onActivate={activate}
+            onBack={() => setStep("paste")}
+            busy={busy}
+            error={error}
+          />
         </section>
       )}
 
@@ -230,6 +248,40 @@ function Steps({ step }: { step: Step }) {
   );
 }
 
+function ResumeDropZone({ busy, onFile }: { busy: boolean; onFile: (f: File) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [drag, setDrag] = useState(false);
+  const pick = (files: FileList | null) => {
+    const f = files?.[0];
+    if (f) onFile(f);
+  };
+  return (
+    <label
+      onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={(e) => { e.preventDefault(); setDrag(false); pick(e.dataTransfer.files); }}
+      className={cn(
+        "mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-colors",
+        drag ? "border-brand bg-brand-soft" : "border-border bg-surface/40 hover:border-brand/40 hover:bg-surface-hover",
+        busy && "pointer-events-none opacity-60",
+      )}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        onChange={(e) => pick(e.target.files)}
+      />
+      {busy ? <Loader2 className="size-6 animate-spin text-brand" /> : <UploadCloud className="size-6 text-brand" />}
+      <span className="text-sm font-medium text-foreground">
+        {busy ? "Reading your resume…" : "Drop your resume PDF here, or click to browse"}
+      </span>
+      <span className="text-xs text-faint">PDF, up to 10MB · parsed locally, nothing is uploaded anywhere</span>
+    </label>
+  );
+}
+
 function ErrorNote({ msg }: { msg: string }) {
   return (
     <p className="mt-3 flex items-start gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
@@ -240,7 +292,20 @@ function ErrorNote({ msg }: { msg: string }) {
 
 /* ── Review form ─────────────────────────────────────────────────────────── */
 
-function ReviewForm({ review, setReview }: { review: Review; setReview: (r: Review) => void }) {
+const WIZ_STEPS = ["Candidate", "Targeting", "Skills", "Location", "Compensation", "Confirm"] as const;
+
+function ReviewForm({
+  review, setReview, onActivate, onBack, busy, error,
+}: {
+  review: Review;
+  setReview: (r: Review) => void;
+  onActivate: () => void;
+  onBack: () => void;
+  busy: boolean;
+  error: string | null;
+}) {
+  const [wiz, setWiz] = useState(0);
+  const last = WIZ_STEPS.length - 1;
   const set = (patch: Partial<Review>) => setReview({ ...review, ...patch });
   const setC = (patch: Partial<Review["candidate"]>) => set({ candidate: { ...review.candidate, ...patch } });
   const setLoc = (patch: Partial<Review["location"]>) => set({ location: { ...review.location, ...patch } });
@@ -256,7 +321,25 @@ function ReviewForm({ review, setReview }: { review: Review; setReview: (r: Revi
   };
 
   return (
-    <div className="mt-5 space-y-6">
+    <div className="mt-5">
+      {/* wizard progress */}
+      <div className="flex items-center gap-1.5">
+        {WIZ_STEPS.map((t, i) => (
+          <button
+            key={t}
+            onClick={() => setWiz(i)}
+            className="group flex flex-1 flex-col gap-1"
+            title={t}
+          >
+            <span className={cn("h-1 rounded-full transition-colors", i <= wiz ? "bg-brand" : "bg-border")} />
+            <span className={cn("hidden text-[10px] sm:block", i === wiz ? "text-brand" : "text-faint")}>{t}</span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 text-xs text-faint">Step {wiz + 1} of {WIZ_STEPS.length} · {WIZ_STEPS[wiz]}</p>
+
+      <div className="mt-4 space-y-6">
+      {wiz === 0 && (
       <Group title="Candidate">
         <Field label="Full name" req>
           <Text value={review.candidate.full_name} onChange={(v) => setC({ full_name: v })} />
@@ -267,7 +350,9 @@ function ReviewForm({ review, setReview }: { review: Review; setReview: (r: Revi
         </div>
         <Field label="Summary"><Text value={review.summary} onChange={(v) => set({ summary: v })} /></Field>
       </Group>
+      )}
 
+      {wiz === 1 && (
       <Group title="Targeting">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Years of experience" req>
@@ -288,7 +373,9 @@ function ReviewForm({ review, setReview }: { review: Review; setReview: (r: Revi
           <ListInput value={review.adjacent_roles} onChange={(v) => set({ adjacent_roles: v })} />
         </Field>
       </Group>
+      )}
 
+      {wiz === 2 && (
       <Group title="Skills">
         <Field label="Demonstrated" req hint="at least five — these drive scoring">
           <ListInput value={review.skills.demonstrated} onChange={(v) => setSkills({ demonstrated: v })} />
@@ -298,7 +385,9 @@ function ReviewForm({ review, setReview }: { review: Review; setReview: (r: Revi
           <Field label="Excluded (deal-breakers)"><ListInput value={review.skills.excluded} onChange={(v) => setSkills({ excluded: v })} /></Field>
         </div>
       </Group>
+      )}
 
+      {wiz === 3 && (
       <Group title="Location & availability">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Home country" req><Text value={review.location.home_country} onChange={(v) => setLoc({ home_country: v })} /></Field>
@@ -334,7 +423,9 @@ function ReviewForm({ review, setReview }: { review: Review; setReview: (r: Revi
           </Field>
         )}
       </Group>
+      )}
 
+      {wiz === 4 && (
       <Group title="Compensation (optional)">
         <div className="grid grid-cols-3 gap-3">
           <Field label="Currency"><Text value={review.compensation.currency} onChange={(v) => set({ compensation: { ...review.compensation, currency: v } })} placeholder="USD" /></Field>
@@ -346,6 +437,62 @@ function ReviewForm({ review, setReview }: { review: Review; setReview: (r: Revi
           </Field>
         </div>
       </Group>
+      )}
+
+      {wiz === last && (
+        <Group title="Confirm & activate">
+          <dl className="space-y-2 text-sm">
+            <SummaryRow label="Name" value={review.candidate.full_name} />
+            <SummaryRow label="Seniority" value={`${review.seniority || "—"} · ${review.experience_years ?? "?"} yrs`} />
+            <SummaryRow label="Target roles" value={review.target_roles.join(", ") || "—"} />
+            <SummaryRow label="Demonstrated skills" value={`${review.skills.demonstrated.length} (${review.skills.demonstrated.slice(0, 5).join(", ")}${review.skills.demonstrated.length > 5 ? "…" : ""})`} />
+            <SummaryRow label="Location" value={`${review.location.home_country || "—"} · ${review.location.search_scopes.join("/") || "—"} · notice ${review.availability.notice_period || "—"}`} />
+          </dl>
+          <p className="mt-3 text-xs text-faint">
+            Activating writes cv.md, config/profile.yml, config/job-search.yml, modes/_profile.md and
+            portals.yml into the active profile (any existing files are archived first).
+          </p>
+        </Group>
+      )}
+      </div>
+
+      {error && <ErrorNote msg={error} />}
+
+      {/* wizard nav */}
+      <div className="mt-6 flex items-center justify-between">
+        <button
+          onClick={() => (wiz === 0 ? onBack() : setWiz(wiz - 1))}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-2 text-sm text-muted hover:bg-surface-hover"
+        >
+          <ArrowLeft className="size-4" /> {wiz === 0 ? "Back" : "Previous"}
+        </button>
+        {wiz < last ? (
+          <button
+            onClick={() => setWiz(wiz + 1)}
+            className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
+          >
+            Next <ArrowRight className="size-4" />
+          </button>
+        ) : (
+          <button
+            onClick={onActivate}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+            Activate profile
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-3">
+      <dt className="w-32 shrink-0 text-xs uppercase tracking-wide text-faint">{label}</dt>
+      <dd className="flex-1 text-foreground">{value}</dd>
     </div>
   );
 }
