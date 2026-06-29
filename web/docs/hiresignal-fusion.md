@@ -11,12 +11,14 @@ Tracking the plan at
 
 | Phase | Scope | State |
 |-------|-------|-------|
-| 0 | Multi-profile `?profile=slug` routing | ✅ Done |
+| 0 | Multi-profile `?profile=slug` routing + switcher | ✅ Done |
 | 1 | Server-side scoring engine (library) | ✅ Done |
-| 2 | Resume onboarding (streaming, multi-step) | ⏳ Next |
-| 3 | Dashboard/search views + refresh | ⏳ |
-| 4 | HireSignal branding | ⏳ |
-| 5 | Deploy / data migration | ⏳ |
+| 2 | Resume onboarding (paste → infer → review → activate) | ✅ Done |
+| 3 | Scored job board + filters + CSV export | ✅ Done |
+| 4 | HireSignal branding | ✅ Done |
+| 5 | Data migration CLI + deploy docs | ✅ Done |
+
+All six phases of the fusion are implemented. See the per-phase notes below.
 
 ## Phase 0 — Multi-profile routing
 
@@ -73,9 +75,62 @@ two-profile root: the default Android config scores an Android role 8/Strong;
 queries. Output is deterministic. A parity test confirms the vendored
 `normalizeJob` is byte-identical to the legacy one for the same inputs.
 
+## Phase 3 — Scored job board
+
+A new `/board` surface over the Phase 1 engine: `jobDashboard(requestRoot())`
+re-scores the active profile's cached feed (`data/job-dashboard.json`) and ranks
+roles, so **switching profiles re-ranks the board live**.
+
+- `/board` (server) → `<JobBoard/>` (client): stat strip (scored/excellent/
+  queries), search-config error banner, toolbar (text filter, section
+  recommended/review/all, min-score), score-sorted cards with level / priority /
+  matched-skill chips / gate warnings / posting links.
+- Re-score button re-reads `/api/jobs/cache`; `GET /api/jobs/export` streams an
+  RFC-4180 CSV of the ranked board.
+- A live feed crawl (the search runner + providers) stays in the CLI; the board
+  is read/score-only.
+
+## Phase 2 — Resume onboarding
+
+Multi-step flow that runs the REAL inference + profile-generation engine via a
+spawn bridge (the `/api/run` pattern — never reimplemented).
+
+- `onboarding-cli.mjs` (engine root): `infer` (structureResume → inferProfile,
+  read-only) returns a flattened form prefill; `activate` (generateUserFiles +
+  validateGeneratedFiles) writes the canonical user files into the target root,
+  archiving any pre-existing file to `data/profile-archives/<ts>/` first.
+- `web/src/lib/onboarding/run.ts` spawns the bridge (JSON over stdin/stdout).
+  Routes: `POST /api/onboarding/infer` (read-only), `POST /api/onboarding/activate`
+  (profile-aware via `requestRoot()`).
+- `/onboarding` UI: paste resume → review (pre-filled, engine-validated) →
+  activate → success → `/board`. The generated `config/job-search.yml` is exactly
+  what the scoring engine reads, so onboarding → board scoring is one closed loop.
+- PDF/DOCX upload (the engine supports it via `pdfjs`/`busboy`) is a future
+  enhancement; the paste path needs no extra web deps.
+
+## Phase 4 — HireSignal branding
+
+- A "signal-strength" mark (ascending bars on the brand tile) + "HireSignal"
+  wordmark across the sidebar, mobile nav, assistant avatar, favicon
+  (`app/icon.svg`) and metadata. Burnt-orange brand retained.
+- Profile switcher (`web/src/components/profile-switcher.tsx`) in the sidebar —
+  lists `/api/profiles`, switches via `?profile=slug`, hidden in single-profile
+  mode. Middleware makes the choice sticky via the `co-profile` cookie so plain
+  nav links keep the active profile.
+
+## Phase 5 — Migration + deploy
+
+- `migrate-profile.mjs` (engine root): migrate a single-profile install into a
+  named profile (`profiles/<slug>/` + `profiles.yml` entry). Copy-by-default
+  (non-destructive), idempotent, `--dry-run` / `--move` / `--force`.
+- `docs/MULTI_PROFILE.md`: registry format, migration usage, `?profile=` + cookie
+  behavior, rollback, and a staging build/deploy section.
+
 ## Data-contract compliance
 
-The web app remains read-only over user data except the two sanctioned writes
-(profile edits + the managed memory block in `modes/_profile.md`). Private
-per-candidate data (`profiles/`, `sync/`, `profiles.yml`) is gitignored and never
-committed — these were **not** previously ignored, a gap this work closed.
+The web app remains read-only over user data except the sanctioned writes
+(profile edits, the managed memory block in `modes/_profile.md`, and the
+onboarding `activate` step which writes a fresh profile, archiving any existing
+files first). Private per-candidate data (`profiles/`, `sync/`, `profiles.yml`)
+is gitignored and never committed — these were **not** previously ignored, a gap
+this work closed.
