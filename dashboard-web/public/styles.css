@@ -2131,6 +2131,8 @@ header.topbar {
   margin-top: 16px;
   justify-content: flex-end;
 }
+.candidate-hidden { display: none !important; }
+.tab-explanation { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
 
 .discovery-review-grid {
   display: grid;

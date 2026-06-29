@@ -66,3 +66,24 @@ test('job cards surface freshness, missing information, and recommended action',
   assert.match(app, /job\.freshness\?\.label/);
   assert.match(app, /telemetry\.funnel/);
 });
+
+test('dashboard explains candidate sections and hides agent-console surfaces', async () => {
+  const [html, css] = await Promise.all([
+    readFile(publicFile('index.html'), 'utf8'), readFile(publicFile('styles.css'), 'utf8'),
+  ]);
+  for (const explanation of [
+    'opportunities discovered and ranked', 'applications and their progress',
+    'search coverage, source health', 'candidate profile and targeting insights',
+  ]) assert.match(html, new RegExp(explanation));
+  assert.match(html, /ops-inbox-panel candidate-hidden/);
+  assert.match(html, /ops-main-grid candidate-hidden/);
+  assert.match(css, /\.candidate-hidden \{ display: none !important; \}/);
+  assert.match(html, /Low Fit\s*<span/);
+});
+
+test('dashboard refresh polling reports asynchronous search failures', async () => {
+  const app = await readFile(publicFile('app.js'), 'utf8');
+  assert.match(app, /s\.outcome === 'failed'/);
+  assert.match(app, /Search failed:.*Cached jobs are still shown/);
+  assert.match(app, /s\.lastError/);
+});

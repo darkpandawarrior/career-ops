@@ -8,8 +8,8 @@ title or strong skill-evidence checks.
 
 The strategy is generated from four independent profile dimensions:
 
-- target roles and title variants;
-- demonstrated/supporting skills and target industries;
+- interested roles, title synonyms, and seniority variants;
+- unified candidate skills and preferred industries;
 - career stage: intern/fresher/entry-level versus experienced;
 - mandatory geographic scopes: local, remote, international, or any combination.
 
@@ -103,14 +103,17 @@ queries.
      healthcare/life sciences, nonprofit/social impact, university/research.
    - Company careers: major technology, global product, enterprise software,
      consulting/professional services, and India product-company groups.
-   - Strong and adjacent titles are split into small query groups instead of
-     one oversized query. Skill-rescue queries run independently.
+   - Interested roles and generated synonyms are split into traceable queries.
+     Independent skill queries preserve recall, and every query records the role,
+     skills, industries, locations, and selected scopes that produced it.
 
 5. **Deduplication and scoring**
    - Results from every layer are normalized to one contract.
    - Duplicate URLs/jobs collapse to the highest-scoring copy.
-   - Work mode, location eligibility, experience, title, skills, compensation,
-     and exclusions affect scoring.
+   - Candidate evidence drives fit; preferences drive role/geographic scope and
+     assist eligibility and secondary scoring.
+   - Valid lower-fit jobs remain available. Only irrelevant, expired, explicitly
+     incompatible, or confirmed-over-60-day jobs are excluded.
 
 ## Why this is broader than the previous implementation
 
@@ -146,10 +149,10 @@ dozens of profile-selected source groups, and reads up to 12 results per query.
      board.
 
 3. **Freshness and liveness**
-   - Store posting timestamps when providers expose them.
-   - Prioritize jobs from the last 7-14 days.
-   - Add an optional sequential Playwright liveness pass for the highest-scored
-     results, not the entire result set.
+   - Normalized postings use 0–14, 15–30, and 31–60-day bands.
+   - Confirmed postings older than 60 days are excluded; unknown dates are kept
+     with a warning.
+   - Liveness checks remain sequential and bounded for visible jobs.
 
 4. **Search telemetry**
    - Cache per-source counts, errors, duration, and last successful refresh.

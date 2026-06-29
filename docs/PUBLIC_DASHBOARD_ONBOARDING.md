@@ -75,21 +75,24 @@ Every inferred value carries a confidence score and source description. The
 system does not infer compensation, visa requirements, relocation preferences,
 or remote-work eligibility.
 
-The seven-step wizard covers:
+Review uses two visible columns on desktop and stacks vertically on mobile:
 
-1. Personal details
-2. Experience and summary
-3. Skills
-4. Target roles and seniority
-5. Location and remote policy
-6. Compensation
-7. Confirmation preview
+- **Candidate Profile:** personal details, one current role, experience and
+  seniority, one unified Skills selector, editable education/certifications,
+  summary, and notice period.
+- **Job Preferences:** multi-value Interested Roles, industries, local/remote/
+  international scopes, locations/countries/remote regions, work mode,
+  employment type, relocation/visa needs, and compensation.
+
+Current Role is single-value. Skills and Interested Roles allow arbitrary custom
+values. Evidence confidence remains internal; candidates do not classify skills
+as demonstrated, supporting, or learning.
 
 `POST /api/setup/preview` validates the edited result and stores `review.json`
-inside the ignored onboarding draft. Validation requires a name, at least one
-target role, at least one demonstrated skill, and a home country. Compensation
+inside the ignored onboarding draft. Validation requires a name, current role,
+at least one interested role, at least one skill, and a home country. Compensation
 is optional, but a currency is required when a minimum is configured.
 
-This reviewed draft is still inactive. Milestone 6 will generate and preview
-the career-ops files, back up existing user data, and require explicit
-confirmation before activation.
+This reviewed draft remains inactive until explicit confirmation. Confirmation
+generates the local profile/search files, runs the first profile-scoped search,
+and rolls back the previous profile if that search fails.

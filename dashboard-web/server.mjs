@@ -37,8 +37,7 @@ const HOST = process.env.CAREER_DASHBOARD_HOST || '127.0.0.1';
 const PORT = Number(process.env.CAREER_DASHBOARD_PORT || 4173);
 const DEMO = process.env.CAREER_DASHBOARD_DEMO === '1';
 const PROFILES_REGISTRY = path.join(ENGINE_ROOT, 'profiles.yml');
-let refreshPromise = null;
-const refreshState = { running: false, phase: 0, phaseName: '', startedAt: null };
+const profileRefreshes = new Map();
 const COACH_STATE = path.resolve(ENGINE_ROOT, '../interview-coach-skill/coaching_state.md');
 
 // ── Per-profile path resolver ─────────────────────────────────────────────────
@@ -67,6 +66,31 @@ function paths(root) {
     reportsDir:path.join(root, 'reports'),
     cachePath: path.join(root, 'data/job-dashboard.json'),
   };
+}
+
+function refreshContext(root) {
+  const key = path.resolve(root);
+  if (!profileRefreshes.has(key)) {
+    profileRefreshes.set(key, {
+      promise: null,
+      generation: 0,
+      state: {
+        running: false,
+        phase: 0,
+        phaseName: '',
+        startedAt: null,
+        completedAt: null,
+        outcome: 'idle',
+        lastError: null,
+      },
+    });
+  }
+  return profileRefreshes.get(key);
+}
+
+export function profileRefreshStatus(root = DEFAULT_ROOT) {
+  const state = refreshContext(root).state;
+  return { ...state, elapsedMs: state.startedAt ? Date.now() - state.startedAt : 0 };
 }
 const CANONICAL_STATES = ['Evaluated','Applied','Responded','Interview','Offer','Rejected','Discarded','SKIP'];
 const COMMANDS = {
@@ -352,12 +376,7 @@ export async function route(req, res) {
       return sendJson(res, { ok: true, service: 'career-ops-dashboard' });
     }
     if (url.pathname === '/api/refresh/status') {
-      return sendJson(res, {
-        running: refreshState.running,
-        phase: refreshState.phase,
-        phaseName: refreshState.phaseName,
-        elapsedMs: refreshState.startedAt ? Date.now() - refreshState.startedAt : 0,
-      });
+      return sendJson(res, profileRefreshStatus(root));
     }
     if (url.pathname === '/api/profiles') {
       try {
@@ -475,8 +494,9 @@ export async function route(req, res) {
     }
     if (url.pathname === '/api/refresh' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { started: true, demo: true });
-      if (!refreshState.running) refreshDashboard(root).catch(() => {});
-      return sendJson(res, { started: true, running: refreshState.running });
+      const context = refreshContext(root);
+      if (!context.state.running) refreshDashboard(root).catch(() => {});
+      return sendJson(res, { started: true, running: context.state.running });
     }
     if (url.pathname === '/api/leads/enrich' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);
@@ -556,10 +576,21 @@ export async function route(req, res) {
   }
 }
 
-function spawnNode(args, dataRoot) {
+export function spawnNode(args, dataRoot, spawnImpl = spawn) {
   return new Promise((resolve) => {
     const env = { ...process.env, ...(dataRoot && dataRoot !== ENGINE_ROOT ? { CAREER_OPS_ROOT: dataRoot } : {}) };
-    const child = spawn(process.execPath, args, { cwd: ENGINE_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let child;
+    try {
+      child = spawnImpl(process.execPath, args, {
+        cwd: ENGINE_ROOT,
+        env,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      resolve({ code: 1, stdout: '', stderr: `Unable to start ${args[0]}: ${error.message}` });
+      return;
+    }
     let stdout = '', stderr = '';
     child.stdout.on('data', (c) => { stdout += c; });
     child.stderr.on('data', (c) => { stderr += c; });
@@ -568,13 +599,20 @@ function spawnNode(args, dataRoot) {
   });
 }
 
-async function refreshDashboard(root = DEFAULT_ROOT) {
-  if (!refreshPromise) {
-    const setPhase = (n, name) => { refreshState.phase = n; refreshState.phaseName = name; };
-    refreshState.running = true;
-    refreshState.startedAt = Date.now();
+export async function refreshDashboard(root = DEFAULT_ROOT, options = {}) {
+  const context = refreshContext(root);
+  if (!context.promise) {
+    const generation = ++context.generation;
+    const setPhase = (n, name) => { context.state.phase = n; context.state.phaseName = name; };
+    context.state.running = true;
+    context.state.startedAt = Date.now();
+    context.state.completedAt = null;
+    context.state.outcome = 'running';
+    context.state.lastError = null;
     setPhase(1, 'Scanning tracked companies');
-    refreshPromise = refreshJobSearch(root, {
+    const executeSearch = options.refreshJobSearchImpl || refreshJobSearch;
+    const buildPayload = options.buildDashboardPayloadImpl || buildDashboardPayload;
+    context.promise = executeSearch(root, {
       engineRoot: ENGINE_ROOT,
       runScan: async () => {
         setPhase(1, 'Scanning tracked companies');
@@ -588,19 +626,28 @@ async function refreshDashboard(root = DEFAULT_ROOT) {
         setPhase(3, 'Fetching job board feeds');
         return r;
       },
-    }).then(() => setPhase(4, 'Scoring & saving results'))
+    }).then(() => {
+      setPhase(4, 'Scoring & saving results');
+      context.state.outcome = 'success';
+      return buildPayload(root);
+    }).catch((error) => {
+      context.state.outcome = 'failed';
+      context.state.lastError = error?.message || String(error);
+      throw error;
+    })
       .finally(() => {
         setTimeout(() => {
-          refreshState.running = false;
-          refreshState.phase = 0;
-          refreshState.phaseName = '';
-          refreshState.startedAt = null;
-        }, 3000);
-        refreshPromise = null;
+          if (context.generation !== generation) return;
+          context.state.running = false;
+          context.state.phase = 0;
+          context.state.phaseName = '';
+          context.state.startedAt = null;
+          context.state.completedAt = new Date().toISOString();
+        }, options.settleDelayMs ?? 3000);
+        context.promise = null;
       });
   }
-  await refreshPromise;
-  return buildDashboardPayload(root);
+  return context.promise;
 }
 
 async function readJsonBody(req, limit = 64 * 1024) {

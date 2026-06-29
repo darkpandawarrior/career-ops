@@ -288,7 +288,7 @@
           </button>
           <button class="tab-btn" data-tab="ops" role="tab">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-            Ops<span id="queueBadge" class="tab-badge" hidden></span>
+            Ops<span id="queueBadge" class="tab-badge candidate-hidden" hidden></span>
           </button>
           <button class="tab-btn" data-tab="intel" role="tab">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -298,6 +298,7 @@
 
         <!-- ── Jobs tab ── -->
         <div id="tab-jobs" class="tab-panel">
+          <p class="tab-explanation"><strong>Jobs</strong> = opportunities discovered and ranked for the selected profile.</p>
 
           <div id="refreshPanel" class="refresh-panel" hidden>
             <div class="refresh-panel-inner">
@@ -371,7 +372,7 @@
               High application fit <span class="tab-count" id="recommendedCount">0</span>
             </button>
             <button class="jsec-tab" data-sec="review">
-              Review <span class="tab-count" id="reviewCount">0</span>
+              Low Fit <span class="tab-count" id="reviewCount">0</span>
             </button>
             <button class="jsec-tab" data-sec="source">
               Job discovery leads <span class="tab-count" id="sourceSectionCount">0</span>
@@ -391,6 +392,7 @@
 
         <!-- ── Tracker tab ── -->
         <div id="tab-tracker" class="tab-panel" hidden>
+          <p class="tab-explanation"><strong>Tracker</strong> = applications and their progress through the hiring pipeline.</p>
           <div id="tracker-funnel"></div>
 
           <div class="tracker-header">
@@ -403,7 +405,6 @@
             <div class="t-panel">
               <h3 class="t-head">Pending Offers Inbox</h3>
               <div id="apps-pipeline"><p class="t-muted">Loading…</p></div>
-              <p class="t-muted" style="margin-top:8px">Evaluate all: queue <strong>/career-ops pipeline</strong> from Console.</p>
             </div>
             <div class="t-panel">
               <h3 class="t-head">Evaluation Reports</h3>
@@ -416,13 +417,13 @@
                 <thead><tr><th>Company</th><th>Status</th><th>Urgency</th><th>Next</th></tr></thead>
                 <tbody></tbody>
               </table>
-              <p class="t-muted" style="margin-top:6px">Queue "/career-ops followup" in Console for drafted messages.</p>
             </div>
           </div>
         </div>
 
         <!-- ── Ops tab ── -->
         <div id="tab-ops" class="tab-panel" hidden>
+          <p class="tab-explanation"><strong>Ops</strong> = search coverage, source health, refresh progress, and failures.</p>
 
           <!-- Action bar -->
           <div class="ops-action-bar">
@@ -439,7 +440,7 @@
           <pre id="scan-out" class="t-pre" hidden style="margin-bottom:16px"></pre>
 
           <!-- Agent inbox -->
-          <div class="ops-inbox-panel">
+          <div class="ops-inbox-panel candidate-hidden" aria-hidden="true">
             <div class="ops-inbox-head">
               <div>
                 <h3>Agent Inbox</h3>
@@ -455,7 +456,7 @@
           </div>
 
           <!-- Commands + Companies 3-col -->
-          <div class="ops-main-grid">
+          <div class="ops-main-grid candidate-hidden" aria-hidden="true">
             <div class="t-panel">
               <h3 class="t-head">career-ops commands</h3>
               <div id="cmds-career" class="cmd-grid"></div>
@@ -492,6 +493,7 @@
 
         <!-- ── Intel tab ── -->
         <div id="tab-intel" class="tab-panel" hidden>
+          <p class="tab-explanation"><strong>Intel</strong> = candidate profile and targeting insights.</p>
 
           <!-- ── Profile banner ── -->
           <div class="intel-banner">

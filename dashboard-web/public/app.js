@@ -188,8 +188,21 @@ async function initialize() {
     }
   }
   // Auto-bypass onboarding when an active profile already exists
-  if (state.payload.setup?.hasActiveProfile) showDashboard();
+  if (state.payload.setup?.hasActiveProfile) {
+    showDashboard();
+    if (_profileParam) void backgroundRefreshSelectedProfile();
+  }
   else showUpload();
+}
+
+async function backgroundRefreshSelectedProfile() {
+  setDashboardBusy(true);
+  try {
+    await request('/api/refresh', { method: 'POST' });
+  } catch (error) {
+    els.statusLine.textContent = `Cached jobs loaded; background refresh failed: ${error.message}`;
+    setDashboardBusy(false);
+  }
 }
 
 async function loadDashboard(force) {
@@ -1559,9 +1572,15 @@ function startRefreshPoll() {
       updateRefreshStages(s.phase || 1);
       if (!s.running) {
         stopRefreshPoll();
-        // reload jobs data now that scan finished
+        // Reload the selected profile's cache after a completed search attempt.
         await loadDashboard(false);
         setDashboardBusy(false);
+        if (s.outcome === 'failed') {
+          els.statusLine.textContent = `Search failed: ${s.lastError || 'Unknown refresh error'}. Cached jobs are still shown.`;
+          els.statusLine.classList.add('error');
+        } else {
+          els.statusLine.classList.remove('error');
+        }
       }
     } catch { /* server temporarily unreachable — keep polling */ }
   }, 1500);

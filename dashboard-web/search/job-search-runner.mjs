@@ -79,10 +79,10 @@ export async function refreshJobSearch(root, options = {}) {
       if (!isDiscoverableJob(job)) { funnel.irrelevant += 1; continue; }
     }
     const existing = byId.get(job.id);
+    if (existing) funnel.duplicates += 1;
     if (!existing
       || job.score > existing.score
       || (job.score === existing.score && job.snippet.length > existing.snippet.length)) {
-      if (existing) funnel.duplicates += 1;
       byId.set(job.id, job);
     }
   }
@@ -123,7 +123,15 @@ export async function refreshJobSearch(root, options = {}) {
     },
   };
   await mkdir(path.join(root, 'data'), { recursive: true });
-  await writeFile(path.join(root, 'data', 'job-dashboard.json'), JSON.stringify(payload, null, 2), 'utf8');
+  const cachePath = path.join(root, 'data', 'job-dashboard.json');
+  await writeFile(cachePath, JSON.stringify(payload, null, 2), 'utf8');
+  if (options.autoEnrich !== false && jobs.some((job) => job.type === 'searchLead')) {
+    await enrichDiscoveryLeads(root, {
+      fetchImpl,
+      limit: options.enrichmentLimit ?? 4,
+    });
+    return JSON.parse(await readFile(cachePath, 'utf8'));
+  }
   return payload;
 }
 
@@ -267,6 +275,33 @@ export async function enrichDiscoveryLead(root, id, options = {}) {
   cache.leadEnrichment = { lastAttempt: attemptedAt, leadId: lead.id, promotedJobs: jobs.length };
   await writeFile(cachePath, JSON.stringify(cache, null, 2), 'utf8');
   return { status: 'promoted', leadId: lead.id, jobs, errors };
+}
+
+export async function enrichDiscoveryLeads(root, options = {}) {
+  const cachePath = path.join(root, 'data', 'job-dashboard.json');
+  const cache = JSON.parse(await readFile(cachePath, 'utf8'));
+  const leads = (cache.jobs || [])
+    .filter((job) => job.type === 'searchLead' && job.discoveryQuery)
+    .slice(0, Math.max(0, Number(options.limit ?? 8)));
+  const results = [];
+  for (const lead of leads) {
+    try {
+      const result = await enrichDiscoveryLead(root, lead.id, { fetchImpl: options.fetchImpl });
+      results.push({ leadId: lead.id, status: result.status, promotedJobs: result.jobs?.length || 0 });
+    } catch (error) {
+      results.push({ leadId: lead.id, status: 'failed', promotedJobs: 0, reason: error.message });
+    }
+  }
+  const latest = JSON.parse(await readFile(cachePath, 'utf8'));
+  latest.leadEnrichmentBatch = {
+    attemptedAt: new Date().toISOString(),
+    attempted: results.length,
+    promotedJobs: results.reduce((sum, result) => sum + result.promotedJobs, 0),
+    failed: results.filter((result) => result.status === 'failed').length,
+    results,
+  };
+  await writeFile(cachePath, JSON.stringify(latest, null, 2), 'utf8');
+  return latest.leadEnrichmentBatch;
 }
 
 async function fetchTrackedCompanyFeeds(portals, fetchImpl, errors) {
@@ -419,9 +454,19 @@ function parseSolidJobs(data, source) {
 
 async function searchConfiguredQueries(queries, fetchImpl, errors) {
   const selected = queries.slice(0, Number(process.env.CAREER_DASHBOARD_SEARCH_LIMIT || 150));
+  const concurrency = Math.max(1, Number(process.env.CAREER_DASHBOARD_SEARCH_CONCURRENCY || 10));
+  const queryTimeoutMs = Math.max(1000, Number(process.env.CAREER_DASHBOARD_QUERY_TIMEOUT_MS || 8000));
+  const budgetMs = Math.max(queryTimeoutMs, Number(process.env.CAREER_DASHBOARD_SEARCH_BUDGET_MS || 60_000));
+  const startedAt = Date.now();
   const results = [];
-  for (let index = 0; index < selected.length; index += 5) {
-    const chunk = selected.slice(index, index + 5);
+  for (let index = 0; index < selected.length; index += concurrency) {
+    if (Date.now() - startedAt >= budgetMs) {
+      const remaining = selected.slice(index);
+      errors.push(`Generated search budget reached after ${index} of ${selected.length} queries`);
+      results.push(...remaining.map((query) => searchLead(query, 'Not fetched before the generated-search time budget expired')));
+      break;
+    }
+    const chunk = selected.slice(index, index + concurrency);
     const batch = await Promise.all(chunk.map(async (query) => {
       try {
         const body = new URLSearchParams({ q: query.query });
@@ -432,6 +477,7 @@ async function searchConfiguredQueries(queries, fetchImpl, errors) {
             'user-agent': 'hiresignal/1.0',
           },
           body,
+          timeoutMs: queryTimeoutMs,
         });
         const html = await response.text();
         const parsed = parseDuckResults(html, query);
@@ -581,9 +627,10 @@ function providerLabel(value) {
 
 async function fetchWithTimeout(url, fetchImpl, options = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetchImpl(url, { ...options, signal: controller.signal });
+    return await fetchImpl(url, { ...fetchOptions, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }

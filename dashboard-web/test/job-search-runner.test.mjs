@@ -83,6 +83,8 @@ test('a discovery lead can be verified and promoted into ranked jobs', async () 
   });
   const lead = initial.jobs.find((job) => job.type === 'searchLead' && job.discoveryQuery);
   assert.ok(lead);
+  assert.equal(initial.leadEnrichmentBatch.attempted, 4);
+  assert.equal(initial.leadEnrichmentBatch.promotedJobs, 0);
   const result = await enrichDiscoveryLead(root, lead.id, {
     fetchImpl: async () => textResponse('<a class="result__a" href="https://jobs.example.test/promoted">Senior Backend Engineer Java PostgreSQL Docker Kafka - Promoted Co</a>'),
   });
@@ -176,6 +178,40 @@ test('valid low-fit jobs are retained and the discovery funnel is observable', a
   assert.ok(payload.telemetry.funnel.raw >= payload.telemetry.funnel.final);
   assert.equal(payload.telemetry.funnel.final, payload.jobs.filter((item) => item.type !== 'searchLead').length);
   assert.ok(payload.telemetry.funnel.unknownDate >= 1);
+});
+
+test('controlled discovery inventory produces 50 to 100 verified deduplicated jobs', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
+  await mkdir(path.join(root, 'config'), { recursive: true });
+  await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig());
+  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  let searchCalls = 0;
+  const fetchImpl = async (url) => {
+    if (String(url).includes('remoteok.com')) return jsonResponse([]);
+    if (String(url).includes('remotive.com')) return jsonResponse({ jobs: [] });
+    if (String(url).includes('jobicy.com')) return jsonResponse({ jobs: [] });
+    if (String(url).includes('himalayas.app')) return jsonResponse({ jobs: [] });
+    if (String(url).includes('arbeitnow.com')) return jsonResponse({ data: [] });
+    if (String(url).includes('workingnomads.com')) return jsonResponse([]);
+    if (String(url).includes('solid.jobs')) return jsonResponse({ jobs: [] });
+    const call = searchCalls++;
+    const group = call < 7 ? call : 0;
+    const results = Array.from({ length: 12 }, (_, index) => {
+      const id = group * 12 + index;
+      return `<a class="result__a" href="https://jobs.example.test/verified-${id}">
+        Backend Engineer Java PostgreSQL Docker - Verified Company ${id}</a>`;
+    }).join('');
+    return textResponse(results);
+  };
+  const payload = await refreshJobSearch(root, {
+    fetchImpl,
+    runScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+    runWideScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  assert.equal(payload.telemetry.funnel.final, 84);
+  assert.equal(payload.jobs.filter((job) => job.type !== 'searchLead').length, 84);
+  assert.ok(payload.telemetry.funnel.duplicates > 0);
+  assert.equal(payload.telemetry.funnel.unknownDate, payload.telemetry.funnel.verified);
 });
 
 function profileConfig() {
