@@ -108,11 +108,12 @@ Selection is driven by a query parameter and made sticky by a cookie.
 
 - **`?profile=<slug>`** — open any dashboard URL with this query param to view that
   profile's data, e.g. `http://localhost:3000/?profile=siddharth`.
-- **Stickiness (`co-profile` cookie)** — `web/middleware.ts` resolves the slug once
-  per request and forwards it to every page/route handler as the `x-co-profile`
-  request header. When `?profile=` is **explicit**, the slug is persisted in the
-  `co-profile` cookie (`httpOnly`, `sameSite=lax`), so subsequent plain navigations
-  (bare links without the query string) keep the same profile.
+- **Stickiness (`co-profile` cookie)** — `web/src/proxy.ts` (Next 16's renamed
+  `middleware`) resolves the slug once per request and forwards it to every
+  page/route handler as the `x-co-profile` request header. When `?profile=` is
+  **explicit**, the slug is persisted in the `co-profile` cookie (`httpOnly`,
+  `sameSite=lax`), so subsequent plain navigations (bare links without the query
+  string) keep the same profile.
 - **Precedence** — explicit `?profile=` query param **wins** over the cookie. An
   explicit but **empty or invalid** `?profile=` clears the cookie → back to the
   single-profile root.
@@ -126,6 +127,27 @@ For CLI/cron runs against a specific profile, point the engine at that data root
 ```
 CAREER_OPS_ROOT=/path/to/checkout/profiles/siddharth node verify-pipeline.mjs
 ```
+
+### Per-profile AI CLI selection (`config/cli.yml`)
+
+The dashboard runs every AI action — the assistant, AI search, CV parsing, and the
+**Evaluate / Apply workers** — through whichever coding CLI the user has installed
+(Claude Code, Codex, Gemini, …). That choice is **per profile**, not global:
+
+- **`GET /api/cli`** — returns the installed CLIs (`detectClis()`, system-wide) plus
+  the active profile's `selected` CLI. It reads `<root>/config/cli.yml`; if there's
+  no saved choice (or the saved one is no longer installed) it **auto-defaults to the
+  first installed CLI**, so the assistant and workers run without the user first
+  visiting Config.
+- **`POST /api/cli`** `{cliId}` — persists the choice to `<root>/config/cli.yml`.
+- Every client that dispatches an AI run (`job-store`, `apply-provider`,
+  `config-form`, `assistant-console`, `cv-ingest`, `onboarding-banner`, `report`)
+  resolves the CLI from `/api/cli` — never a global `localStorage` key. A worker that
+  showed *"No CLI configured"* despite an installed CLI was reading the old global
+  key; that path is gone.
+
+> One install can host several candidates, each with a different engine
+> (e.g. Siddharth → `claude`, Lakshita → `codex`) without collisions.
 
 ---
 

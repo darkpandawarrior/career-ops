@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -12,14 +12,6 @@ import { cvReadiness, parseCvStream, type CvSeed } from "@/lib/cv/quality";
 import { DEFAULT_FILTERS, filtersToParams } from "@/lib/explore";
 
 type Phase = "input" | "parsing" | "review" | "saving" | "error";
-
-function cliId(): string | null {
-  try {
-    return JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
-  } catch {
-    return null;
-  }
-}
 
 const STYLE = `
 .co-cvdrop{position:relative;border:1.5px dashed color-mix(in srgb, var(--fg) 22%, transparent);border-radius:1rem;transition:border-color .2s,background .2s}
@@ -36,7 +28,18 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
   const [md, setMd] = useState("");
   const [seed, setSeed] = useState<CvSeed | null>(null);
   const [err, setErr] = useState("");
+  // Active profile's CLI (per-profile, from /api/cli) — PDF parsing runs through it.
+  const [cliId, setCliId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/cli")
+      .then((r) => r.json())
+      .then((c) => { if (!cancelled) setCliId(c.selected ?? null); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const readiness = md ? cvReadiness(md) : null;
 
@@ -90,7 +93,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
   }, []);
 
   const ingestText = (text: string) => {
-    const id = cliId();
+    const id = cliId;
     if (!id) {
       setErr("needs-cli");
       setPhase("error");
@@ -120,7 +123,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       return;
     }
     // PDF/other → the user's CLI parses it. Needs a configured CLI.
-    const id = cliId();
+    const id = cliId;
     if (!id) {
       setErr("needs-cli");
       setPhase("error");

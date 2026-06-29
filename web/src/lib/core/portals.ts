@@ -62,9 +62,9 @@ export function cleanupTempPortals(file: string): void {
   }
 }
 
-function loadYaml(rel: string): Record<string, unknown> | null {
+function loadYaml(rel: string, root: string = careerOpsRoot()): Record<string, unknown> | null {
   try {
-    const doc = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8"));
+    const doc = yaml.load(fs.readFileSync(path.join(root, rel), "utf8"));
     return doc && typeof doc === "object" ? (doc as Record<string, unknown>) : null;
   } catch {
     return null;
@@ -76,12 +76,16 @@ function loadYaml(rel: string): Record<string, unknown> | null {
  * portals.yml (title_filter / location_filter) and falls back to
  * config/profile.yml (target_roles, location) for the positive keywords when
  * portals has none. Never throws — a bare checkout just yields DEFAULT_FILTERS.
+ *
+ * `root` is the ACTIVE profile's data root (from requestRoot()) so the Explorer
+ * seeds from the right candidate's portals.yml — never the engine root's by
+ * default in a multi-profile install.
  */
-export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: string[] } {
+export function seedExploreFilters(root: string = careerOpsRoot()): { filters: ExploreFilters; seededFrom: string[] } {
   const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] };
   const seededFrom: string[] = [];
 
-  const portals = loadYaml("portals.yml");
+  const portals = loadYaml("portals.yml", root);
   if (portals) {
     const tf = (portals.title_filter ?? {}) as Record<string, unknown>;
     const lf = (portals.location_filter ?? {}) as Record<string, unknown>;
@@ -94,7 +98,7 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
   }
 
   if (filters.positive.length === 0) {
-    const profile = loadYaml("config/profile.yml");
+    const profile = loadYaml("config/profile.yml", root);
     const roles = (profile?.target_roles ?? {}) as Record<string, unknown>;
     const fromRoles = listFrom([
       ...(typeof roles.primary === "string" ? [roles.primary] : []),

@@ -3,10 +3,12 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 
 /**
- * Interview-coach state — ports dashboard-web/server.mjs#parseCoachState. The
- * coaching_state.md lives in the sibling interview-coach-skill checkout (one per
- * candidate, global to the engine), so it is resolved relative to the engine
- * root, not the per-profile data root.
+ * Interview-coach state — ports dashboard-web/server.mjs#parseCoachState.
+ *
+ * Resolution order (per profile root):
+ *   1. <profile_root>/coaching_state.md  — profile-local (federation absorb writes here)
+ *   2. <engine_root>/../interview-coach-skill/coaching_state.md  — global, only for the
+ *      engine-root profile (Siddharth). Other profiles get null if no local file exists.
  */
 
 export type CoachStory = { id: string; title: string; skill: string; skill2: string; strength: string };
@@ -33,8 +35,16 @@ export type CoachState = {
   gatesPassed: string;
 };
 
-function coachStatePath(): string {
-  return path.resolve(careerOpsRoot(), "..", "interview-coach-skill", "coaching_state.md");
+function coachStatePath(root: string): string | null {
+  // 1. Profile-local file (federation absorb writes here; any profile can have one)
+  const local = path.join(root, "coaching_state.md");
+  if (fs.existsSync(local)) return local;
+  // 2. Global sibling checkout — only valid for the engine-root profile
+  if (path.resolve(root) === path.resolve(careerOpsRoot())) {
+    const global_ = path.resolve(careerOpsRoot(), "..", "interview-coach-skill", "coaching_state.md");
+    if (fs.existsSync(global_)) return global_;
+  }
+  return null;
 }
 
 function sectionOf(text: string, name: string): string {
@@ -45,11 +55,13 @@ function sectionOf(text: string, name: string): string {
 
 const bullets = (s: string) => s.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
 
-/** Read + parse coaching_state.md, or null when the skill checkout is absent. */
-export function readCoachState(): CoachState | null {
+/** Read + parse coaching_state.md for the given profile root, or null when absent. */
+export function readCoachState(root: string = careerOpsRoot()): CoachState | null {
+  const statePath = coachStatePath(root);
+  if (!statePath) return null;
   let text: string;
   try {
-    text = fs.readFileSync(coachStatePath(), "utf8");
+    text = fs.readFileSync(statePath, "utf8");
   } catch {
     return null;
   }
@@ -92,7 +104,7 @@ export function readCoachState(): CoachState | null {
     /^\| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \|$/gm,
   )) {
     const c = m.slice(1).map((s) => s.trim());
-    if (c[0] === "Date") continue;
+    if (c[0] === "Date" || /^-+$/.test(c[0])) continue;
     questions.push({ date: c[0], company: c[1], round: c[3], question: c[4], competency: c[5], outcome: c[7] });
   }
 

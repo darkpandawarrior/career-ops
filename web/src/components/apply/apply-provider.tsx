@@ -42,15 +42,6 @@ export function useApply(): ApplyCtx {
   return c;
 }
 
-const CONFIG_KEY = "career-ops:config";
-function cliId(): string | null {
-  try {
-    return JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").cliId || null;
-  } catch {
-    return null;
-  }
-}
-
 export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>("idle");
   const [url, setUrl] = useState("");
@@ -77,6 +68,19 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   metaRef.current = meta;
   const rememberRef = useRef<Record<string, boolean>>({});
   rememberRef.current = remember;
+  // Active profile's CLI (per-profile, from /api/cli — auto-defaults to first
+  // installed). Resolved once on mount into a ref so the synchronous call sites
+  // below keep working; never the global localStorage key.
+  const cliIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/cli")
+      .then((r) => r.json())
+      .then((c) => { if (!cancelled) cliIdRef.current = c.selected ?? null; })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const cliId = useCallback(() => cliIdRef.current, []);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashMemory = useCallback((msg: string) => {
     setMemoryToast(msg);

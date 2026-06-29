@@ -152,20 +152,40 @@ export function AssistantConsole() {
   const handledRef = useRef<Set<string>>(new Set());
   const confirmRuns = useRef<Map<string, () => DoneInfo>>(new Map());
 
-  // selected CLI from Config (reacts to changes in other tabs)
+  // selected CLI for the ACTIVE profile. Source of truth is the server
+  // (/api/cli → <profile_root>/config/cli.yml), which also auto-defaults to the
+  // first installed CLI — so the assistant is enabled even before the user visits
+  // Config. localStorage is a fallback only. Re-reads when the panel opens and on
+  // cross-/same-tab "storage" events (Config dispatches one after saving).
   useEffect(() => {
-    function read() {
+    let cancelled = false;
+    async function read() {
+      try {
+        const r = await fetch("/api/cli");
+        if (r.ok) {
+          const d = await r.json();
+          if (!cancelled) {
+            setCliId(d.selected ?? null);
+            return;
+          }
+        }
+      } catch {
+        /* fall back to localStorage */
+      }
       try {
         const raw = localStorage.getItem(CONFIG_KEY);
-        setCliId(raw ? JSON.parse(raw).cliId || null : null);
+        if (!cancelled) setCliId(raw ? JSON.parse(raw).cliId || null : null);
       } catch {
-        setCliId(null);
+        if (!cancelled) setCliId(null);
       }
     }
     read();
     window.addEventListener("storage", read);
-    return () => window.removeEventListener("storage", read);
-  }, []);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("storage", read);
+    };
+  }, [open]);
 
   // restore + persist conversation
   useEffect(() => {

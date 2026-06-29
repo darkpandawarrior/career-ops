@@ -33,7 +33,10 @@ function shortSha(): string {
 
 export async function GET() {
   const version = readVersion();
-  const m = version.match(/-(rc|beta|alpha|next)\b/i);
+  // Match the pre-release suffix in any common form: -rc, -rc1, -rc.1, -beta2…
+  // The old trailing \b never matched a suffix glued to a digit (-rc1), so RC
+  // builds wrongly reported "stable" and the beta banner never showed.
+  const m = version.match(/-(rc|beta|alpha|next)(?![a-z])/i);
   const channel = m ? m[1].toLowerCase() : "stable";
   return Response.json({ version, channel, sha: shortSha() });
 }

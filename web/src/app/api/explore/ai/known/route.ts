@@ -1,4 +1,5 @@
 import { assembleDedupContext } from "@/lib/core/discover";
+import { requestRoot } from "@/lib/profile-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,7 +9,8 @@ export const dynamic = "force-dynamic";
 // is already known). Keeps the stream itself pure text/plain.
 export async function GET() {
   try {
-    const { urls } = assembleDedupContext();
+    const root = await requestRoot();
+    const { urls } = assembleDedupContext(root);
     return Response.json({ urls: [...urls] });
   } catch {
     return Response.json({ urls: [] });

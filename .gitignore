@@ -53,6 +53,12 @@ modes/_profile.md
 /sync/
 /profiles.yml
 
+# Per-candidate web runtime + private/transient artifacts — never commit.
+/.career-ops-web/
+/resumes/
+/data/agent-inbox.md
+/.claude/
+
 # Secrets (never commit — use .env.example as template)
 .env
 # Universal safety net — protects ALL checkouts/branches, incl. untracked subprojects

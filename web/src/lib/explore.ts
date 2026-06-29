@@ -156,6 +156,19 @@ export function filtersToParams(f: ExploreFilters): string {
   return sp.toString();
 }
 
+/** Keys paramsToFilters reads — a shared/restorable Explore search. */
+const FILTER_PARAM_KEYS = ["q", "not", "loc", "noloc", "home", "since", "ats", "limit"] as const;
+
+/**
+ * True only when the URL carries an ACTUAL Explore search (one of the filter
+ * params above). Unrelated query params — notably `?profile=slug` from the
+ * multi-profile router — must NOT count, or the empty paramsToFilters() would
+ * clobber the server seed (the candidate's portals.yml roles).
+ */
+export function hasExploreParams(sp: URLSearchParams): boolean {
+  return FILTER_PARAM_KEYS.some((k) => sp.has(k));
+}
+
 export function paramsToFilters(sp: URLSearchParams, base: ExploreFilters = DEFAULT_FILTERS): ExploreFilters {
   const split = (s: string | null) => (s ? s.split(",") : undefined);
   return parseExplorePatch(

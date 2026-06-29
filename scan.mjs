@@ -42,14 +42,16 @@ const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
-const SCAN_HISTORY_PATH = 'data/scan-history.tsv';
-const PIPELINE_PATH = 'data/pipeline.md';
-const APPLICATIONS_PATH = 'data/applications.md';
-const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
+const _SCAN_ENGINE = path.dirname(fileURLToPath(import.meta.url));
+const _SCAN_DATA_ROOT = process.env.CAREER_OPS_ROOT ? path.resolve(process.env.CAREER_OPS_ROOT) : _SCAN_ENGINE;
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(_SCAN_DATA_ROOT, 'portals.yml');
+const SCAN_HISTORY_PATH = path.join(_SCAN_DATA_ROOT, 'data/scan-history.tsv');
+const PIPELINE_PATH = path.join(_SCAN_DATA_ROOT, 'data/pipeline.md');
+const APPLICATIONS_PATH = path.join(_SCAN_DATA_ROOT, 'data/applications.md');
+const PROVIDERS_DIR = path.resolve(_SCAN_ENGINE, 'providers');
 
 // Ensure required directories exist (fresh setup)
-mkdirSync('data', { recursive: true });
+mkdirSync(path.join(_SCAN_DATA_ROOT, 'data'), { recursive: true });
 
 const CONCURRENCY = 10;
 

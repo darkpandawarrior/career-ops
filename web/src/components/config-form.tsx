@@ -50,7 +50,9 @@ export function ConfigForm() {
         // key/manual are not wired yet (nothing reads them) → never restore into
         // those dead panels; only the Installed-CLI path is functional.
         if (v.mode === "cli") setMode("cli");
-        if (v.cliId) setCliId(v.cliId);
+        // cliId is NOT restored from localStorage — it's per-profile and the
+        // source of truth is the server (/api/cli). localStorage holds only the
+        // global UI prefs (mode/provider/apiKey/logos).
         if (v.provider) setProvider(v.provider);
         if (typeof v.apiKey === "string") setApiKey(v.apiKey);
         if (typeof v.logos === "boolean") setLogos(v.logos);
@@ -60,21 +62,39 @@ export function ConfigForm() {
     }
   }, []);
 
-  // Detect installed CLIs
+  // Detect installed CLIs + the ACTIVE profile's saved choice (profile-aware).
+  // /api/cli returns { clis, selected } where `selected` is this profile's saved
+  // cli.yml choice, or an auto-default to the first installed CLI.
   useEffect(() => {
-    fetch("/api/clis")
+    fetch("/api/cli")
       .then((r) => r.json())
       .then((d) => {
         const list: Cli[] = d.clis ?? [];
         setClis(list);
-        // auto-select first installed if nothing chosen yet
-        setCliId((prev) => prev || list.find((c) => c.installed)?.id || "");
+        setCliId(d.selected || list.find((c) => c.installed)?.id || "");
       })
       .catch(() => setClis([]));
   }, []);
 
   function save() {
+    // Persist the CLI choice per-profile on the server (the source of truth the
+    // assistant reads), and mirror the global UI prefs to localStorage. The
+    // synthetic "storage" event nudges the assistant console (same tab) to re-read.
+    if (cliId) {
+      fetch("/api/cli", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cliId }),
+      }).catch(() => {
+        /* best-effort — localStorage below still gives the UI an instant choice */
+      });
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, apiKey, logos }));
+    try {
+      window.dispatchEvent(new Event("storage"));
+    } catch {
+      /* ignore */
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }

@@ -10,14 +10,15 @@ import { canon } from "@/lib/explore-ai";
  * token-cheap — not thousands of raw URLs) so it skips known employers, AND a
  * canonicalized URL set the client uses as a silent backstop on the stream.
  */
-export function assembleDedupContext(): { urls: Set<string>; lines: string[] } {
+export function assembleDedupContext(root: string = careerOpsRoot()): { urls: Set<string>; lines: string[] } {
   const urls = new Set<string>();
   const companies = new Set<string>();
   const roles = new Set<string>();
 
-  // scan-history.tsv col 0 = url (every URL ever surfaced)
+  // scan-history.tsv col 0 = url (every URL ever surfaced) — read from the ACTIVE
+  // profile root so AI-search dedup never leaks another candidate's history.
   try {
-    const tsv = fs.readFileSync(path.join(careerOpsRoot(), "data", "scan-history.tsv"), "utf8");
+    const tsv = fs.readFileSync(path.join(root, "data", "scan-history.tsv"), "utf8");
     const rows = tsv.split("\n");
     for (let i = 1; i < rows.length; i++) {
       const url = rows[i].split("\t")[0]?.trim();
@@ -27,11 +28,11 @@ export function assembleDedupContext(): { urls: Set<string>; lines: string[] } {
     /* no history yet */
   }
 
-  for (const j of readInbox()) {
+  for (const j of readInbox(root)) {
     if (j.url && /^https?:\/\//i.test(j.url)) urls.add(canon(j.url));
     if (j.company) companies.add(j.company.trim());
   }
-  for (const a of readApplications()) {
+  for (const a of readApplications(root)) {
     if (a.company) companies.add(a.company.trim());
     if (a.role) roles.add(a.role.trim());
   }

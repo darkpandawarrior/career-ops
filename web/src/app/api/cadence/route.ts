@@ -22,7 +22,7 @@ export async function GET() {
       "node",
       [script, "--json"],
       { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, timeout: 15_000 },
-      (_e, out) => resolve(out || ""),
+      (err, out) => resolve(err ? "" : out || ""),
     );
   });
   try {

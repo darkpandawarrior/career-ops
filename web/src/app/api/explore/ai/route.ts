@@ -53,7 +53,7 @@ export async function POST(req: Request) {
   }
 
   const dataRoot = await requestRoot();
-  const { lines } = assembleDedupContext();
+  const { lines } = assembleDedupContext(dataRoot);
   const memory = readMemory(dataRoot);
   const memoryLine = memory.trim() ? `\n\nWHAT YOU KNOW ABOUT THE USER (persistent memory):\n${memory.trim()}` : "";
   const knownBlock = lines.length ? `\n\n--- ALREADY KNOWN (dedup — do NOT propose these) ---\n${lines.join("\n")}` : "";
