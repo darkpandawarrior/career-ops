@@ -159,6 +159,55 @@ export function pipelineSummary(root: string = careerOpsRoot()): PipelineSummary
   };
 }
 
+export type ScanRow = {
+  url: string;
+  first_seen: string;
+  portal: string;
+  title: string;
+  company: string;
+  status: string;
+  location: string;
+};
+
+export type ScanHistory = {
+  total: number;
+  lastScan: string;
+  byStatus: Record<string, number>;
+  rows: ScanRow[];
+};
+
+/**
+ * Parse data/scan-history.tsv — the discovery log written by scan.mjs. Columns:
+ * url, first_seen, portal, title, company, status, location (tab-separated, with
+ * a header row). Ports dashboard-web/server.mjs#parseScanHistory (newest first).
+ */
+export function readScanHistory(root: string = careerOpsRoot()): ScanHistory {
+  const raw = read("data/scan-history.tsv", root) ?? "";
+  const lines = raw.trim().split("\n").slice(1).filter(Boolean); // drop header
+  const byStatus: Record<string, number> = {};
+  let lastScan = "";
+  const rows: ScanRow[] = [];
+  for (const line of lines) {
+    const [url, first_seen, portal, title, company, status, location] = line.split("\t");
+    byStatus[status] = (byStatus[status] || 0) + 1;
+    if (first_seen > lastScan) lastScan = first_seen;
+    rows.push({ url, first_seen, portal, title, company, status, location });
+  }
+  return { total: lines.length, lastScan, byStatus, rows: rows.reverse() };
+}
+
+export type AgentInboxItem = { done: boolean; text: string };
+
+/** Parse data/agent-inbox.md — `- [ ] task` checklist the agent queues. */
+export function readAgentInbox(root: string = careerOpsRoot()): AgentInboxItem[] {
+  const md = read("data/agent-inbox.md", root) ?? "";
+  const items: AgentInboxItem[] = [];
+  for (const m of md.matchAll(/^- \[([ xX])\] (.+)$/gm)) {
+    items.push({ done: m[1].toLowerCase() === "x", text: m[2].trim() });
+  }
+  return items;
+}
+
 export type ReportData = { content: string; file: string };
 
 /** Locate the evaluation report for an application number
