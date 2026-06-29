@@ -54,6 +54,8 @@ export function scoreJob(rawJob, rawConfig) {
     compensation,
     gates,
   });
+  const missingInformation = buildMissingInformation(job, experience, eligibility, compensation);
+  const recommendedAction = buildRecommendedAction({ gates, eligibility, scoreRaw, missingInformation });
 
   return {
     ...job,
@@ -93,6 +95,8 @@ export function scoreJob(rawJob, rawConfig) {
     reasons,
     whyRanksHighly: explanation.positive,
     potentialConcerns: explanation.concerns,
+    missingInformation,
+    recommendedAction,
   };
 }
 
@@ -126,6 +130,12 @@ function normalizeRawJob(rawJob = {}) {
     snippet,
     compensation: rawJob.compensation,
     salary: rawJob.salary,
+    employmentType: clean(rawJob.employmentType || rawJob.employment_type) || inferEmploymentType(snippet),
+    authorization: clean(rawJob.authorization || rawJob.workAuthorization || rawJob.work_authorization) || 'unknown',
+    remoteRestrictions: clean(rawJob.remoteRestrictions || rawJob.remote_restrictions) || inferRemoteRestrictions(snippet),
+    postedDate: normalizeDate(rawJob.postedDate || rawJob.posted_at || rawJob.publishedAt || rawJob.published_at || rawJob.date),
+    updatedDate: normalizeDate(rawJob.updatedDate || rawJob.updated_at),
+    freshness: classifyFreshness(rawJob.postedDate || rawJob.posted_at || rawJob.publishedAt || rawJob.published_at || rawJob.date),
     text: `${title} ${company} ${location} ${source} ${snippet}`,
   };
 }
@@ -171,10 +181,65 @@ function scoreOtherSignals(job, compensation, preferences) {
     : compensation.status === 'meets_minimum' ? 1 : 0.7;
   const sourceRatio = job.source ? 1 : 0.6;
   const preferenceRatio = negative ? 0 : domainMatch || preferences.domains.length === 0 ? 1 : 0.6;
+  const freshnessRatio = job.freshness.band === '0-14 days' ? 1
+    : job.freshness.band === '15-30 days' ? 0.8
+      : job.freshness.band === '31-60 days' ? 0.45
+        : job.freshness.band === 'over 60 days' ? 0 : 0.55;
   return {
-    ratio: compensationRatio * 0.5 + sourceRatio * 0.2 + preferenceRatio * 0.3,
-    reason: [compensation.label, domainMatch ? 'preferred industry' : '', negative ? 'excluded preference found' : '', job.source ? `source: ${job.source}` : 'source unclear'].filter(Boolean).join('; '),
+    ratio: compensationRatio * 0.35 + sourceRatio * 0.15 + preferenceRatio * 0.25 + freshnessRatio * 0.25,
+    reason: [compensation.label, job.freshness.label, domainMatch ? 'preferred industry' : '', negative ? 'excluded preference found' : '', job.source ? `source: ${job.source}` : 'source unclear'].filter(Boolean).join('; '),
   };
+}
+
+export function classifyFreshness(value, now = new Date()) {
+  const normalized = normalizeDate(value);
+  if (!normalized) return { band: 'unknown', daysOld: null, label: 'Posting date unknown', confirmed: false };
+  const daysOld = Math.max(0, Math.floor((now.getTime() - new Date(normalized).getTime()) / 86_400_000));
+  if (daysOld <= 14) return { band: '0-14 days', daysOld, label: `Posted ${daysOld} day${daysOld === 1 ? '' : 's'} ago`, confirmed: true };
+  if (daysOld <= 30) return { band: '15-30 days', daysOld, label: `Posted ${daysOld} days ago`, confirmed: true };
+  if (daysOld <= 60) return { band: '31-60 days', daysOld, label: `Posted ${daysOld} days ago`, confirmed: true };
+  return { band: 'over 60 days', daysOld, label: `Posted ${daysOld} days ago`, confirmed: true };
+}
+
+function normalizeDate(value) {
+  if (value == null || value === '') return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function inferEmploymentType(text) {
+  const value = String(text).toLowerCase();
+  if (/\bintern(?:ship)?\b/.test(value)) return 'internship';
+  if (/\bfreelance\b/.test(value)) return 'freelance';
+  if (/\b(?:contract|contractor)\b/.test(value)) return 'contract';
+  if (/\bpart[ -]?time\b/.test(value)) return 'part-time';
+  if (/\bfull[ -]?time\b/.test(value)) return 'full-time';
+  return 'unknown';
+}
+
+function inferRemoteRestrictions(text) {
+  const value = String(text);
+  const match = value.match(/\bremote\s*(?:-|â€“|â€”|:)?\s*(?:only\s+)?(?:within|in|from|for)?\s*([A-Z][A-Za-z ]{2,30})(?:\.|,|$)/i);
+  return match ? match[1].trim() : 'unknown';
+}
+
+function buildMissingInformation(job, experience, eligibility, compensation) {
+  const missing = [];
+  if (!job.postedDate) missing.push('Posting date');
+  if (job.employmentType === 'unknown') missing.push('Employment type');
+  if (experience.min === null && experience.max === null) missing.push('Experience range');
+  if (eligibility.status === 'verify') missing.push('Work authorization or location eligibility');
+  if (job.remoteRestrictions === 'unknown' && /remote/i.test(job.text)) missing.push('Remote location restrictions');
+  if (compensation.status === 'unknown') missing.push('Compensation');
+  return missing;
+}
+
+function buildRecommendedAction({ gates, eligibility, scoreRaw, missingInformation }) {
+  if (gates.length) return 'Do not apply unless the explicit incompatibility is resolved.';
+  if (eligibility.status === 'verify') return 'Verify eligibility with the employer before investing in an application.';
+  if (scoreRaw >= 70) return missingInformation.length ? 'Review the missing details, then consider a tailored application.' : 'Strong candidate for a tailored application.';
+  if (scoreRaw >= 50) return 'Review the concerns before deciding whether to apply.';
+  return 'Keep for reference, but prioritize stronger-fit opportunities.';
 }
 
 function buildExplanation({

@@ -960,6 +960,9 @@ function renderTelemetry(telemetry) {
   els.telemetryMeta.textContent = [
     refreshed && !Number.isNaN(refreshed.getTime()) ? `Last refresh ${refreshed.toLocaleString()}` : '',
     Number.isFinite(telemetry.durationMs) ? `${formatDuration(telemetry.durationMs)}` : '',
+    telemetry.funnel ? `${telemetry.funnel.raw || 0} raw → ${telemetry.funnel.verified || 0} verified → ${telemetry.funnel.final || 0} shown` : '',
+    telemetry.funnel?.over60Days ? `${telemetry.funnel.over60Days} older than 60 days excluded` : '',
+    telemetry.funnel?.unknownDate ? `${telemetry.funnel.unknownDate} dates unknown` : '',
   ].filter(Boolean).join(' · ');
   els.telemetrySources.textContent = '';
   sources.forEach((source) => {
@@ -1201,6 +1204,8 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
   const metaParts = [];
   if (cleanLoc) metaParts.push(cleanLoc);
   if (job.yearsRequired) metaParts.push(cleanText(job.yearsRequired));
+  if (job.employmentType && job.employmentType !== 'unknown') metaParts.push(cleanText(job.employmentType));
+  if (job.freshness?.label) metaParts.push(cleanText(job.freshness.label));
   if (job.remoteStatus === 'open' || job.remoteStatus === 'required') metaParts.push('Remote ok');
   if (metaParts.length) {
     const meta = document.createElement('div');
@@ -1243,6 +1248,7 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
   const concerns = [...(job.potentialConcerns || [])];
   if (isRejCo) concerns.unshift('Previously rejected by this company');
   appendExplanation(explanation, 'Potential concerns', concerns, 'concern');
+  appendExplanation(explanation, 'Missing information', job.missingInformation || [], 'concern');
   if (explanation.childElementCount) card.append(explanation);
 
   // ── Footer: liveness + action buttons ─────────────────────────────────
@@ -1301,6 +1307,9 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
   fg.className = 'job-fields';
   if (!inGroup) addField(fg, 'Organization', cleanText(job.company));
   addField(fg, 'Job site', cleanText(job.source));
+  addField(fg, 'Freshness', cleanText(job.freshness?.label));
+  addField(fg, 'Employment type', cleanText(job.employmentType));
+  addField(fg, 'Remote restrictions', cleanText(job.remoteRestrictions));
   addField(fg, 'Location', cleanLocation(job.locationLabel || job.location));
   addField(fg, 'Experience', cleanText(job.yearsRequired));
   addField(fg, 'Matched skills', (job.matchedSkills || []).map(cleanText).join(', '));
@@ -1309,6 +1318,7 @@ function renderJob(job, defaultExpanded = false, inGroup = false) {
   addField(fg, 'Education', cleanText((job.educationRequirements || []).join(' | ') || job.educationStatus));
   addField(fg, 'Eligibility', cleanText(job.eligibility?.label || job.remoteStatus));
   addField(fg, 'Compensation', cleanText(job.compensation?.label || job.salaryBand));
+  addField(fg, 'Recommended action', cleanText(job.recommendedAction));
   detail.append(fg);
 
   if (jobDescription) {

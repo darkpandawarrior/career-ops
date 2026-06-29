@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { enrichDiscoveryLead, parseDuckResults, refreshJobSearch } from '../search/job-search-runner.mjs';
+import { enrichDiscoveryLead, isDiscoverableJob, parseDuckResults, refreshJobSearch } from '../search/job-search-runner.mjs';
 
 test('fresh search uses active profile rules, scores results, and persists the cache', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
@@ -150,6 +150,32 @@ test('adjacent titles require supporting profile evidence', async () => {
     runWideScan: async () => ({ code: 0, stdout: '', stderr: '' }),
   });
   assert.equal(payload.jobs.some((job) => job.url === 'https://jobs.example.test/generic'), false);
+});
+
+test('valid low-fit jobs are retained and the discovery funnel is observable', async () => {
+  assert.equal(isDiscoverableJob({
+    type: 'job', score: 1, matchedSkills: ['Java', 'PostgreSQL'], supportingSkills: [],
+    snippet: 'Active role', freshness: { band: 'unknown' },
+  }), true, 'fit score must not be an admission cutoff');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
+  await mkdir(path.join(root, 'config'), { recursive: true });
+  await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig());
+  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  const payload = await refreshJobSearch(root, {
+    fetchImpl: async () => textResponse(`
+      <a class="result__a" href="https://jobs.example.test/low-fit">
+        Backend Engineer Java PostgreSQL React remote US only must be based in US no visa sponsorship immediate joiner 12 years required - Low Fit Co
+      </a>
+    `),
+    runScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+    runWideScan: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const job = payload.jobs.find((item) => item.url === 'https://jobs.example.test/low-fit');
+  assert.ok(job, 'a relevant job below the old score-4 cutoff should remain visible');
+  assert.ok(job.score <= 4);
+  assert.ok(payload.telemetry.funnel.raw >= payload.telemetry.funnel.final);
+  assert.equal(payload.telemetry.funnel.final, payload.jobs.filter((item) => item.type !== 'searchLead').length);
+  assert.ok(payload.telemetry.funnel.unknownDate >= 1);
 });
 
 function profileConfig() {

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import yaml from 'js-yaml';
 
-import { normalizeJob } from '../scoring/scorer.mjs';
+import { classifyFreshness, normalizeJob } from '../scoring/scorer.mjs';
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const config = yaml.load(await readFile(path.join(fixtures, 'backend-profile.yml'), 'utf8'));
@@ -210,4 +210,27 @@ test('unclear eligibility lowers fit without creating a hard gate', () => {
   assert.deepEqual(unclear.gates, []);
   assert.ok(unclear.scoreRaw < open.scoreRaw);
   assert.ok(unclear.potentialConcerns.some((reason) => /Location fit requires review/i.test(reason)));
+});
+
+test('freshness uses approved bands and retains an explicit unknown state', () => {
+  const now = new Date('2026-06-29T12:00:00.000Z');
+  assert.equal(classifyFreshness('2026-06-20T12:00:00.000Z', now).band, '0-14 days');
+  assert.equal(classifyFreshness('2026-06-09T12:00:00.000Z', now).band, '15-30 days');
+  assert.equal(classifyFreshness('2026-05-15T12:00:00.000Z', now).band, '31-60 days');
+  assert.equal(classifyFreshness('2026-04-01T12:00:00.000Z', now).band, 'over 60 days');
+  assert.deepEqual(classifyFreshness('', now), {
+    band: 'unknown', daysOld: null, label: 'Posting date unknown', confirmed: false,
+  });
+});
+
+test('normalized jobs expose discovery decision fields and missing information', () => {
+  const job = normalizeJob({
+    title: 'Backend Engineer', company: 'Example', location: 'Remote - India',
+    description: 'Full-time remote role. Java and PostgreSQL. 4 years experience.',
+    posted_at: new Date(Date.now() - 9 * 86_400_000).toISOString(), source: 'Company careers',
+  }, config);
+  assert.equal(job.employmentType, 'full-time');
+  assert.equal(job.freshness.band, '0-14 days');
+  assert.ok(Array.isArray(job.missingInformation));
+  assert.ok(job.recommendedAction);
 });

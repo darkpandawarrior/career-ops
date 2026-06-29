@@ -48,3 +48,11 @@ test('onboarding presents the four-stage recommendation pipeline', async () => {
     assert.match(html, new RegExp(stage));
   }
 });
+
+test('job cards surface freshness, missing information, and recommended action', async () => {
+  const app = await readFile(publicFile('app.js'), 'utf8');
+  assert.match(app, /Missing information/);
+  assert.match(app, /Recommended action/);
+  assert.match(app, /job\.freshness\?\.label/);
+  assert.match(app, /telemetry\.funnel/);
+});

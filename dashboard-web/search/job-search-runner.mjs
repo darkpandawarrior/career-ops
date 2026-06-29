@@ -62,22 +62,34 @@ export async function refreshJobSearch(root, options = {}) {
   ]);
   telemetry.push(...sources.map((source) => source.telemetry));
   const batches = sources.map((source) => source.results);
+  const funnel = {
+    raw: batches.flat().length, verified: 0, leads: 0, irrelevant: 0,
+    expired: 0, over60Days: 0, unknownDate: 0, duplicates: 0, final: 0,
+  };
   const byId = new Map();
   for (const raw of batches.flat()) {
     if (!raw?.url || !raw?.title) continue;
     const job = normalizeJob(raw, validation.config);
-    if (job.type !== 'searchLead' && job.score < 4) continue;
-    if (job.type !== 'searchLead' && !isRelevantJob(job)) continue;
+    if (job.type === 'searchLead') funnel.leads += 1;
+    else {
+      funnel.verified += 1;
+      if (isExpiredJob(job)) { funnel.expired += 1; continue; }
+      if (job.freshness?.band === 'over 60 days') { funnel.over60Days += 1; continue; }
+      if (job.freshness?.band === 'unknown') funnel.unknownDate += 1;
+      if (!isDiscoverableJob(job)) { funnel.irrelevant += 1; continue; }
+    }
     const existing = byId.get(job.id);
     if (!existing
       || job.score > existing.score
       || (job.score === existing.score && job.snippet.length > existing.snippet.length)) {
+      if (existing) funnel.duplicates += 1;
       byId.set(job.id, job);
     }
   }
   const jobs = [...byId.values()]
     .sort((a, b) => b.score - a.score || a.company.localeCompare(b.company));
   const generatedAt = new Date().toISOString();
+  funnel.final = jobs.filter((job) => job.type !== 'searchLead').length;
   const payload = {
     version: 2,
     scored: true,
@@ -101,6 +113,7 @@ export async function refreshJobSearch(root, options = {}) {
       durationMs: new Date(generatedAt).getTime() - new Date(refreshStartedAt).getTime(),
       sources: telemetry,
       contributors: summarizeContributors(batches.flat()),
+      funnel,
     },
     diagnostics: {
       feedErrors: errors.slice(0, 20),
@@ -195,6 +208,16 @@ function isRelevantJob(job) {
   return verified >= 2 || (verified >= 1 && verified + supporting >= 3);
 }
 
+export function isDiscoverableJob(job) {
+  if (job?.type === 'searchLead') return true;
+  return !isExpiredJob(job) && job?.freshness?.band !== 'over 60 days' && isRelevantJob(job);
+}
+
+function isExpiredJob(job) {
+  const value = `${job.liveness || ''} ${job.status || ''} ${job.snippet || ''}`;
+  return /\b(expired|closed|no longer accepting|position (?:has been )?filled|job unavailable)\b/i.test(value);
+}
+
 export async function findCachedJob(root, id) {
   try {
     const cache = JSON.parse(await readFile(path.join(root, 'data', 'job-dashboard.json'), 'utf8'));
@@ -222,7 +245,7 @@ export async function enrichDiscoveryLead(root, id, options = {}) {
   const jobs = rawJobs
     .filter((job) => job.type !== 'searchLead')
     .map((job) => normalizeJob(job, validation.config))
-    .filter((job) => job.score >= 4 && isRelevantJob(job));
+    .filter(isDiscoverableJob);
   const attemptedAt = new Date().toISOString();
 
   if (jobs.length === 0) {
