@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, BookOpen, Target, MessagesSquare, Trophy, Dumbbell, Building2, Clock, TrendingUp, TrendingDown, Wallet, Zap, HeartPulse, NotebookPen, History, UserRound } from "lucide-react";
+import { Loader2, BookOpen, Target, MessagesSquare, Trophy, Dumbbell, Building2, Clock, TrendingUp, TrendingDown, Wallet, Zap, HeartPulse, NotebookPen, History, UserRound, FileText } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/cn";
 import type { CoachState } from "@/lib/coach";
 import type { ProfileMeta } from "@/lib/profile-meta";
@@ -251,7 +253,45 @@ export function IntelView({ coach, profile }: { coach: CoachState | null; profil
           )}
         </>
       )}
+
+      <CvSection />
     </div>
+  );
+}
+
+/** Collapsible canonical CV viewer — fetches /api/cv on first expand, renders
+ *  the markdown. Hidden gracefully when the CV is empty/absent. */
+function CvSection() {
+  const [state, setState] = useState<{ loaded: boolean; loading: boolean; content: string }>({ loaded: false, loading: false, content: "" });
+
+  const load = () => {
+    if (state.loaded || state.loading) return;
+    setState((s) => ({ ...s, loading: true }));
+    fetch("/api/cv")
+      .then((r) => r.json())
+      .then((d) => setState({ loaded: true, loading: false, content: typeof d.content === "string" ? d.content : "" }))
+      .catch(() => setState({ loaded: true, loading: false, content: "" }));
+  };
+
+  return (
+    <section className="mt-8">
+      <details onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && load()}>
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.18em] text-muted transition-colors hover:text-foreground">
+          <FileText className="size-3.5" /> Canonical CV (cv.md)
+        </summary>
+        <div className="mt-3">
+          {state.loading ? (
+            <Loading label="Loading CV…" />
+          ) : !state.content.trim() ? (
+            <Empty>No cv.md found for this candidate.</Empty>
+          ) : (
+            <article className="report-prose rounded-2xl border border-border bg-surface/40 p-5">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{state.content}</ReactMarkdown>
+            </article>
+          )}
+        </div>
+      </details>
+    </section>
   );
 }
 

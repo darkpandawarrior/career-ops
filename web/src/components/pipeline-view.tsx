@@ -163,6 +163,9 @@ export function PipelineView({
         </div>
       </div>
 
+      {/* funnel mini-viz — status distribution across the tracker */}
+      <Funnel applications={applications} />
+
       {/* tabs */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
         {TABS.map((t) => {
@@ -326,6 +329,63 @@ export function PipelineView({
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+// The active funnel stages (in flow order) + the muted terminal buckets.
+const FUNNEL_STAGES = ["EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER"] as const;
+const FUNNEL_MUTED = ["REJECTED", "DISCARDED"] as const;
+
+/** Compact horizontal funnel of the status distribution. Buckets via canonStatus
+ *  so aliases collapse to canonical tokens. Subtle, on-brand, read-only. */
+function Funnel({ applications }: { applications: Application[] }) {
+  const counts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const a of applications) {
+      const c = canonStatus(a.status);
+      const key = [...FUNNEL_STAGES, ...FUNNEL_MUTED].find((k) => c.includes(k));
+      if (key) m[key] = (m[key] || 0) + 1;
+    }
+    return m;
+  }, [applications]);
+
+  const activeTotal = FUNNEL_STAGES.reduce((s, k) => s + (counts[k] || 0), 0);
+  if (applications.length === 0) return null;
+
+  return (
+    <div className="mt-5 rounded-2xl border border-border bg-surface/40 p-3">
+      <div className="flex items-stretch gap-1.5">
+        {FUNNEL_STAGES.map((k) => {
+          const n = counts[k] || 0;
+          const pct = activeTotal > 0 ? Math.round((n / activeTotal) * 100) : 0;
+          return (
+            <div key={k} className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex items-baseline justify-between gap-1">
+                <span className="truncate text-[10px] font-medium uppercase tracking-wide text-faint">{k}</span>
+                <span className="shrink-0 text-xs font-semibold tabular-nums text-foreground">{n}</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-brand to-brand-200"
+                  style={{ width: `${Math.max(pct, n > 0 ? 8 : 0)}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+        {FUNNEL_MUTED.some((k) => counts[k]) && (
+          <div className="flex shrink-0 items-center gap-2 border-l border-border pl-2 text-[10px] text-faint">
+            {FUNNEL_MUTED.map((k) =>
+              counts[k] ? (
+                <span key={k} className="uppercase tracking-wide">
+                  {k} <span className="tabular-nums text-muted">{counts[k]}</span>
+                </span>
+              ) : null,
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

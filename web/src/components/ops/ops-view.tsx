@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Search, Radar, ShieldCheck, Activity, HeartPulse, Loader2, ExternalLink, Inbox, Terminal, Plus, X,
+  Search, Radar, ShieldCheck, Activity, HeartPulse, Loader2, ExternalLink, Inbox, Terminal, Plus, X, Link2,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { ScanHistory, AgentInboxItem } from "@/lib/career-ops";
@@ -46,6 +46,8 @@ export function OpsView({
   const [running, setRunning] = useState<string | null>(null);
   const [out, setOut] = useState<{ label: string; output: string; code: number | null } | null>(null);
   const [task, setTask] = useState("");
+  const [livenessUrl, setLivenessUrl] = useState("");
+  const [checkingLiveness, setCheckingLiveness] = useState(false);
   const router = useRouter();
 
   const queueText = async (text: string) => {
@@ -80,6 +82,27 @@ export function OpsView({
       setOut({ label, output: "Failed to run operation (network error).", code: 1 });
     } finally {
       setRunning(null);
+    }
+  };
+
+  const checkLiveness = async () => {
+    const url = livenessUrl.trim();
+    if (!url || checkingLiveness) return;
+    setCheckingLiveness(true);
+    setOut({ label: "Liveness · URL check", output: `Checking ${url}…`, code: null });
+    try {
+      const r = await fetch("/api/liveness", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const d = await r.json();
+      const tag = d.live === true ? "✅ live\n\n" : d.live === false ? "❌ dead\n\n" : "";
+      setOut({ label: "Liveness · URL check", output: tag + (d.output || d.error || "(no output)"), code: d.code ?? (d.ok ? 0 : 1) });
+    } catch {
+      setOut({ label: "Liveness · URL check", output: "Failed to check liveness (network error).", code: 1 });
+    } finally {
+      setCheckingLiveness(false);
     }
   };
 
@@ -120,6 +143,27 @@ export function OpsView({
             </p>
           </button>
         ))}
+      </div>
+
+      {/* ad-hoc liveness — paste any job URL, spawn check-liveness.mjs for it */}
+      <div className="mt-3 flex gap-2">
+        <div className="relative flex-1">
+          <Link2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-faint" />
+          <input
+            value={livenessUrl}
+            onChange={(e) => setLivenessUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && checkLiveness()}
+            placeholder="Paste a job URL to check liveness…"
+            className="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-3 text-sm outline-none focus:border-brand/50"
+          />
+        </div>
+        <button
+          onClick={checkLiveness}
+          disabled={!livenessUrl.trim() || checkingLiveness}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50"
+        >
+          {checkingLiveness ? <Loader2 className="size-3.5 animate-spin" /> : <Activity className="size-3.5" />} Check
+        </button>
       </div>
 
       {/* op output */}

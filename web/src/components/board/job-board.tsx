@@ -5,9 +5,11 @@ import Link from "next/link";
 import {
   Search, RefreshCw, Download, ExternalLink, AlertTriangle,
   Sparkles, SlidersHorizontal, Inbox, Radar, Loader2, Check, Circle,
+  ChevronDown, Layers,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
+import { useJobs } from "@/components/jobs/job-store";
 import type { ScoredJob } from "@/lib/jobs/types";
 import type { JobDashboard } from "@/lib/jobs/scoring";
 
@@ -47,12 +49,26 @@ export function JobBoard({
   const [minScore, setMinScore] = useState(0);
   const [section, setSection] = useState<SectionKey>("recommended");
   const [hideRejected, setHideRejected] = useState(true);
+  const [groupByCompany, setGroupByCompany] = useState(false);
   const [busy, setBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchLog, setSearchLog] = useState<string[]>([]);
   const [searchPhase, setSearchPhase] = useState(0);
   const [searchElapsed, setSearchElapsed] = useState(0);
   const rejectedSet = useMemo(() => new Set(rejectedCompanies.map((c) => c.toLowerCase())), [rejectedCompanies]);
+  const { jobs: workerJobs, startJob } = useJobs();
+
+  // Link each posting to its evaluate-worker (by URL) so a card can show
+  // Evaluate → Evaluating… → score — mirrors pipeline-view's jobByUrl logic.
+  const jobByUrl = useMemo(() => {
+    const m = new Map<string, (typeof workerJobs)[number]>();
+    for (const j of workerJobs) {
+      if (!j.input || j.kind === "research") continue;
+      const ex = m.get(j.input);
+      if (!ex || j.startedAt > ex.startedAt) m.set(j.input, j);
+    }
+    return m;
+  }, [workerJobs]);
 
   const reScore = async () => {
     setBusy(true);
@@ -278,6 +294,16 @@ export function JobBoard({
                 ⛔ Rejected {hideRejected ? "off" : "on"}
               </button>
             )}
+            <button
+              onClick={() => setGroupByCompany((v) => !v)}
+              title="Group roles under collapsible company headers"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border px-2.5 py-2 text-xs transition-colors",
+                groupByCompany ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:bg-surface-hover",
+              )}
+            >
+              <Layers className="size-3.5" /> Group by company
+            </button>
           </>
         )}
       </div>
@@ -289,15 +315,65 @@ export function JobBoard({
             ? "No cached job feed yet. Run a scan from the CLI, or finish onboarding to drive scoring."
             : "No roles match these filters."}
         </div>
+      ) : groupByCompany && !isSources ? (
+        <div className="mt-5 space-y-3">
+          {groupByCompanyName(jobs).map(([company, group]) => (
+            <details key={company} open className="group overflow-hidden rounded-2xl border border-border bg-surface/30">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors hover:bg-surface-hover">
+                <ChevronDown className="size-4 shrink-0 text-faint transition-transform group-open:rotate-0 -rotate-90" />
+                <span className="truncate">{company || "Unknown"}</span>
+                {rejectedSet.has((company ?? "").toLowerCase().trim()) && (
+                  <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                    ⛔ rejected
+                  </span>
+                )}
+                <span className="ml-auto shrink-0 tabular-nums text-xs text-faint">{group.length}</span>
+              </summary>
+              <ul className="space-y-3 px-3 pb-3">
+                {group.map((j) => (
+                  <JobCard
+                    key={String(j.id ?? j.url ?? j.title)}
+                    job={j}
+                    rejected={rejectedSet.has((j.company ?? "").toLowerCase().trim())}
+                    worker={j.url ? jobByUrl.get(j.url) : undefined}
+                    onEvaluate={() =>
+                      startJob({ title: `Evaluate · ${j.company}`, subtitle: j.title, kind: "evaluate", input: String(j.url), page: "/board" })
+                    }
+                  />
+                ))}
+              </ul>
+            </details>
+          ))}
+        </div>
       ) : (
         <ul className="mt-5 space-y-3">
           {jobs.map((j) => (
-            <JobCard key={String(j.id ?? j.url ?? j.title)} job={j} />
+            <JobCard
+              key={String(j.id ?? j.url ?? j.title)}
+              job={j}
+              rejected={rejectedSet.has((j.company ?? "").toLowerCase().trim())}
+              worker={j.url ? jobByUrl.get(j.url) : undefined}
+              onEvaluate={() =>
+                startJob({ title: `Evaluate · ${j.company}`, subtitle: j.title, kind: "evaluate", input: String(j.url), page: "/board" })
+              }
+            />
           ))}
         </ul>
       )}
     </div>
   );
+}
+
+/** Group scored jobs by company, preserving the incoming (score-sorted) order. */
+function groupByCompanyName(jobs: ScoredJob[]): [string, ScoredJob[]][] {
+  const map = new Map<string, ScoredJob[]>();
+  for (const j of jobs) {
+    const key = (j.company ?? "").trim();
+    const bucket = map.get(key);
+    if (bucket) bucket.push(j);
+    else map.set(key, [j]);
+  }
+  return [...map.entries()];
 }
 
 function Stat({
@@ -420,7 +496,29 @@ function ScoreDonut({ dist }: { dist: { excellent: number; strong: number; possi
   );
 }
 
-function JobCard({ job }: { job: ScoredJob }) {
+/** Narrow accessors for scorer-attached fields not on the typed surface. */
+type Eligibility = { label?: string; status?: string; reason?: string };
+type Compensation = { label?: string; status?: string };
+function readEligibility(job: ScoredJob): Eligibility | undefined {
+  const e = job.eligibility;
+  return e && typeof e === "object" ? (e as Eligibility) : undefined;
+}
+function readCompensation(job: ScoredJob): Compensation | undefined {
+  const c = job.compensation;
+  return c && typeof c === "object" ? (c as Compensation) : undefined;
+}
+
+function JobCard({
+  job,
+  rejected = false,
+  worker,
+  onEvaluate,
+}: {
+  job: ScoredJob;
+  rejected?: boolean;
+  worker?: { id: string; status: "running" | "done" | "error"; result?: { score: number | null; tone: "good" | "warn" | "bad" | "muted" } };
+  onEvaluate?: () => void;
+}) {
   // Source leads (search queries) have no score — render a compact card.
   if (job.type === "searchLead") {
     return (
@@ -441,6 +539,20 @@ function JobCard({ job }: { job: ScoredJob }) {
   const tone = levelTone(job);
   const skills = [...(job.matchedSkills ?? []), ...(job.supportingSkills ?? [])].slice(0, 8);
   const gated = (job.gates?.length ?? 0) > 0;
+
+  const eligibility = readEligibility(job);
+  const compensation = readCompensation(job);
+  const yearsRequired = typeof job.yearsRequired === "string" ? job.yearsRequired : undefined;
+  const reasons = job.reasons ?? [];
+  const matched = job.matchedSkills ?? [];
+  const supporting = job.supportingSkills ?? [];
+  const learning = job.learningSkills ?? [];
+  const gaps = job.recommendedSkillGaps ?? [];
+  const hasDetail =
+    !!eligibility?.label || !!compensation?.label || !!yearsRequired ||
+    reasons.length > 0 || matched.length > 0 || supporting.length > 0 ||
+    learning.length > 0 || gaps.length > 0;
+
   return (
     <li className="relative overflow-hidden rounded-2xl border border-border bg-surface/50 p-4 transition-colors hover:border-brand/30">
       <div className="flex items-start gap-3">
@@ -453,6 +565,11 @@ function JobCard({ job }: { job: ScoredJob }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="truncate font-medium text-foreground">{job.title}</h3>
+            {rejected && (
+              <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                ⛔ previously rejected
+              </span>
+            )}
             {job.url && (
               <a
                 href={job.url}
@@ -490,8 +607,110 @@ function JobCard({ job }: { job: ScoredJob }) {
               <AlertTriangle className="size-3.5" /> {job.gates!.join("; ")}
             </p>
           )}
+
+          {/* action row: evaluate worker trigger */}
+          {job.url && (
+            <div className="mt-2.5 flex items-center gap-3">
+              {worker?.status === "running" ? (
+                <Link href={`/jobs/${worker.id}`} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand">
+                  <Loader2 className="size-3.5 animate-spin" /> Evaluating…
+                </Link>
+              ) : worker?.status === "done" ? (
+                <Link href={`/jobs/${worker.id}`} className="inline-flex items-center gap-1.5 text-xs">
+                  {worker.result?.score != null && <Badge tone={worker.result.tone}>{worker.result.score}/5</Badge>}
+                  <span className="text-faint">evaluated</span>
+                </Link>
+              ) : worker?.status === "error" ? (
+                <button type="button" onClick={onEvaluate} className="text-xs text-red-400 transition-colors hover:underline">
+                  Retry evaluate
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onEvaluate}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-brand"
+                  title="Evaluate this posting — spins up a worker on your CLI"
+                >
+                  <Sparkles className="size-3.5" /> Evaluate
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* expandable detail */}
+          {hasDetail && (
+            <details className="group mt-2">
+              <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-faint transition-colors hover:text-foreground">
+                <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" /> Details
+              </summary>
+              <div className="mt-2 space-y-2.5 border-t border-border pt-2.5 text-xs">
+                {(eligibility?.label || compensation?.label || yearsRequired) && (
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted">
+                    {eligibility?.label && (
+                      <>
+                        <dt className="text-faint">Eligibility</dt>
+                        <dd>
+                          {eligibility.label}
+                          {eligibility.status ? <span className="text-faint"> ({eligibility.status})</span> : ""}
+                          {eligibility.reason && <span className="block text-faint">{eligibility.reason}</span>}
+                        </dd>
+                      </>
+                    )}
+                    {compensation?.label && (
+                      <>
+                        <dt className="text-faint">Compensation</dt>
+                        <dd>{compensation.label}</dd>
+                      </>
+                    )}
+                    {yearsRequired && (
+                      <>
+                        <dt className="text-faint">Years req.</dt>
+                        <dd>{yearsRequired}</dd>
+                      </>
+                    )}
+                  </dl>
+                )}
+
+                {reasons.length > 0 && (
+                  <ul className="list-disc space-y-0.5 pl-4 text-muted">
+                    {reasons.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="space-y-1.5">
+                  <SkillRow label="Matched" tone="good" skills={matched} />
+                  <SkillRow label="Supporting" tone="muted" skills={supporting} />
+                  <SkillRow label="Learning" tone="warn" skills={learning} />
+                  <SkillRow label="Recommended gaps" tone="bad" skills={gaps} />
+                </div>
+              </div>
+            </details>
+          )}
         </div>
       </div>
     </li>
+  );
+}
+
+const SKILL_TONES = {
+  good: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  warn: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  bad: "bg-red-500/15 text-red-700 dark:text-red-400",
+  muted: "bg-surface-hover text-muted",
+} as const;
+
+function SkillRow({ label, tone, skills }: { label: string; tone: keyof typeof SKILL_TONES; skills: string[] }) {
+  if (skills.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-baseline gap-1.5">
+      <span className="text-[10px] uppercase tracking-wide text-faint">{label}</span>
+      {skills.map((s) => (
+        <span key={s} className={cn("rounded-md px-1.5 py-0.5 text-[11px]", SKILL_TONES[tone])}>
+          {s}
+        </span>
+      ))}
+    </div>
   );
 }
