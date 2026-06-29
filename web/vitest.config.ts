@@ -36,9 +36,9 @@ export default defineConfig({
         // No-regression floors for the logic layer. Well-covered modules sit far
         // above these; the floor accounts for the CLI-orchestration routes (run,
         // assistant, explore/ai, cv/ingest, apply/*) that are integration-tested.
-        statements: 45,
-        branches: 44,
-        functions: 48,
+        statements: 60,
+        branches: 55,
+        functions: 62,
       },
     },
   },
