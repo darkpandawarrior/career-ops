@@ -48,14 +48,31 @@ test('normalizes unified profile fields and migrates legacy role and skill bucke
   assert.deepEqual(legacy.config.skills.demonstrated, ['Financial Reporting']);
 });
 
-test('builds discovery queries only from skills, experience stage, and location', () => {
+test('builds traceable role and skill queries from preferences, evidence, stage, and location', () => {
   const plan = buildSearchPlan(config, { sources: ['greenhouse', 'ashby'] });
-  assert.equal(plan.queries.length, 4);
-  assert.ok(plan.queries.every((item) => item.strategy === 'skills'));
+  assert.ok(plan.queries.length >= 10);
+  assert.ok(plan.queries.some((item) => item.strategy === 'skills'));
+  assert.ok(plan.queries.some((item) => item.strategy === 'role'));
   assert.ok(plan.queries.some((item) => item.query.includes('"Java"')));
   assert.ok(plan.queries.every((item) => !item.query.toLowerCase().includes('android')));
-  assert.deepEqual(plan.portalConfig.title_filter.positive, []);
-  assert.ok(plan.queries.every((item) => !item.query.includes('"Senior Backend Engineer"')));
+  for (const role of ['Senior Backend Engineer', 'Backend Engineer', 'Platform Engineer']) {
+    assert.ok(plan.portalConfig.title_filter.positive.includes(role));
+  }
+  assert.ok(plan.queries.some((item) => item.query.includes('"Senior Backend Engineer"')));
+  assert.ok(plan.queries.filter((item) => item.strategy === 'role').every((item) => item.signals.interestedRole));
+});
+
+test('preferences change role query scope without rewriting candidate skill evidence', () => {
+  const nursing = buildSearchPlan({
+    ...config,
+    interested_roles: ['Registered Nurse'],
+    titles: { interested: ['Registered Nurse'] },
+    preferences: { ...config.preferences, domains: ['Healthcare'] },
+  }, { sources: ['greenhouse'] });
+  assert.ok(nursing.queries.some((item) => item.strategy === 'role' && item.query.includes('"Registered Nurse"')));
+  assert.ok(nursing.queries.some((item) => item.query.includes('"Healthcare"')));
+  const baseline = buildSearchPlan(config, { sources: ['greenhouse'] });
+  assert.deepEqual(nursing.portalConfig.content_filter.positive, baseline.portalConfig.content_filter.positive);
 });
 
 test('search scopes independently enable remote, local, and international sources', () => {

@@ -13,6 +13,8 @@ export function buildSearchPlan(rawConfig, options = {}) {
     ...config.skills.supporting,
   ]);
   const skillGroups = chunks(searchSkills.slice(0, 15), 3);
+  const roleGroups = config.interested_roles.slice(0, 8).map((role) => unique(expandRole(role)).slice(0, 4));
+  const industries = config.preferences.domains.slice(0, 4);
   const stageClause = buildStageClause(config.seniority);
   const negativeTerms = [...config.skills.excluded];
   const negativeClause = negativeTerms.slice(0, 8).map((term) => `-${quote(term)}`).join(' ');
@@ -20,12 +22,24 @@ export function buildSearchPlan(rawConfig, options = {}) {
 
   for (const source of sources) {
     const locationClause = buildLocationClause(config.location, source);
+    for (const [index, roles] of roleGroups.entries()) {
+      const role = config.interested_roles[index];
+      queries.push({
+        id: `${source.id}-role-${index + 1}`,
+        name: `${source.name} - ${role}`,
+        category: source.category,
+        strategy: 'role',
+        signals: { interestedRole: role, synonyms: roles.slice(1), industries, scope: config.location.search_scopes },
+        query: joinQuery(source.site, orClause(roles), orClause(searchSkills.slice(0, 3)), orClause(industries), stageClause, locationClause, negativeClause),
+      });
+    }
     for (const [index, skills] of skillGroups.entries()) {
       queries.push({
         id: `${source.id}-skills-${index + 1}`,
         name: `${source.name} - core skills ${index + 1}`,
         category: source.category,
         strategy: 'skills',
+        signals: { skills, industries, scope: config.location.search_scopes },
         query: joinQuery(source.site, orClause(skills), stageClause, locationClause, negativeClause),
       });
     }
@@ -36,6 +50,8 @@ export function buildSearchPlan(rawConfig, options = {}) {
     summary: {
       verifiedSkills: verifiedSkills.length,
       supportingSkills: config.skills.supporting.length,
+      interestedRoles: config.interested_roles.length,
+      industries: industries.length,
       sources: sources.length,
       queries: queries.length,
     },
@@ -48,7 +64,7 @@ export function buildPortalFilters(rawConfig, queries = []) {
   const config = normalizeJobSearchConfig(rawConfig);
   return {
     title_filter: {
-      positive: [],
+      positive: config.interested_roles,
       negative: [],
       seniority_boost: config.seniority.preferred_levels,
     },
@@ -72,6 +88,20 @@ export function buildPortalFilters(rawConfig, queries = []) {
     },
     search_queries: queries.map(({ name, query }) => ({ name, query, enabled: true })),
   };
+}
+
+function expandRole(role) {
+  const value = String(role).trim();
+  const variants = [value];
+  const replacements = [
+    [/\bEngineer\b/i, 'Developer'], [/\bDeveloper\b/i, 'Engineer'],
+    [/\bManager\b/i, 'Lead'], [/\bSpecialist\b/i, 'Analyst'],
+    [/\bRepresentative\b/i, 'Associate'], [/\bAssistant\b/i, 'Coordinator'],
+  ];
+  for (const [pattern, replacement] of replacements) {
+    if (pattern.test(value)) variants.push(value.replace(pattern, replacement));
+  }
+  return variants;
 }
 
 function buildLocationClause(location, source) {
