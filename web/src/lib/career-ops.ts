@@ -25,9 +25,17 @@ export function rootScript(nameNoExt: string): string {
   return path.join(careerOpsRoot(), `${nameNoExt}.mjs`);
 }
 
-function read(rel: string): string | null {
+/**
+ * Profile-awareness: every reader takes an optional `root` (the resolved data
+ * directory for the active `?profile`). It defaults to `careerOpsRoot()`, so a
+ * single-profile install behaves exactly as before. Request-scoped callers pass
+ * `await requestRoot()` (from `@/lib/profile-registry`) to read a specific
+ * candidate's data. The functions stay synchronous — root resolution (which may
+ * read the registry / request headers) happens once, upstream, at the entry point.
+ */
+function read(rel: string, root: string = careerOpsRoot()): string | null {
   try {
-    return fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8");
+    return fs.readFileSync(path.join(root, rel), "utf8");
   } catch {
     return null;
   }
@@ -36,8 +44,8 @@ function read(rel: string): string | null {
 export type InboxJob = { url: string; company: string; role: string; done: boolean };
 
 /** Parse data/pipeline.md — lines like `- [ ] URL | Company | Role`. */
-export function readInbox(): InboxJob[] {
-  const md = read("data/pipeline.md");
+export function readInbox(root: string = careerOpsRoot()): InboxJob[] {
+  const md = read("data/pipeline.md", root);
   if (!md) return [];
   const jobs: InboxJob[] = [];
   for (const line of md.split("\n")) {
@@ -70,8 +78,8 @@ export type Application = {
  * Column order: # | Date | Company | Role | Score | Status | PDF | Report | Notes
  * (note: score BEFORE status, per the core data contract).
  */
-export function readApplications(): Application[] {
-  const md = read("data/applications.md");
+export function readApplications(root: string = careerOpsRoot()): Application[] {
+  const md = read("data/applications.md", root);
   if (!md) return [];
   const rows: Application[] = [];
   for (const raw of md.split("\n")) {
@@ -107,7 +115,7 @@ export type LifecyclePhase = "first-run" | "in-between" | "established";
  *   - established → all 4 prereqs present.
  * onboardingNeeded mirrors doctor.mjs: true if ANY prereq is missing → show banner.
  */
-export function doctorState(): {
+export function doctorState(root: string = careerOpsRoot()): {
   phase: LifecyclePhase;
   onboardingNeeded: boolean;
   missing: string[];
@@ -116,7 +124,7 @@ export function doctorState(): {
 } {
   const has = (rel: string) => {
     try {
-      return fs.existsSync(path.join(careerOpsRoot(), rel));
+      return fs.existsSync(path.join(root, rel));
     } catch {
       return false;
     }
@@ -129,7 +137,7 @@ export function doctorState(): {
   ];
   const missing = prereqs.filter(([rel]) => !has(rel)).map(([, label]) => label);
   const hasCv = has("cv.md");
-  const hasData = readApplications().length > 0 || readInbox().some((j) => !j.done);
+  const hasData = readApplications(root).length > 0 || readInbox(root).some((j) => !j.done);
   const onboardingNeeded = missing.length > 0;
   const phase: LifecyclePhase = !hasCv && !hasData ? "first-run" : onboardingNeeded ? "in-between" : "established";
   return { phase, onboardingNeeded, missing, hasCv, hasData };
@@ -142,13 +150,12 @@ export type PipelineSummary = {
   applications: Application[];
 };
 
-export function pipelineSummary(): PipelineSummary {
-  const root = careerOpsRoot();
+export function pipelineSummary(root: string = careerOpsRoot()): PipelineSummary {
   return {
     root,
     rootExists: fs.existsSync(root),
-    inbox: readInbox(),
-    applications: readApplications(),
+    inbox: readInbox(root),
+    applications: readApplications(root),
   };
 }
 
@@ -156,21 +163,21 @@ export type ReportData = { content: string; file: string };
 
 /** Locate the evaluation report for an application number
  *  (reports/{n}-{slug}-{date}.md; the leading number may be zero-padded). */
-export function findReportFile(n: string): string | null {
+export function findReportFile(n: string, root: string = careerOpsRoot()): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
   let files: string[];
   try {
-    files = fs.readdirSync(path.join(careerOpsRoot(), "reports"));
+    files = fs.readdirSync(path.join(root, "reports"));
   } catch {
     return null;
   }
   const match = files.find((f) => f.endsWith(".md") && parseInt(f, 10) === target);
-  return match ? path.join(careerOpsRoot(), "reports", match) : null;
+  return match ? path.join(root, "reports", match) : null;
 }
 
-export function readReport(n: string): ReportData | null {
-  const file = findReportFile(n);
+export function readReport(n: string, root: string = careerOpsRoot()): ReportData | null {
+  const file = findReportFile(n, root);
   if (!file) return null;
   try {
     return { content: fs.readFileSync(file, "utf8"), file: path.basename(file) };
@@ -179,15 +186,15 @@ export function readReport(n: string): ReportData | null {
   }
 }
 
-export function findApplication(n: string): Application | null {
-  return readApplications().find((a) => a.n === n) ?? null;
+export function findApplication(n: string, root: string = careerOpsRoot()): Application | null {
+  return readApplications(root).find((a) => a.n === n) ?? null;
 }
 
 /** The CANONICAL user-customization file the CLI/TUI reads. Durable facts the
  *  web assistant learns go HERE (single source of truth) inside a managed marker
  *  block — so the CLI sees them too. No web-only memory store (that would drift). */
-export function profilePath(): string {
-  return path.join(careerOpsRoot(), "modes", "_profile.md");
+export function profilePath(root: string = careerOpsRoot()): string {
+  return path.join(root, "modes", "_profile.md");
 }
 
 const NOTES_START = "<!-- co-web-notes:start -->";
@@ -196,9 +203,9 @@ const NOTES_END = "<!-- co-web-notes:end -->";
 /** Read back ONLY the web-assistant managed notes from modes/_profile.md (small,
  *  focused — the agent reads the rest of the canonical files itself). Falls back
  *  to the legacy web-only memory file for back-compat. */
-export function readMemory(): string {
+export function readMemory(root: string = careerOpsRoot()): string {
   try {
-    const md = fs.readFileSync(profilePath(), "utf8");
+    const md = fs.readFileSync(profilePath(root), "utf8");
     const i = md.indexOf(NOTES_START);
     const j = md.indexOf(NOTES_END);
     if (i !== -1 && j !== -1 && j > i) return md.slice(i + NOTES_START.length, j).trim();
@@ -206,7 +213,7 @@ export function readMemory(): string {
     /* no _profile.md yet */
   }
   try {
-    return fs.readFileSync(path.join(careerOpsRoot(), ".career-ops-web", "memory.md"), "utf8").trim();
+    return fs.readFileSync(path.join(root, ".career-ops-web", "memory.md"), "utf8").trim();
   } catch {
     return "";
   }
@@ -214,10 +221,10 @@ export function readMemory(): string {
 
 /** Append a durable fact to the canonical modes/_profile.md (creating the file +
  *  managed block if needed), PRESERVING existing user content. */
-export function rememberFact(fact: string): "ok" | "deduped" | "error" {
+export function rememberFact(fact: string, root: string = careerOpsRoot()): "ok" | "deduped" | "error" {
   const f = fact.trim().replace(/\s+/g, " ").slice(0, 300);
   if (!f) return "deduped";
-  const p = profilePath();
+  const p = profilePath(root);
   try {
     fs.mkdirSync(path.dirname(p), { recursive: true });
     let md = "";

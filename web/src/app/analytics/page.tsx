@@ -1,4 +1,5 @@
 import { pipelineSummary } from "@/lib/career-ops";
+import { requestRoot } from "@/lib/profile-registry";
 import { canonStatus, scoreNum } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +14,8 @@ const STAGES: { key: string; label: string }[] = [
   { key: "DISCARDED", label: "Discarded" },
 ];
 
-export default function Analytics() {
-  const { applications } = pipelineSummary();
+export default async function Analytics() {
+  const { applications } = pipelineSummary(await requestRoot());
   const total = applications.length;
 
   const stageCounts = STAGES.map((s) => ({

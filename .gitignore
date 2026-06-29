@@ -37,6 +37,13 @@ modes/_profile.md
 .update-dismissed
 .update-lock
 
+# Multi-profile private data (per-candidate roots + sync state) — never commit.
+# Anchored to the repo root so nested code paths (e.g. web/src/app/api/profiles/)
+# are NOT ignored — only the top-level private data dirs are.
+/profiles/
+/sync/
+/profiles.yml
+
 # Secrets (never commit — use .env.example as template)
 .env
 # Universal safety net — protects ALL checkouts/branches, incl. untracked subprojects

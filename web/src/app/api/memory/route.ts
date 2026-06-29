@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { readMemory, rememberFact } from "@/lib/career-ops";
+import { requestRoot } from "@/lib/profile-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ memory: readMemory() });
+  return NextResponse.json({ memory: readMemory(await requestRoot()) });
 }
 
 // Append a durable fact the assistant learned about the user. Written to the
@@ -21,7 +22,7 @@ export async function POST(req: Request) {
   const fact = (b.fact ?? "").toString();
   if (!fact.trim()) return NextResponse.json({ error: "fact required" }, { status: 400 });
 
-  const result = rememberFact(fact);
+  const result = rememberFact(fact, await requestRoot());
   if (result === "error") return NextResponse.json({ error: "write failed" }, { status: 500 });
   return NextResponse.json({ ok: true, deduped: result === "deduped" });
 }
