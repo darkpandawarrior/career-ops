@@ -64,9 +64,13 @@ preferences:
   company_types: []
   negative_keywords: []
 
+education:
+  levels: []
+  certifications: []
+
 weights:
-  title: 30
-  skills: 35
-  experience: 10
-  location: 15
-  preferences: 10
+  skills: 45
+  experience: 25
+  eligibility: 15
+  notice_education: 10
+  other: 5

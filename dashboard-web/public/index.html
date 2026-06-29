@@ -23,7 +23,7 @@
 
       <div class="topbar-actions">
         <button id="themeToggleBtn" class="topbar-btn topbar-theme-btn" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
-        <button id="refreshBtn" class="topbar-btn" type="button" hidden>↻ Refresh</button>
+        <button id="refreshBtn" class="topbar-btn" type="button" hidden>↻ Search jobs</button>
         <div class="profile-switcher" id="profileSwitcher" hidden>
           <button class="profile-switcher-btn" id="profileSwitcherBtn" type="button" aria-haspopup="true" aria-expanded="false">
             <span>Switch</span>
@@ -38,8 +38,12 @@
     <main>
       <section id="onboardingPanel" class="onboarding" hidden>
         <section id="returningPanel" class="onboarding-card" hidden>
-          <p class="eyebrow">Welcome back</p>
-          <h2>Continue with your current profile?</h2>
+          <div class="pipeline-strip" aria-label="Recommendation pipeline">
+            <span>Candidate Discovery</span><span>Job Discovery</span><span>Eligibility</span><span>Application Fit</span>
+          </div>
+          <p class="eyebrow">Candidate Discovery</p>
+          <h2>Continue your job search with this profile?</h2>
+          <p>HireSignal discovers broadly, checks eligibility, then ranks jobs by application fit.</p>
           <div class="profile-preview">
             <strong id="returningName">Candidate</strong>
             <span id="returningHeadline"></span>
@@ -54,10 +58,13 @@
         </section>
 
         <section id="uploadPanel" class="onboarding-card" hidden>
+          <div class="pipeline-strip" aria-label="Recommendation pipeline">
+            <span class="active">Candidate Discovery</span><span>Job Discovery</span><span>Eligibility</span><span>Application Fit</span>
+          </div>
           <button id="backToProfileBtn" class="text-button" type="button" hidden>← Back to current profile</button>
-          <p class="eyebrow">Private local onboarding</p>
-          <h2>Start with your resume</h2>
-          <p>Upload one PDF resume. It is staged locally for extraction and review; uploading does not replace your active profile.</p>
+          <p class="eyebrow">Candidate Discovery</p>
+          <h2>Build your search profile from your resume</h2>
+          <p>Upload one PDF resume. HireSignal extracts evidence locally, then lets you review the signals used for discovery, eligibility, and ranking.</p>
 
           <form id="uploadForm">
             <label id="dropZone" class="drop-zone" for="resumeInput">
@@ -109,17 +116,21 @@
         </section>
 
         <section id="reviewPanel" class="onboarding-card review-card" hidden>
+          <div class="pipeline-strip" aria-label="Recommendation pipeline">
+            <span class="active">Candidate Discovery</span><span>Job Discovery</span><span>Eligibility</span><span>Application Fit</span>
+          </div>
           <button id="backToExtractionBtn" class="text-button" type="button">← Back to extraction</button>
           <div class="review-heading">
             <div>
-              <p class="eyebrow">Review before activation</p>
-              <h2>Shape your job-search profile</h2>
+              <p class="eyebrow">Candidate Discovery</p>
+              <h2>Choose the profile signals HireSignal should use</h2>
             </div>
-            <span id="reviewProgress">Step 1 of 7</span>
+            <span id="reviewProgress">Step 1 of 2</span>
           </div>
 
-          <form id="reviewForm">
-            <section class="review-step" data-step="0">
+          <form id="reviewForm" class="discovery-review-grid">
+            <section class="review-step candidate-profile-panel" data-step="0">
+              <p class="eyebrow">Candidate Profile</p>
               <h3>Personal details</h3>
               <p>Confirm contact information extracted from the resume.</p>
               <div class="form-grid">
@@ -134,10 +145,11 @@
               <div id="personalEvidence" class="evidence-note"></div>
             </section>
 
-            <section class="review-step" data-step="1" hidden>
+            <section class="review-step candidate-profile-panel" data-step="0">
               <h3>Experience and summary</h3>
               <p>Dates provide an estimate; edit it if overlapping or incomplete roles distort the result.</p>
               <div class="form-grid">
+                <label class="wide chip-field">Current role *<input id="reviewCurrentRole" type="hidden" required><div id="currentRolePicker" class="chip-picker"></div><span class="chip-add"><input id="currentRoleInput" placeholder="Search or add your current role"><button id="currentRoleAdd" type="button">Set</button></span></label>
                 <label>Total years *<input id="reviewYears" type="number" min="0" step="0.1" required></label>
                 <label>Experience level *
                   <select id="reviewSeniority" required>
@@ -147,62 +159,66 @@
                     <option>staff/lead</option><option>executive</option>
                   </select>
                 </label>
-                <label>Notice period *<input id="reviewNoticePeriod" placeholder="Immediate, 30 days, 2 months" required></label>
+                <label>Notice period *
+                  <select id="reviewNoticePeriod" required>
+                    <option value="">Choose</option><option>Immediate</option><option>15 days</option>
+                    <option>30 days</option><option>45 days</option><option>60 days</option><option>90 days</option>
+                  </select>
+                </label>
                 <label class="wide">Professional summary<textarea id="reviewSummary" rows="5"></textarea></label>
               </div>
               <div id="experienceEvidence" class="evidence-note"></div>
             </section>
 
-            <section class="review-step" data-step="2" hidden>
+            <section class="review-step candidate-profile-panel" data-step="0">
               <h3>Skills</h3>
-              <p>Only demonstrated skills receive full scoring credit. Add unlisted skills only if you can support them.</p>
+              <p>Confirm the skills HireSignal should use as evidence for application fit.</p>
               <div class="form-grid">
-                <label class="wide">Demonstrated skills *<textarea id="reviewSkillsDemonstrated" rows="4" required></textarea></label>
-                <label class="wide">Confirmed but unlisted<textarea id="reviewSkillsConfirmed" rows="3"></textarea></label>
-                <label class="wide">Supporting skills<textarea id="reviewSkillsSupporting" rows="3"></textarea></label>
-                <label class="wide">Currently learning<textarea id="reviewSkillsLearning" rows="2"></textarea></label>
-                <label class="wide">Exclude from targeting<textarea id="reviewSkillsExcluded" rows="2"></textarea></label>
+                <label class="wide chip-field">Skills *<textarea id="reviewSkillsDemonstrated" class="chip-source" required></textarea><div id="skillsDemonstratedPicker" class="chip-picker"></div><span class="chip-add"><input id="skillsDemonstratedInput" placeholder="Search or add a skill"><button id="skillsDemonstratedAdd" type="button">Add</button></span></label>
+                <label class="wide">Education<textarea id="reviewEducation" rows="2" placeholder="Degree, diploma, or other education"></textarea></label>
+                <label class="wide">Certifications and licences<textarea id="reviewCertifications" rows="2" placeholder="One per line or comma-separated"></textarea></label>
               </div>
-              <p class="field-help">Use comma-separated skill names. Confirm at least five demonstrated skills.</p>
+              <p class="field-help">Custom skills are always allowed. Confirm at least one skill.</p>
               <div id="skillsEvidence" class="evidence-list"></div>
             </section>
 
-            <section class="review-step" data-step="3" hidden>
-              <h3>Target roles and seniority</h3>
-              <p>Resume-derived roles are only a starting point. Add every relevant title employers may use for the work you want.</p>
+            <section class="review-step job-preferences-panel" data-step="0">
+              <p class="eyebrow">Job Preferences</p>
+              <h3>Interested roles and industries</h3>
+              <p>Titles expand job discovery. Final ranking relies more heavily on skills, experience, eligibility, notice period, and education.</p>
               <div class="form-grid">
-                <label class="wide">Primary target roles *<textarea id="reviewTargetRoles" rows="3" required></textarea></label>
-                <label class="wide">Adjacent roles<textarea id="reviewAdjacentRoles" rows="3"></textarea></label>
-                <label class="wide">Excluded titles<textarea id="reviewExcludedTitles" rows="2"></textarea></label>
-                <label class="wide">Target industries or domains<input id="reviewIndustries" placeholder="Fintech, healthcare, retail, SaaS"></label>
+                <label class="wide chip-field">Interested roles *<textarea id="reviewTargetRoles" class="chip-source" required></textarea><div id="targetRolesPicker" class="chip-picker"></div><span class="chip-add"><input id="targetRolesInput" placeholder="Search or add an interested role"><button id="targetRolesAdd" type="button">Add</button></span></label>
+                <label class="wide chip-field">Target industries or domains<input id="reviewIndustries" type="hidden"><div id="industriesPicker" class="chip-picker"></div><span class="chip-add"><input id="industriesInput" placeholder="Search or add an industry"><button id="industriesAdd" type="button">Add</button></span></label>
               </div>
-              <p class="field-help">Use comma-separated role titles. Include spelling and level variants.</p>
+              <p class="field-help">Choose multiple roles or add any custom profession.</p>
               <div id="rolesEvidence" class="evidence-list"></div>
             </section>
 
-            <section class="review-step" data-step="4" hidden>
+            <section class="review-step job-preferences-panel" data-step="0">
               <h3>Location and remote policy</h3>
               <p>Remote eligibility cannot be inferred from a resume. These answers directly control filtering.</p>
               <div class="form-grid">
-                <label>Home country *<input id="reviewHomeCountry" required></label>
+                <label class="chip-field">Home country *<input id="reviewHomeCountry" type="hidden" required><div id="homeCountryPicker" class="chip-picker"></div><span class="chip-add"><input id="homeCountryInput" placeholder="Search country"><button id="homeCountryAdd" type="button">Set</button></span></label>
                 <label>Relocation *
                   <select id="reviewRelocation" required><option value="">Choose</option><option>open</option><option>limited</option><option>closed</option></select>
                 </label>
+                <label>Work mode<select id="reviewWorkMode"><option value="any">Any</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="on-site">On-site</option></select></label>
+                <label>Employment type<select id="reviewEmploymentType"><option value="any">Any</option><option value="full-time">Full-time</option><option value="part-time">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option><option value="freelance">Freelance</option></select></label>
                 <fieldset class="wide scope-choice">
                   <legend>Job-search scope *</legend>
                   <label class="checkbox"><input id="reviewScopeLocal" type="checkbox"> Local roles in my home country</label>
                   <label class="checkbox"><input id="reviewScopeRemote" type="checkbox"> Remote roles</label>
                   <label class="checkbox"><input id="reviewScopeInternational" type="checkbox"> International roles outside my home country</label>
                 </fieldset>
-                <label class="wide">Preferred locations<input id="reviewPreferredLocations" placeholder="Bangalore, Toronto, Berlin"></label>
-                <label class="wide">Accepted remote regions<input id="reviewRemoteRegions" placeholder="Worldwide, North America"></label>
-                <label id="internationalLocationsLabel" class="wide">International target countries or regions *<input id="reviewInternationalLocations" placeholder="Germany, UK, Canada, Singapore"></label>
+                <label class="wide chip-field">Preferred locations<input id="reviewPreferredLocations" type="hidden"><div id="preferredLocationsPicker" class="chip-picker"></div><span class="chip-add"><input id="preferredLocationsInput" placeholder="Search or add a location"><button id="preferredLocationsAdd" type="button">Add</button></span></label>
+                <label class="wide chip-field">Accepted remote regions<input id="reviewRemoteRegions" type="hidden"><div id="remoteRegionsPicker" class="chip-picker"></div><span class="chip-add"><input id="remoteRegionsInput" placeholder="Search or add a remote region"><button id="remoteRegionsAdd" type="button">Add</button></span></label>
+                <label id="internationalLocationsLabel" class="wide chip-field">International target countries or regions *<input id="reviewInternationalLocations" type="hidden"><div id="internationalLocationsPicker" class="chip-picker"></div><span class="chip-add"><input id="internationalLocationsInput" placeholder="Search or add a target country"><button id="internationalLocationsAdd" type="button">Add</button></span></label>
                 <label class="checkbox"><input id="reviewRemoteEligibility" type="checkbox" checked> Require explicit remote eligibility</label>
                 <label class="checkbox"><input id="reviewVisaRequired" type="checkbox"> Visa sponsorship required</label>
               </div>
             </section>
 
-            <section class="review-step" data-step="5" hidden>
+            <section class="review-step job-preferences-panel" data-step="0">
               <h3>Compensation</h3>
               <p>This is never inferred from the resume. Leave amounts blank if you do not want a compensation gate.</p>
               <div class="form-grid">
@@ -212,9 +228,9 @@
               </div>
             </section>
 
-            <section class="review-step" data-step="6" hidden>
-              <h3>Confirmation preview</h3>
-              <p>Validate the reviewed profile, then activate it. The previous profile and its cached onboarding data are permanently removed only after the new job search completes.</p>
+            <section class="review-step review-confirm-panel" data-step="1" hidden>
+              <h3>Confirm and search</h3>
+              <p>Validate the reviewed profile, then search for jobs. The previous profile is removed only after the replacement profile's first search succeeds.</p>
               <div id="reviewErrors" class="extraction-warnings" hidden></div>
               <pre id="reviewPreview" class="review-preview"></pre>
               <div id="activationPreview" class="activation-preview" hidden></div>
@@ -225,7 +241,7 @@
               <div id="activationProgress" class="activation-progress" role="status" aria-live="polite" hidden>
                 <span class="spinner" aria-hidden="true"></span>
                 <span>
-                  <strong>Activating your profile and searching for jobs…</strong>
+                  <strong>Saving your profile and searching for jobs…</strong>
                   <small>This first search checks many job sources and may take a few minutes. Please keep this page open.</small>
                 </span>
               </div>
@@ -235,8 +251,8 @@
             <div class="wizard-actions">
               <button id="reviewPrevBtn" type="button">Previous</button>
               <button id="reviewNextBtn" class="primary" type="button">Next</button>
-              <button id="validateReviewBtn" class="primary" type="submit" hidden>Validate reviewed profile</button>
-              <button id="activateProfileBtn" class="primary" type="button" hidden disabled>Activate profile</button>
+              <button id="validateReviewBtn" class="primary" type="submit" hidden>Review search setup</button>
+              <button id="confirmAndSearchBtn" class="primary" type="button" hidden disabled>Search jobs</button>
             </div>
           </form>
         </section>
@@ -272,7 +288,7 @@
           </button>
           <button class="tab-btn" data-tab="ops" role="tab">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-            Ops<span id="queueBadge" class="tab-badge" hidden></span>
+            Ops<span id="queueBadge" class="tab-badge candidate-hidden" hidden></span>
           </button>
           <button class="tab-btn" data-tab="intel" role="tab">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -282,6 +298,7 @@
 
         <!-- ── Jobs tab ── -->
         <div id="tab-jobs" class="tab-panel">
+          <p class="tab-explanation"><strong>Jobs</strong> = opportunities discovered and ranked for the selected profile.</p>
 
           <div id="refreshPanel" class="refresh-panel" hidden>
             <div class="refresh-panel-inner">
@@ -324,10 +341,10 @@
           <div class="jobs-toolbar">
             <section class="toolbar" aria-label="Filters">
               <input id="searchInput" type="search" placeholder="Search company, title, skill, or location…">
-              <select id="scoreFilter" aria-label="Minimum score" style="display:none">
-                <option value="0">All scores</option>
-                <option value="7">Strong+</option>
-                <option value="8">Excellent</option>
+              <select id="scoreFilter" aria-label="Minimum application fit" style="display:none">
+                <option value="0">All fit scores</option>
+                <option value="7">Strong fit</option>
+                <option value="8">Excellent fit</option>
               </select>
               <div class="score-tabs" id="scoreTabs">
                 <button class="stab active" data-min="0">All</button>
@@ -341,15 +358,24 @@
 
           <section class="statusline" id="statusLine">Loading dashboard...</section>
 
+          <details id="discoveryTelemetry" class="discovery-telemetry" hidden>
+            <summary>
+              <span>Discovery source health</span>
+              <span id="telemetrySummary" class="telemetry-summary"></span>
+            </summary>
+            <div id="telemetryMeta" class="telemetry-meta"></div>
+            <div id="telemetrySources" class="telemetry-sources"></div>
+          </details>
+
           <nav class="job-section-nav" aria-label="Job sections">
             <button class="jsec-tab active" data-sec="recommended">
-              Recommended <span class="tab-count" id="recommendedCount">0</span>
+              High application fit <span class="tab-count" id="recommendedCount">0</span>
             </button>
             <button class="jsec-tab" data-sec="review">
-              Review <span class="tab-count" id="reviewCount">0</span>
+              Low Fit <span class="tab-count" id="reviewCount">0</span>
             </button>
             <button class="jsec-tab" data-sec="source">
-              Sources <span class="tab-count" id="sourceSectionCount">0</span>
+              Job discovery leads <span class="tab-count" id="sourceSectionCount">0</span>
             </button>
           </nav>
 
@@ -366,6 +392,7 @@
 
         <!-- ── Tracker tab ── -->
         <div id="tab-tracker" class="tab-panel" hidden>
+          <p class="tab-explanation"><strong>Tracker</strong> = applications and their progress through the hiring pipeline.</p>
           <div id="tracker-funnel"></div>
 
           <div class="tracker-header">
@@ -378,7 +405,6 @@
             <div class="t-panel">
               <h3 class="t-head">Pending Offers Inbox</h3>
               <div id="apps-pipeline"><p class="t-muted">Loading…</p></div>
-              <p class="t-muted" style="margin-top:8px">Evaluate all: queue <strong>/career-ops pipeline</strong> from Console.</p>
             </div>
             <div class="t-panel">
               <h3 class="t-head">Evaluation Reports</h3>
@@ -391,13 +417,13 @@
                 <thead><tr><th>Company</th><th>Status</th><th>Urgency</th><th>Next</th></tr></thead>
                 <tbody></tbody>
               </table>
-              <p class="t-muted" style="margin-top:6px">Queue "/career-ops followup" in Console for drafted messages.</p>
             </div>
           </div>
         </div>
 
         <!-- ── Ops tab ── -->
         <div id="tab-ops" class="tab-panel" hidden>
+          <p class="tab-explanation"><strong>Ops</strong> = search coverage, source health, refresh progress, and failures.</p>
 
           <!-- Action bar -->
           <div class="ops-action-bar">
@@ -414,7 +440,7 @@
           <pre id="scan-out" class="t-pre" hidden style="margin-bottom:16px"></pre>
 
           <!-- Agent inbox -->
-          <div class="ops-inbox-panel">
+          <div class="ops-inbox-panel candidate-hidden" aria-hidden="true">
             <div class="ops-inbox-head">
               <div>
                 <h3>Agent Inbox</h3>
@@ -430,7 +456,7 @@
           </div>
 
           <!-- Commands + Companies 3-col -->
-          <div class="ops-main-grid">
+          <div class="ops-main-grid candidate-hidden" aria-hidden="true">
             <div class="t-panel">
               <h3 class="t-head">career-ops commands</h3>
               <div id="cmds-career" class="cmd-grid"></div>
@@ -467,6 +493,7 @@
 
         <!-- ── Intel tab ── -->
         <div id="tab-intel" class="tab-panel" hidden>
+          <p class="tab-explanation"><strong>Intel</strong> = candidate profile and targeting insights.</p>
 
           <!-- ── Profile banner ── -->
           <div class="intel-banner">

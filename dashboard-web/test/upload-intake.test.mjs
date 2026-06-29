@@ -99,6 +99,24 @@ test('upload staging never overwrites active profile files', async () => {
   assert.equal(await readDraft(root, draft.draftId), null);
 });
 
+test('a replacement upload removes every older onboarding draft for that profile', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-upload-'));
+  const first = await acceptResumeUpload(multipartRequest({
+    filename: 'first.pdf',
+    mimeType: 'application/pdf',
+    content: Buffer.from('%PDF-1.7\nFirst candidate'),
+  }), root);
+  await writeFile(path.join(root, 'data', 'onboarding-drafts', first.draftId, 'inference.json'), '{"candidate":"old"}');
+  const second = await acceptResumeUpload(multipartRequest({
+    filename: 'second.pdf',
+    mimeType: 'application/pdf',
+    content: Buffer.from('%PDF-1.7\nSecond candidate'),
+  }), root);
+
+  assert.equal(await readDraft(root, first.draftId), null);
+  assert.equal((await readDraft(root, second.draftId)).filename, 'second.pdf');
+});
+
 test('sanitizes traversal and unusual filename characters', () => {
   assert.equal(sanitizeFilename('../../résumé final?.pdf'), 'r_sum_ final_.pdf');
 });

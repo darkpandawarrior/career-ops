@@ -1,16 +1,22 @@
 {
   "name": "hiresignal",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "description": "HireSignal: a local-first AI career dashboard for resume onboarding, job discovery, and fit scoring",
   "private": true,
   "scripts": {
     "doctor": "node doctor.mjs",
+    "or": "node openrouter-runner.mjs",
+    "or:scan": "node openrouter-runner.mjs scan",
+    "or:pipeline": "node openrouter-runner.mjs pipeline",
+    "or:eval": "node openrouter-runner.mjs evaluate",
+    "or:apply": "node openrouter-runner.mjs apply",
     "verify": "node verify-pipeline.mjs",
     "normalize": "node normalize-statuses.mjs",
     "dedup": "node dedup-tracker.mjs",
     "merge": "node merge-tracker.mjs",
     "reconcile": "node reconcile-pipeline.mjs",
     "pdf": "node generate-pdf.mjs",
+    "cover-letter": "node generate-cover-letter.mjs --payload",
     "sync-check": "node cv-sync-check.mjs",
     "liveness": "node check-liveness.mjs",
     "scan": "node scan.mjs",
@@ -30,23 +36,10 @@
     "dashboard:audit": "node dashboard-web/private-data-audit.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps"
   },
-  "keywords": [
-    "ai",
-    "job-search",
-    "claude-code",
-    "opencode",
-    "career",
-    "hiresignal",
-    "career-ops",
-    "careerops",
-    "automation"
-  ],
+  "keywords": ["ai", "job-search", "claude-code", "opencode", "career", "hiresignal", "career-ops", "careerops", "automation"],
   "author": "Gagandeep Singh",
   "homepage": "https://github.com/kirklazar-android/hiresignal#readme",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/kirklazar-android/hiresignal.git"
-  },
+  "repository": { "type": "git", "url": "https://github.com/kirklazar-android/hiresignal.git" },
   "license": "MIT",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

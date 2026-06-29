@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import yaml from 'js-yaml';
 
-import { normalizeJob } from '../scoring/scorer.mjs';
+import { classifyFreshness, normalizeJob } from '../scoring/scorer.mjs';
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const config = yaml.load(await readFile(path.join(fixtures, 'backend-profile.yml'), 'utf8'));
@@ -90,18 +90,21 @@ test('international target locations are scored separately from local and remote
   assert.equal(job.eligibility.label, 'International target location');
 });
 
-test('skills, experience, and availability form the complete relevance score', () => {
+test('the application fit score exposes all five weighted categories', () => {
   const job = normalizeJob(jobs[0], {
     ...config,
     weights: undefined,
   });
   assert.ok(job.score >= 8);
-  assert.match(job.reasons.join(' '), /Joining availability:/);
+  assert.match(job.reasons.join(' '), /Notice period:/);
+  assert.deepEqual(Object.keys(job.scoreBreakdown), ['skills', 'experience', 'eligibility', 'noticeEducation', 'other']);
   assert.equal(job.reasons.some((reason) => reason.startsWith('Title:')), false);
   assert.equal(job.reasons.some((reason) => reason.startsWith('Preferences:')), false);
+  assert.ok(job.whyRanksHighly.some((reason) => /skills/i.test(reason)));
+  assert.ok(Array.isArray(job.potentialConcerns));
 });
 
-test('summary, employer, education, projects, and industry do not affect score', () => {
+test('education is neutral unless the posting explicitly requires it', () => {
   const base = {
     title: 'Unrelated wording',
     company: 'Example',
@@ -109,13 +112,22 @@ test('summary, employer, education, projects, and industry do not affect score',
     url: 'https://example.test/facts',
     description: 'Java PostgreSQL Docker. 5 years.',
   };
-  const enriched = normalizeJob({
-    ...base,
-    company: 'Fintech Education Projects Employer',
-    description: `${base.description} MBA university award fintech healthcare project leadership summary.`,
-  }, config);
   const plain = normalizeJob(base, config);
-  assert.equal(enriched.scoreRaw, plain.scoreRaw);
+  assert.equal(plain.educationStatus, 'neutral');
+  const required = normalizeJob({ ...base, description: `${base.description} Bachelor's degree required.` }, config);
+  assert.equal(required.educationStatus, 'verify');
+  assert.ok(required.scoreRaw < plain.scoreRaw);
+});
+
+test('mandatory, preferred, related, and transferable skills are parsed from job text', () => {
+  const job = normalizeJob({
+    title: 'Backend Engineer', company: 'Layers', location: 'India', url: 'https://example.test/layers',
+    description: 'Java and Spring Boot are required. AWS is preferred. Kafka powers the platform. Kubernetes exposure helps.',
+  }, config);
+  assert.deepEqual(job.skillRequirements.mandatory, ['Java', 'Spring Boot']);
+  assert.deepEqual(job.skillRequirements.preferred, ['AWS']);
+  assert.deepEqual(job.skillRequirements.related, ['Kafka']);
+  assert.deepEqual(job.skillRequirements.transferable, ['Kubernetes']);
 });
 
 test('joining availability penalizes urgent roles when notice period is too long', () => {
@@ -183,4 +195,42 @@ test('international roles without required sponsorship are blocked', () => {
     },
   });
   assert.equal(job.eligibility.status, 'blocked');
+});
+
+test('unclear eligibility lowers fit without creating a hard gate', () => {
+  const unclear = normalizeJob({
+    title: 'Senior Backend Engineer', company: 'Unclear', location: '',
+    url: 'https://example.test/unclear', description: 'Java Spring Boot PostgreSQL Docker. 5 years.',
+  }, config);
+  const open = normalizeJob({
+    title: 'Senior Backend Engineer', company: 'Open', location: 'Bengaluru, India',
+    url: 'https://example.test/open', description: 'Java Spring Boot PostgreSQL Docker. 5 years.',
+  }, config);
+  assert.equal(unclear.eligibility.status, 'verify');
+  assert.deepEqual(unclear.gates, []);
+  assert.ok(unclear.scoreRaw < open.scoreRaw);
+  assert.ok(unclear.potentialConcerns.some((reason) => /Location fit requires review/i.test(reason)));
+});
+
+test('freshness uses approved bands and retains an explicit unknown state', () => {
+  const now = new Date('2026-06-29T12:00:00.000Z');
+  assert.equal(classifyFreshness('2026-06-20T12:00:00.000Z', now).band, '0-14 days');
+  assert.equal(classifyFreshness('2026-06-09T12:00:00.000Z', now).band, '15-30 days');
+  assert.equal(classifyFreshness('2026-05-15T12:00:00.000Z', now).band, '31-60 days');
+  assert.equal(classifyFreshness('2026-04-01T12:00:00.000Z', now).band, 'over 60 days');
+  assert.deepEqual(classifyFreshness('', now), {
+    band: 'unknown', daysOld: null, label: 'Posting date unknown', confirmed: false,
+  });
+});
+
+test('normalized jobs expose discovery decision fields and missing information', () => {
+  const job = normalizeJob({
+    title: 'Backend Engineer', company: 'Example', location: 'Remote - India',
+    description: 'Full-time remote role. Java and PostgreSQL. 4 years experience.',
+    posted_at: new Date(Date.now() - 9 * 86_400_000).toISOString(), source: 'Company careers',
+  }, config);
+  assert.equal(job.employmentType, 'full-time');
+  assert.equal(job.freshness.band, '0-14 days');
+  assert.ok(Array.isArray(job.missingInformation));
+  assert.ok(job.recommendedAction);
 });

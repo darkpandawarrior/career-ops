@@ -40,27 +40,46 @@ export async function refreshJobSearch(root, options = {}) {
   const runWideScan = options.runWideScan || (() => runReverseAtsScan(root, validation.config));
   const plan = buildSearchPlan(validation.config);
   const errors = [];
+  const telemetry = [];
+  const refreshStartedAt = new Date().toISOString();
+  let started = Date.now();
   const scan = await runScan();
   if (scan.code !== 0) errors.push(`career-ops scan: ${scan.stderr || `exit ${scan.code}`}`);
+  telemetry.push(commandTelemetry('career-ops-scan', 'Career-ops portal scan', scan, started));
+  started = Date.now();
   const wideScan = await runWideScan();
   if (wideScan.code !== 0) errors.push(`career-ops reverse ATS scan: ${wideScan.stderr || `exit ${wideScan.code}`}`);
+  telemetry.push(commandTelemetry('reverse-ats', 'Reverse ATS discovery', wideScan, started));
 
-  const batches = await Promise.all([
-    readPipelineJobs(root),
-    readScanHistoryJobs(root),
-    fetchTrackedCompanyFeeds(portals, fetchImpl, errors),
+  const sources = await Promise.all([
+    measureSource('pipeline', 'Saved pipeline', 'local', () => readPipelineJobs(root), errors),
+    measureSource('scan-history', 'Scan history', 'local', () => readScanHistoryJobs(root), errors),
+    measureSource('tracked-companies', 'Tracked company feeds', 'provider', () => fetchTrackedCompanyFeeds(portals, fetchImpl, errors), errors),
     validation.config.location.search_scopes.includes('remote')
-      ? fetchRemoteFeeds(fetchImpl, errors)
-      : Promise.resolve([]),
-    searchConfiguredQueries(plan.queries, fetchImpl, errors),
+      ? measureSource('remote-feeds', 'Remote job feeds', 'provider', () => fetchRemoteFeeds(fetchImpl, errors), errors)
+      : Promise.resolve(skippedSource('remote-feeds', 'Remote job feeds', 'provider')),
+    measureSource('generated-search', 'Generated web discovery', 'search', () => searchConfiguredQueries(plan.queries, fetchImpl, errors), errors),
   ]);
+  telemetry.push(...sources.map((source) => source.telemetry));
+  const batches = sources.map((source) => source.results);
+  const funnel = {
+    raw: batches.flat().length, verified: 0, leads: 0, irrelevant: 0,
+    expired: 0, over60Days: 0, unknownDate: 0, duplicates: 0, final: 0,
+  };
   const byId = new Map();
   for (const raw of batches.flat()) {
     if (!raw?.url || !raw?.title) continue;
     const job = normalizeJob(raw, validation.config);
-    if (job.type !== 'searchLead' && job.score < 4) continue;
-    if (job.type !== 'searchLead' && !isRelevantJob(job)) continue;
+    if (job.type === 'searchLead') funnel.leads += 1;
+    else {
+      funnel.verified += 1;
+      if (isExpiredJob(job)) { funnel.expired += 1; continue; }
+      if (job.freshness?.band === 'over 60 days') { funnel.over60Days += 1; continue; }
+      if (job.freshness?.band === 'unknown') funnel.unknownDate += 1;
+      if (!isDiscoverableJob(job)) { funnel.irrelevant += 1; continue; }
+    }
     const existing = byId.get(job.id);
+    if (existing) funnel.duplicates += 1;
     if (!existing
       || job.score > existing.score
       || (job.score === existing.score && job.snippet.length > existing.snippet.length)) {
@@ -69,10 +88,12 @@ export async function refreshJobSearch(root, options = {}) {
   }
   const jobs = [...byId.values()]
     .sort((a, b) => b.score - a.score || a.company.localeCompare(b.company));
+  const generatedAt = new Date().toISOString();
+  funnel.final = jobs.filter((job) => job.type !== 'searchLead').length;
   const payload = {
-    version: 1,
+    version: 2,
     scored: true,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     jobs,
     stats: summarizeJobs(jobs),
     scan: {
@@ -86,6 +107,14 @@ export async function refreshJobSearch(root, options = {}) {
       },
     },
     searchPlan: plan.summary,
+    telemetry: {
+      refreshStartedAt,
+      lastRefresh: generatedAt,
+      durationMs: new Date(generatedAt).getTime() - new Date(refreshStartedAt).getTime(),
+      sources: telemetry,
+      contributors: summarizeContributors(batches.flat()),
+      funnel,
+    },
     diagnostics: {
       feedErrors: errors.slice(0, 20),
       note: errors.length
@@ -94,14 +123,107 @@ export async function refreshJobSearch(root, options = {}) {
     },
   };
   await mkdir(path.join(root, 'data'), { recursive: true });
-  await writeFile(path.join(root, 'data', 'job-dashboard.json'), JSON.stringify(payload, null, 2), 'utf8');
+  const cachePath = path.join(root, 'data', 'job-dashboard.json');
+  await writeFile(cachePath, JSON.stringify(payload, null, 2), 'utf8');
+  if (options.autoEnrich !== false && jobs.some((job) => job.type === 'searchLead')) {
+    await enrichDiscoveryLeads(root, {
+      fetchImpl,
+      limit: options.enrichmentLimit ?? 4,
+    });
+    return JSON.parse(await readFile(cachePath, 'utf8'));
+  }
   return payload;
+}
+
+async function measureSource(id, label, kind, runner, errors) {
+  const startedAt = Date.now();
+  const errorCount = errors.length;
+  try {
+    const results = await runner();
+    const newErrors = errors.length - errorCount;
+    return {
+      results,
+      telemetry: resultTelemetry(id, label, kind, results, startedAt, newErrors),
+    };
+  } catch (error) {
+    errors.push(`${label}: ${error.message}`);
+    return {
+      results: [],
+      telemetry: {
+        id, label, kind, status: 'failed', jobs: 0, leads: 0,
+        failures: 1, durationMs: Date.now() - startedAt,
+        refreshedAt: new Date().toISOString(), freshness: 'fresh',
+      },
+    };
+  }
+}
+
+function resultTelemetry(id, label, kind, results, startedAt, failures) {
+  return {
+    id,
+    label,
+    kind,
+    status: failures > 0 ? 'partial' : 'success',
+    jobs: results.filter((item) => item?.type !== 'searchLead').length,
+    leads: results.filter((item) => item?.type === 'searchLead').length,
+    failures,
+    durationMs: Date.now() - startedAt,
+    refreshedAt: new Date().toISOString(),
+    freshness: 'fresh',
+  };
+}
+
+function skippedSource(id, label, kind) {
+  return {
+    results: [],
+    telemetry: {
+      id, label, kind, status: 'skipped', jobs: 0, leads: 0,
+      failures: 0, durationMs: 0, refreshedAt: null, freshness: 'not-run',
+    },
+  };
+}
+
+function commandTelemetry(id, label, result, startedAt) {
+  return {
+    id,
+    label,
+    kind: 'scanner',
+    status: result.code === 0 ? 'success' : 'failed',
+    jobs: 0,
+    leads: 0,
+    failures: result.code === 0 ? 0 : 1,
+    durationMs: Date.now() - startedAt,
+    refreshedAt: new Date().toISOString(),
+    freshness: 'fresh',
+  };
+}
+
+function summarizeContributors(items) {
+  const sources = new Map();
+  for (const item of items) {
+    const label = item?.source || 'Unknown source';
+    const current = sources.get(label) || { source: label, jobs: 0, leads: 0 };
+    if (item?.type === 'searchLead') current.leads += 1;
+    else current.jobs += 1;
+    sources.set(label, current);
+  }
+  return [...sources.values()].sort((a, b) => b.jobs - a.jobs || b.leads - a.leads || a.source.localeCompare(b.source));
 }
 
 function isRelevantJob(job) {
   const verified = (job.matchedSkills || []).length;
   const supporting = (job.supportingSkills || []).length;
   return verified >= 2 || (verified >= 1 && verified + supporting >= 3);
+}
+
+export function isDiscoverableJob(job) {
+  if (job?.type === 'searchLead') return true;
+  return !isExpiredJob(job) && job?.freshness?.band !== 'over 60 days' && isRelevantJob(job);
+}
+
+function isExpiredJob(job) {
+  const value = `${job.liveness || ''} ${job.status || ''} ${job.snippet || ''}`;
+  return /\b(expired|closed|no longer accepting|position (?:has been )?filled|job unavailable)\b/i.test(value);
 }
 
 export async function findCachedJob(root, id) {
@@ -111,6 +233,75 @@ export async function findCachedJob(root, id) {
   } catch {
     return null;
   }
+}
+
+export async function enrichDiscoveryLead(root, id, options = {}) {
+  const cachePath = path.join(root, 'data', 'job-dashboard.json');
+  const [cache, rawConfig] = await Promise.all([
+    readFile(cachePath, 'utf8').then(JSON.parse),
+    readYaml(path.join(root, 'config', 'job-search.yml')),
+  ]);
+  const validation = validateJobSearchConfig(rawConfig);
+  if (!validation.valid) throw searchError('invalid_search_config', validation.errors.join('; '), 422);
+  const lead = (cache.jobs || []).find((job) => job.id === id && job.type === 'searchLead');
+  if (!lead) throw searchError('lead_not_found', 'Discovery lead was not found', 404);
+  if (!lead.discoveryQuery) throw searchError('lead_query_missing', 'Run a fresh search before enriching this legacy lead', 409);
+
+  const errors = [];
+  const query = { name: lead.source || lead.title, category: lead.sourceCategory || 'search', query: lead.discoveryQuery };
+  const rawJobs = await searchConfiguredQueries([query], options.fetchImpl || globalThis.fetch, errors);
+  const jobs = rawJobs
+    .filter((job) => job.type !== 'searchLead')
+    .map((job) => normalizeJob(job, validation.config))
+    .filter(isDiscoverableJob);
+  const attemptedAt = new Date().toISOString();
+
+  if (jobs.length === 0) {
+    lead.enrichment = {
+      status: 'unverified', attemptedAt,
+      reason: errors[0] || rawJobs[0]?.discoveryReason || 'No job postings could be verified from this lead',
+    };
+    await writeFile(cachePath, JSON.stringify(cache, null, 2), 'utf8');
+    return { status: 'unverified', lead, jobs: [], errors };
+  }
+
+  const byId = new Map((cache.jobs || []).filter((job) => job.id !== lead.id).map((job) => [job.id, job]));
+  for (const job of jobs) {
+    const existing = byId.get(job.id);
+    if (!existing || job.score > existing.score || job.snippet.length > existing.snippet.length) byId.set(job.id, job);
+  }
+  cache.jobs = [...byId.values()].sort((a, b) => b.score - a.score || a.company.localeCompare(b.company));
+  cache.stats = summarizeJobs(cache.jobs);
+  cache.leadEnrichment = { lastAttempt: attemptedAt, leadId: lead.id, promotedJobs: jobs.length };
+  await writeFile(cachePath, JSON.stringify(cache, null, 2), 'utf8');
+  return { status: 'promoted', leadId: lead.id, jobs, errors };
+}
+
+export async function enrichDiscoveryLeads(root, options = {}) {
+  const cachePath = path.join(root, 'data', 'job-dashboard.json');
+  const cache = JSON.parse(await readFile(cachePath, 'utf8'));
+  const leads = (cache.jobs || [])
+    .filter((job) => job.type === 'searchLead' && job.discoveryQuery)
+    .slice(0, Math.max(0, Number(options.limit ?? 8)));
+  const results = [];
+  for (const lead of leads) {
+    try {
+      const result = await enrichDiscoveryLead(root, lead.id, { fetchImpl: options.fetchImpl });
+      results.push({ leadId: lead.id, status: result.status, promotedJobs: result.jobs?.length || 0 });
+    } catch (error) {
+      results.push({ leadId: lead.id, status: 'failed', promotedJobs: 0, reason: error.message });
+    }
+  }
+  const latest = JSON.parse(await readFile(cachePath, 'utf8'));
+  latest.leadEnrichmentBatch = {
+    attemptedAt: new Date().toISOString(),
+    attempted: results.length,
+    promotedJobs: results.reduce((sum, result) => sum + result.promotedJobs, 0),
+    failed: results.filter((result) => result.status === 'failed').length,
+    results,
+  };
+  await writeFile(cachePath, JSON.stringify(latest, null, 2), 'utf8');
+  return latest.leadEnrichmentBatch;
 }
 
 async function fetchTrackedCompanyFeeds(portals, fetchImpl, errors) {
@@ -263,9 +454,19 @@ function parseSolidJobs(data, source) {
 
 async function searchConfiguredQueries(queries, fetchImpl, errors) {
   const selected = queries.slice(0, Number(process.env.CAREER_DASHBOARD_SEARCH_LIMIT || 150));
+  const concurrency = Math.max(1, Number(process.env.CAREER_DASHBOARD_SEARCH_CONCURRENCY || 10));
+  const queryTimeoutMs = Math.max(1000, Number(process.env.CAREER_DASHBOARD_QUERY_TIMEOUT_MS || 8000));
+  const budgetMs = Math.max(queryTimeoutMs, Number(process.env.CAREER_DASHBOARD_SEARCH_BUDGET_MS || 60_000));
+  const startedAt = Date.now();
   const results = [];
-  for (let index = 0; index < selected.length; index += 5) {
-    const chunk = selected.slice(index, index + 5);
+  for (let index = 0; index < selected.length; index += concurrency) {
+    if (Date.now() - startedAt >= budgetMs) {
+      const remaining = selected.slice(index);
+      errors.push(`Generated search budget reached after ${index} of ${selected.length} queries`);
+      results.push(...remaining.map((query) => searchLead(query, 'Not fetched before the generated-search time budget expired')));
+      break;
+    }
+    const chunk = selected.slice(index, index + concurrency);
     const batch = await Promise.all(chunk.map(async (query) => {
       try {
         const body = new URLSearchParams({ q: query.query });
@@ -276,6 +477,7 @@ async function searchConfiguredQueries(queries, fetchImpl, errors) {
             'user-agent': 'hiresignal/1.0',
           },
           body,
+          timeoutMs: queryTimeoutMs,
         });
         const html = await response.text();
         const parsed = parseDuckResults(html, query);
@@ -325,6 +527,8 @@ function searchLead(query, reason) {
     url: `https://duckduckgo.com/?q=${encodeURIComponent(query.query)}`,
     source: query.name,
     sourceCategory: query.category,
+    discoveryQuery: query.query,
+    discoveryReason: reason,
     snippet: reason,
   };
 }
@@ -423,9 +627,10 @@ function providerLabel(value) {
 
 async function fetchWithTimeout(url, fetchImpl, options = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetchImpl(url, { ...options, signal: controller.signal });
+    return await fetchImpl(url, { ...fetchOptions, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }
