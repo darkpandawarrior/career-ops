@@ -37,6 +37,11 @@ modes/_profile.md
 .update-dismissed
 .update-lock
 
+# Multi-profile private layer (per-candidate config/cv/data — e.g. siddharth, lakshita)
+profiles/
+# Agent sync state (inbox/outbox/digests/state — local runtime, private)
+sync/
+
 # Secrets (never commit — use .env.example as template)
 .env
 # Universal safety net — protects ALL checkouts/branches, incl. untracked subprojects
