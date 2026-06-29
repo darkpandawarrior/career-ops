@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
+import { requestRoot } from "@/lib/profile-registry";
 
 export const runtime = "nodejs"; // child_process (spawn) requires the Node runtime
 export const dynamic = "force-dynamic";
@@ -70,7 +71,8 @@ export async function POST(req: Request) {
   const pageLine = pageContext
     ? `\n\nCURRENT PAGE (the user is looking at this right now): ${pageContext}\nWhen the user's message is ambiguous ("this", "it", "apply", "evaluate this", "draft it"), assume it refers to what's on the current page.`
     : "";
-  const memory = readMemory();
+  const dataRoot = await requestRoot();
+  const memory = readMemory(dataRoot);
   const memoryLine = memory.trim()
     ? `\n\nWHAT YOU KNOW ABOUT THE USER (persistent memory — carries across sessions and CLIs):\n${memory.trim()}`
     : "\n\n(No persistent memory about the user yet — learn and use <<remember:>> as you go.)";
@@ -101,7 +103,7 @@ export async function POST(req: Request) {
       ]
     : spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot } });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

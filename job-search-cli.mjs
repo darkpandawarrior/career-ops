@@ -16,6 +16,8 @@ import { refreshJobSearch } from "./dashboard-web/search/job-search-runner.mjs";
 
 const root = process.argv[2] || process.env.CAREER_OPS_ROOT || process.cwd();
 const emit = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+// 4-phase progress (mirrors the legacy refresh animation).
+const phase = (n, name) => emit({ type: "phase", phase: n, name });
 
 // Keep the noisy engine logs off stdout (NDJSON only).
 const origLog = console.log;
@@ -23,10 +25,32 @@ const origInfo = console.info;
 console.log = (...a) => process.stderr.write(a.map(String).join(" ") + "\n");
 console.info = console.log;
 
-emit({ type: "log", message: "Starting job search — scanning portals, fetching feeds + queries…" });
+// Instrument fetch so we can flip to the "fetch feeds" phase the moment the
+// runner starts pulling ATS / remote feeds + running queries.
+let announcedFetch = false;
+const fetchImpl = (...args) => {
+  if (!announcedFetch) {
+    announcedFetch = true;
+    phase(3, "Fetching job feeds + queries");
+  }
+  return globalThis.fetch(...args);
+};
+
+phase(1, "Scanning company boards");
+emit({ type: "log", message: "Starting job search…" });
 
 try {
-  const payload = await refreshJobSearch(root, {});
+  // Heartbeat so the UI's elapsed timer + active phase keep feeling alive.
+  const startedAt = Date.now();
+  const beat = setInterval(() => emit({ type: "tick", elapsed: Math.round((Date.now() - startedAt) / 1000) }), 2000);
+  // Phase 2 (ATS discovery) follows the initial board scan shortly after.
+  const p2 = setTimeout(() => phase(2, "ATS discovery"), 1500);
+
+  const payload = await refreshJobSearch(root, { fetchImpl });
+
+  clearInterval(beat);
+  clearTimeout(p2);
+  phase(4, "Scoring & saving");
   const stats = payload?.stats ?? {};
   const errs = payload?.diagnostics?.feedErrors?.length ?? 0;
   emit({ type: "log", message: `Found ${stats.total ?? 0} roles (${stats.excellent ?? 0} excellent, ${stats.sources ?? 0} source leads)${errs ? `, ${errs} feed warning(s)` : ""}.` });

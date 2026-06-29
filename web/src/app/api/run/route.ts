@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { careerOpsRoot, readMemory } from "@/lib/career-ops";
+import { readMemory } from "@/lib/career-ops";
+import { requestRoot } from "@/lib/profile-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,12 +83,13 @@ export async function POST(req: Request) {
     });
   }
   const { spec, binPath } = resolved;
+  const root = await requestRoot();
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
   const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
   const required = needsScript[kind];
-  if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
+  if (required && !fs.existsSync(path.join(root, required))) {
     return new Response(
       JSON.stringify({
         error: `This needs a complete career-ops checkout (${required}). CAREER_OPS_ROOT has data only — point it at a full checkout.`,
@@ -98,7 +100,7 @@ export async function POST(req: Request) {
 
   // An A–F score is meaningless without a CV to score against — the CLI would
   // hallucinate a fit narrative and still emit a VERDICT. Require cv.md first.
-  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(careerOpsRoot(), "cv.md"))) {
+  if ((kind === "evaluate" || kind === "pdf") && !fs.existsSync(path.join(root, "cv.md"))) {
     return new Response(
       JSON.stringify({ error: "Add your CV first so I can score this against you — drop it on the home page." }),
       { status: 400, headers: { "Content-Type": "application/json" } },
@@ -106,7 +108,7 @@ export async function POST(req: Request) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const prompt = buildPrompt(kind, input, readMemory(), today);
+  const prompt = buildPrompt(kind, input, readMemory(root), today);
 
   const isClaude = cliId === "claude";
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
@@ -127,7 +129,7 @@ export async function POST(req: Request) {
 
   // For write-needing kinds, snapshot reports/ so we can verify the worker
   // actually persisted (non-Claude CLIs lack Write auth and silently no-op).
-  const reportsDir = path.join(careerOpsRoot(), "reports");
+  const reportsDir = path.join(root, "reports");
   const countReports = () => {
     try {
       return fs.readdirSync(reportsDir).filter((f) => f.endsWith(".md")).length;
@@ -138,7 +140,7 @@ export async function POST(req: Request) {
   const persists = kind === "evaluate";
   const reportsBefore = persists ? countReports() : 0;
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+  const child = spawn(binPath, args, { cwd: root, env: { ...process.env, CAREER_OPS_ROOT: root } });
   const enc = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({

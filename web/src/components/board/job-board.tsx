@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Search, RefreshCw, Download, ExternalLink, AlertTriangle,
-  Sparkles, SlidersHorizontal, Inbox, Radar, Loader2,
+  Sparkles, SlidersHorizontal, Inbox, Radar, Loader2, Check, Circle,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
@@ -50,6 +50,8 @@ export function JobBoard({
   const [busy, setBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchLog, setSearchLog] = useState<string[]>([]);
+  const [searchPhase, setSearchPhase] = useState(0);
+  const [searchElapsed, setSearchElapsed] = useState(0);
   const rejectedSet = useMemo(() => new Set(rejectedCompanies.map((c) => c.toLowerCase())), [rejectedCompanies]);
 
   const reScore = async () => {
@@ -62,10 +64,14 @@ export function JobBoard({
     }
   };
 
-  // Run a real job-search refresh (crawls portals + feeds), streaming progress.
+  // Run a real job-search refresh (crawls portals + feeds), streaming staged
+  // progress (phase / tick / log / done events from job-search-cli.mjs).
   const runSearch = async () => {
     setSearching(true);
-    setSearchLog(["Connecting…"]);
+    setSearchLog([]);
+    setSearchPhase(1);
+    setSearchElapsed(0);
+    let failed = false;
     try {
       const res = await fetch("/api/jobs/refresh", { method: "POST" });
       const reader = res.body?.getReader();
@@ -81,20 +87,26 @@ export function JobBoard({
           if (!line.trim()) continue;
           try {
             const ev = JSON.parse(line);
-            if (ev.type === "log") setSearchLog((l) => [...l, ev.message]);
-            else if (ev.type === "error") setSearchLog((l) => [...l, `⚠ ${ev.message}`]);
-            else if (ev.type === "done")
+            if (ev.type === "phase") setSearchPhase((p) => Math.max(p, ev.phase)); // monotonic — never regress
+            else if (ev.type === "tick") setSearchElapsed(ev.elapsed);
+            else if (ev.type === "log") setSearchLog((l) => [...l, ev.message]);
+            else if (ev.type === "error") { failed = true; setSearchLog((l) => [...l, `⚠ ${ev.message}`]); }
+            else if (ev.type === "done") {
+              setSearchPhase(5); // all complete
               setSearchLog((l) => [...l, `✓ Done — ${ev.stats?.total ?? 0} roles scored.`]);
+            }
           } catch {
             /* ignore non-JSON */
           }
         }
       }
-      await reScore(); // reload the freshly-written board
+      if (!failed) await reScore(); // reload the freshly-written board
     } catch {
+      failed = true;
       setSearchLog((l) => [...l, "⚠ Search failed (network)."]);
     } finally {
       setSearching(false);
+      if (failed) setSearchPhase(0);
     }
   };
 
@@ -176,24 +188,15 @@ export function JobBoard({
         </div>
       </div>
 
-      {/* live search progress */}
+      {/* live staged search progress */}
       {(searching || searchLog.length > 0) && (
-        <div className="mt-4 overflow-hidden rounded-xl border border-border bg-surface/60">
-          <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-muted">
-            <Radar className="size-3.5" /> Job search
-            {searching && <Loader2 className="size-3 animate-spin text-brand" />}
-            {!searching && (
-              <button onClick={() => setSearchLog([])} className="ml-auto text-faint hover:text-foreground">
-                dismiss
-              </button>
-            )}
-          </div>
-          <div className="max-h-40 overflow-auto px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground/80">
-            {searchLog.map((l, i) => (
-              <div key={i}>{l}</div>
-            ))}
-          </div>
-        </div>
+        <RefreshProgress
+          phase={searchPhase}
+          elapsed={searchElapsed}
+          searching={searching}
+          log={searchLog}
+          onDismiss={() => { setSearchLog([]); setSearchPhase(0); }}
+        />
       )}
 
       {/* stat strip + score distribution */}
@@ -315,6 +318,65 @@ function Stat({
         {value}
       </div>
       <div className="mt-1 text-xs text-faint">{label}</div>
+    </div>
+  );
+}
+
+const REFRESH_STAGES = [
+  "Scan company boards",
+  "ATS discovery",
+  "Fetch job feeds",
+  "Score & save",
+] as const;
+
+function RefreshProgress({
+  phase, elapsed, searching, log, onDismiss,
+}: {
+  phase: number; elapsed: number; searching: boolean; log: string[]; onDismiss: () => void;
+}) {
+  const done = phase >= 5;
+  return (
+    <div className="mt-4 overflow-hidden rounded-2xl border border-border bg-surface/60">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+        {done ? <Check className="size-4 text-emerald-500" /> : <Radar className="size-4 animate-pulse text-brand" />}
+        <span className="text-sm font-medium">{done ? "Search complete" : "Scanning for new jobs…"}</span>
+        <span className="ml-auto text-xs tabular-nums text-faint">{elapsed}s</span>
+        {!searching && (
+          <button onClick={onDismiss} className="text-faint transition-colors hover:text-foreground" aria-label="Dismiss">
+            <Circle className="hidden" />✕
+          </button>
+        )}
+      </div>
+
+      {/* 4-stage stepper */}
+      <ol className="flex flex-col gap-0 px-4 py-3 sm:flex-row sm:items-center sm:gap-1">
+        {REFRESH_STAGES.map((label, i) => {
+          const n = i + 1;
+          const state = done || phase > n ? "done" : phase === n ? "active" : "pending";
+          return (
+            <li key={label} className="flex flex-1 items-center gap-2">
+              <span
+                className={cn(
+                  "grid size-5 shrink-0 place-items-center rounded-full text-[10px]",
+                  state === "done" ? "bg-emerald-500/20 text-emerald-500"
+                    : state === "active" ? "bg-brand-soft text-brand"
+                    : "bg-surface-hover text-faint",
+                )}
+              >
+                {state === "done" ? <Check className="size-3" /> : state === "active" ? <Loader2 className="size-3 animate-spin" /> : n}
+              </span>
+              <span className={cn("text-xs", state === "pending" ? "text-faint" : "text-foreground")}>{label}</span>
+              {i < REFRESH_STAGES.length - 1 && <span className="mx-1 hidden h-px flex-1 bg-border sm:block" />}
+            </li>
+          );
+        })}
+      </ol>
+
+      {log.length > 0 && (
+        <div className="max-h-32 overflow-auto border-t border-border px-4 py-2 font-mono text-[11px] leading-relaxed text-foreground/70">
+          {log.map((l, i) => <div key={i}>{l}</div>)}
+        </div>
+      )}
     </div>
   );
 }

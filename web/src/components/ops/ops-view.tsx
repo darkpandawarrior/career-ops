@@ -10,6 +10,13 @@ import type { ScanHistory, AgentInboxItem } from "@/lib/career-ops";
 import type { PortalsMeta } from "@/lib/portals-meta";
 import { COMMAND_CATALOG } from "@/lib/commands";
 
+const QUICK_TASKS = [
+  "Process the agent inbox",
+  "Evaluate the next inbox posting",
+  "Run a deep scan for new roles",
+  "Draft follow-ups for overdue applications",
+] as const;
+
 const OPS = [
   { op: "pipeline-health", label: "Pipeline health", icon: HeartPulse, hint: "Verify pending URLs", heavy: false },
   { op: "scan", label: "Portal scan", icon: Radar, hint: "Crawl tracked portals", heavy: true },
@@ -41,12 +48,17 @@ export function OpsView({
   const [task, setTask] = useState("");
   const router = useRouter();
 
+  const queueText = async (text: string) => {
+    const t = text.trim();
+    if (!t) return;
+    await fetch("/api/queue", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: t }) });
+    router.refresh();
+  };
   const queueTask = async () => {
     const text = task.trim();
     if (!text) return;
     setTask("");
-    await fetch("/api/queue", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-    router.refresh();
+    await queueText(text);
   };
   const removeTask = async (text: string) => {
     await fetch("/api/queue", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
@@ -157,20 +169,46 @@ export function OpsView({
             <Plus className="size-3.5" /> Queue
           </button>
         </div>
-        {inbox.length > 0 && (
-          <ul className="mt-2 space-y-1">
-            {inbox.map((it, i) => (
-              <li key={i} className={cn("group flex items-start gap-2 rounded-md bg-surface/50 px-3 py-1.5 text-sm", it.done && "text-faint line-through")}>
-                <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", it.done ? "bg-emerald-500" : "bg-brand")} />
-                <span className="flex-1">{it.text}</span>
-                {!it.done && (
-                  <button onClick={() => removeTask(it.text)} className="text-faint opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100" aria-label="Remove">
-                    <X className="size-3.5" />
-                  </button>
-                )}
-              </li>
-            ))}
+
+        {/* quick-queue suggestions */}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {QUICK_TASKS.map((t) => (
+            <button
+              key={t}
+              onClick={() => queueText(t)}
+              className="rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] text-muted transition-colors hover:border-brand/40 hover:text-brand"
+            >
+              + {t}
+            </button>
+          ))}
+        </div>
+
+        {inbox.length > 0 ? (
+          <ul className="mt-3 space-y-1">
+            {inbox.map((it, i) => {
+              const m = it.text.match(/^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2})\s*[—-]\s*(.+)$/);
+              const when = m?.[1];
+              const body = m?.[2] ?? it.text;
+              return (
+                <li key={i} className={cn("group flex items-start gap-2 rounded-md bg-surface/50 px-3 py-1.5 text-sm", it.done && "text-faint")}>
+                  <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", it.done ? "bg-emerald-500" : "bg-brand")} />
+                  <span className="min-w-0 flex-1">
+                    <span className={cn("block", it.done && "line-through")}>{body}</span>
+                    {when && <span className="text-[10px] tabular-nums text-faint">{when}</span>}
+                  </span>
+                  {it.done ? (
+                    <span className="text-[10px] uppercase tracking-wide text-emerald-500">done</span>
+                  ) : (
+                    <button onClick={() => removeTask(it.text)} className="text-faint opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100" aria-label="Remove">
+                      <X className="size-3.5" />
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
+        ) : (
+          <p className="mt-3 text-xs text-faint">No queued tasks. Add one above — the agent runs them at the next session start.</p>
         )}
       </section>
 

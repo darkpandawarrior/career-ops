@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { requestRoot } from "@/lib/profile-registry";
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
 // the USER'S OWN CLI headless — the web never ships a heavyweight parser, and the
@@ -99,6 +100,7 @@ export async function POST(req: Request) {
   }
   const { spec, binPath } = resolved;
   const prompt = ingestPrompt(promptSource);
+  const dataRoot = await requestRoot();
   const isClaude = cliId === "claude";
   const args = isClaude
     ? [
@@ -119,7 +121,7 @@ export async function POST(req: Request) {
 
   let child;
   try {
-    child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env });
+    child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot } });
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });

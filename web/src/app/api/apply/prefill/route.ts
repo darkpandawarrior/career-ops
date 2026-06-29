@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
+import { requestRoot } from "@/lib/profile-registry";
 import { getSession } from "@/lib/apply/session";
 
 export const runtime = "nodejs";
@@ -82,7 +83,8 @@ export async function POST(req: Request) {
   const { sessionId, cliId } = body;
   const t0 = Date.now();
   const encoder = new TextEncoder();
-  const logPath = path.join(careerOpsRoot(), ".career-ops-web", "apply-prefill.log");
+  const dataRoot = await requestRoot();
+  const logPath = path.join(dataRoot, ".career-ops-web", "apply-prefill.log");
   try {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
   } catch {
@@ -127,7 +129,7 @@ export async function POST(req: Request) {
       const fieldsList = s.fields
         .map((f) => `${f.id}\t${f.type}${f.required ? "*" : ""}\t${f.label}${f.options ? `\t[options: ${f.options.join(" | ")}]` : ""}`)
         .join("\n");
-      const mem = readMemory().trim();
+      const mem = readMemory(dataRoot).trim();
       // Inline the candidate's REAL files into the prompt — we're LOCAL (same
       // machine, the very data the planner would Read anyway), so the planner needs
       // ZERO tool round-trips: this kills the ~50s of startup file-reads + the
@@ -136,14 +138,14 @@ export async function POST(req: Request) {
       // placeholder data can't poison answers.
       let cv = "";
       try {
-        cv = fs.readFileSync(path.join(careerOpsRoot(), "cv.md"), "utf8");
+        cv = fs.readFileSync(path.join(dataRoot, "cv.md"), "utf8");
       } catch {
         /* no cv.md → fall back to letting the planner read files itself */
       }
       const haveCv = cv.trim().length > 0;
       let profile = "";
       try {
-        const p = fs.readFileSync(path.join(careerOpsRoot(), "config", "profile.yml"), "utf8");
+        const p = fs.readFileSync(path.join(dataRoot, "config", "profile.yml"), "utf8");
         if (!/jane\s+smith|jane@|@example\.com|your[-_. ]?(name|email)|placeholder/i.test(p)) profile = p;
       } catch {
         /* none */
@@ -153,7 +155,7 @@ export async function POST(req: Request) {
         const company = (s.title.split(/\bat\b/i).pop() || s.title).trim();
         const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
         if (slug.length > 2) {
-          const dir = path.join(careerOpsRoot(), "reports");
+          const dir = path.join(dataRoot, "reports");
           const hit = fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f.toLowerCase().includes(slug)).sort().pop();
           if (hit) report = fs.readFileSync(path.join(dir, hit), "utf8").slice(0, 12000);
         }
@@ -214,7 +216,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
 
       const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         // stdin = /dev/null so the CLI doesn't wait 3s for piped input.
-        const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, stdio: ["ignore", "pipe", "pipe"] });
         let buf = "";
         let lineBuf = "";
         let firstByteAt = 0;
