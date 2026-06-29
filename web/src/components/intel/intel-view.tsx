@@ -6,7 +6,23 @@ import { cn } from "@/lib/cn";
 import type { CoachState } from "@/lib/coach";
 import type { ProfileMeta } from "@/lib/profile-meta";
 
-type CadenceEntry = { company?: string; role?: string; status?: string; action?: string; due?: string; days?: number; [k: string]: unknown };
+type CadenceEntry = {
+  company?: string;
+  role?: string;
+  status?: string;
+  urgency?: string;
+  nextFollowupDate?: string;
+  daysUntilNext?: number;
+  daysSinceApplication?: number;
+  [k: string]: unknown;
+};
+
+function urgencyTone(u?: string): string {
+  const k = (u || "").toLowerCase();
+  if (k.includes("overdue") || k.includes("urgent")) return "text-red-500";
+  if (k.includes("soon") || k.includes("due")) return "text-amber-600 dark:text-amber-400";
+  return "text-faint";
+}
 
 export function IntelView({ coach, profile }: { coach: CoachState | null; profile?: ProfileMeta | null }) {
   const [cadence, setCadence] = useState<{ loading: boolean; entries: CadenceEntry[]; available: boolean }>({ loading: true, entries: [], available: false });
@@ -38,16 +54,28 @@ export function IntelView({ coach, profile }: { coach: CoachState | null; profil
           <div className="overflow-x-auto rounded-xl border border-border">
             <table className="w-full text-left text-sm">
               <thead className="bg-surface/60 text-xs uppercase tracking-wide text-faint">
-                <tr><th className="px-3 py-2 font-medium">Company</th><th className="px-3 py-2 font-medium">Status</th><th className="px-3 py-2 font-medium">Action</th><th className="px-3 py-2 font-medium">Due</th></tr>
+                <tr>
+                  <th className="px-3 py-2 font-medium">Company</th>
+                  <th className="px-3 py-2 font-medium">Role</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                  <th className="px-3 py-2 font-medium">Urgency</th>
+                  <th className="px-3 py-2 font-medium">Next follow-up</th>
+                </tr>
               </thead>
               <tbody>
                 {cadence.entries.map((e, i) => (
                   <tr key={i} className="border-t border-border">
-                    <td className="px-3 py-2">{e.company || "—"}</td>
-                    <td className="px-3 py-2 text-muted">{e.status || "—"}</td>
-                    <td className="px-3 py-2 text-muted">{e.action || (e as { recommendation?: string }).recommendation || "—"}</td>
-                    <td className={cn("px-3 py-2 text-xs tabular-nums", /overdue|urgent/i.test(String(e.status)) ? "text-red-500" : "text-faint")}>
-                      {e.due || (typeof e.days === "number" ? `${e.days}d` : "—")}
+                    <td className="px-3 py-2 font-medium">{e.company || "—"}</td>
+                    <td className="px-3 py-2 text-muted">{e.role || "—"}</td>
+                    <td className="px-3 py-2 capitalize text-muted">{e.status || "—"}</td>
+                    <td className={cn("px-3 py-2 text-xs font-medium capitalize", urgencyTone(e.urgency))}>{e.urgency || "—"}</td>
+                    <td className="px-3 py-2 text-xs tabular-nums text-faint">
+                      {e.nextFollowupDate || "—"}
+                      {typeof e.daysUntilNext === "number" && (
+                        <span className={cn("ml-1", e.daysUntilNext < 0 ? "text-red-500" : "text-faint")}>
+                          ({e.daysUntilNext < 0 ? `${-e.daysUntilNext}d overdue` : `in ${e.daysUntilNext}d`})
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -289,24 +317,101 @@ function ProfileBanner({ profile }: { profile: ProfileMeta }) {
   );
 }
 
+const titleCase = (k: string) => k.replace(/([A-Z])/g, " $1").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()).trim();
+
 function PatternsResult({ result }: { result: unknown }) {
-  if (result && typeof result === "object") {
-    const r = result as Record<string, unknown>;
-    const lists = Object.entries(r).filter(([, v]) => Array.isArray(v) && (v as unknown[]).length);
-    if (lists.length > 0) {
-      return (
-        <div className="space-y-4">
-          {lists.map(([k, v]) => (
-            <div key={k}>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{k.replace(/_/g, " ")}</p>
-              <Bullets items={(v as unknown[]).map((x) => (typeof x === "string" ? x : JSON.stringify(x)))} muted />
-            </div>
-          ))}
-        </div>
-      );
-    }
+  if (!result || typeof result !== "object") {
+    return <pre className="overflow-auto rounded-xl border border-border bg-surface/50 p-3 text-xs text-muted">{JSON.stringify(result, null, 2)}</pre>;
   }
-  return <pre className="overflow-auto rounded-xl border border-border bg-surface/50 p-3 text-xs text-muted">{JSON.stringify(result, null, 2)}</pre>;
+  const r = result as Record<string, unknown>;
+  const isScalar = (v: unknown) => v == null || ["string", "number", "boolean"].includes(typeof v);
+  const scalarObj = (v: unknown): v is Record<string, string | number> =>
+    !!v && typeof v === "object" && !Array.isArray(v) && Object.values(v as object).every(isScalar);
+
+  return (
+    <div className="space-y-5">
+      {/* Hiring funnel */}
+      {scalarObj(r.funnel) && (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Funnel</p>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(r.funnel).map(([k, v]) => (
+              <span key={k} className="rounded-md bg-surface-hover px-2 py-1 text-xs capitalize text-muted">
+                {k} <span className="tabular-nums font-semibold text-foreground">{v}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recommendations */}
+      {Array.isArray(r.recommendations) && r.recommendations.length > 0 && (
+        <div>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">Recommendations</p>
+          <div className="space-y-2">
+            {(r.recommendations as Record<string, unknown>[]).map((rec, i) => (
+              <div key={i} className="rounded-xl border border-border bg-surface/50 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm font-medium">{String(rec.action ?? "")}</p>
+                  {rec.impact != null && (
+                    <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase",
+                      String(rec.impact) === "high" ? "bg-brand-soft text-brand" : "bg-surface-hover text-faint")}>
+                      {String(rec.impact)}
+                    </span>
+                  )}
+                </div>
+                {rec.reasoning != null && <p className="mt-1 text-xs text-muted">{String(rec.reasoning)}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Remaining sections: scalar-objects → chips; object-arrays → key/value rows */}
+      {Object.entries(r)
+        .filter(([k, v]) => !["funnel", "recommendations", "metadata"].includes(k) && !(Array.isArray(v) && v.length === 0))
+        .map(([k, v]) => {
+          if (scalarObj(v)) {
+            return (
+              <div key={k}>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">{titleCase(k)}</p>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(v).map(([kk, vv]) => (
+                    <span key={kk} className="rounded-md bg-surface-hover px-2 py-1 text-xs text-muted">
+                      {titleCase(kk)} <span className="tabular-nums font-semibold text-foreground">{String(vv)}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          if (Array.isArray(v)) {
+            return (
+              <div key={k}>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">{titleCase(k)}</p>
+                <div className="space-y-1.5">
+                  {(v as unknown[]).map((row, i) =>
+                    row && typeof row === "object" ? (
+                      <div key={i} className="rounded-lg bg-surface/50 px-3 py-2 text-xs text-muted">
+                        {Object.entries(row as Record<string, unknown>).map(([kk, vv]) => (
+                          <span key={kk} className="mr-3 inline-block">
+                            <span className="text-faint">{titleCase(kk)}:</span>{" "}
+                            <span className="text-foreground">{String(vv)}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div key={i} className="text-xs text-muted">{String(row)}</div>
+                    ),
+                  )}
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })}
+    </div>
+  );
 }
 
 function Section({ icon: Icon, title, children }: { icon: React.ComponentType<{ className?: string }>; title: string; children: React.ReactNode }) {
