@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { requestRoot } from "@/lib/profile-registry";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 
-function cvPath() {
-  return path.join(careerOpsRoot(), "cv.md");
+async function cvPath() {
+  return path.join(await requestRoot(), "cv.md");
 }
 
 const MAX_CV_BYTES = 200_000;
 
 export async function GET() {
   try {
-    return NextResponse.json({ content: fs.readFileSync(cvPath(), "utf8"), exists: true });
+    return NextResponse.json({ content: fs.readFileSync(await cvPath(), "utf8"), exists: true });
   } catch {
     return NextResponse.json({ content: "", exists: false });
   }
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
   // DATA_CONTRACT: cv.md is user-layer and gitignored (no git recovery). Never
   // blind-overwrite — snapshot the prior CV to a .bak first, write atomically.
   try {
-    const bak = atomicWriteWithBackup(cvPath(), body.content);
+    const bak = atomicWriteWithBackup(await cvPath(), body.content);
     return NextResponse.json({ ok: true, backedUp: !!bak });
   } catch {
     return NextResponse.json({ error: "write failed" }, { status: 500 });
