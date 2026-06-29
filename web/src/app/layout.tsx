@@ -4,11 +4,12 @@ import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "career-ops — official web experience",
-  description: "The official, local-first web experience for career-ops.",
+  title: "HireSignal — your job search, scored",
+  description:
+    "HireSignal — local-first job-search command center. Multi-profile, with a deterministic A–G scoring engine that surfaces the strongest-fit roles first.",
   // Home-screen / standalone (iOS): let our theme-color flow up to the status bar
   // + Dynamic Island; safe-area insets handle the layout.
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "career-ops" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "HireSignal" },
 };
 
 export const viewport: Viewport = {

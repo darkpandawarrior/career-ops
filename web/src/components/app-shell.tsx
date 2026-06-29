@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
-import { CoMark } from "@/components/co-mark";
+import { BrandLockup } from "@/components/brand";
+import { ProfileSwitcher } from "@/components/profile-switcher";
 import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -28,13 +29,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <MobileNav />
       <div className="flex min-h-screen">
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
-          <Link href="/" className="mb-8 flex items-center gap-2.5 px-1">
-            <CoMark size={32} />
-            <span className={`${instrumentSerif.className} relative -top-px text-2xl font-normal tracking-tight text-landing`}>
-              career-ops
-            </span>
+          <Link href="/" className="mb-5 flex items-center px-1">
+            <BrandLockup size={32} />
           </Link>
-          <nav className="flex flex-col gap-1">
+          <ProfileSwitcher />
+          <nav className="mt-5 flex flex-col gap-1">
             {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
               const active = isActivePath(href, pathname);
               return (
@@ -65,7 +64,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="mt-auto space-y-3 pt-4">
             <UsageMeter />
             <div className="flex items-center justify-between px-1">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
+              <span className={`${instrumentSerif.className} text-sm text-faint`}>HireSignal · local-first</span>
               <ThemeToggle />
             </div>
           </div>

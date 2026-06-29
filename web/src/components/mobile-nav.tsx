@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { CoMark } from "@/components/co-mark";
+import { HireSignalMark } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
@@ -105,9 +105,11 @@ export function MobileNav() {
       <style>{STYLE}</style>
 
       <header className="co-mnav flex items-center gap-2 border-b border-border px-4 pb-3 md:hidden">
-        <Link href="/" className="flex items-center gap-2" aria-label="career-ops home">
-          <CoMark size={26} />
-          <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>career-ops</span>
+        <Link href="/" className="flex items-center gap-2" aria-label="HireSignal home">
+          <HireSignalMark size={26} />
+          <span className={`${instrumentSerif.className} relative -top-px text-xl text-landing`}>
+            Hire<span className="text-brand">Signal</span>
+          </span>
         </Link>
         <div className="ml-auto flex items-center gap-0.5">
           <ThemeToggle />
