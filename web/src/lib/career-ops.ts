@@ -256,6 +256,39 @@ export function findApplication(n: string, root: string = careerOpsRoot()): Appl
   return readApplications(root).find((a) => a.n === n) ?? null;
 }
 
+/**
+ * Resolve the evaluation report for an application. CRITICAL: report numbers are
+ * INDEPENDENT of application numbers (row #22 may link report `007`), so we must
+ * read the report via the tracker row's `report` link, not the row number. Order:
+ *   1. the explicit linked path  `[7](../reports/007-navi-….md)`
+ *   2. the report number in `[7]` → reports/007*
+ *   3. fall back to the application number (legacy installs where n == report no.)
+ */
+export function readReportForApplication(app: Application, root: string = careerOpsRoot()): ReportData | null {
+  // 1. explicit path inside the markdown link, sandboxed to the reports dir.
+  const linked = app.report.match(/\(([^)]*reports\/[^)]+\.md)\)/i);
+  if (linked) {
+    const rel = linked[1].replace(/^(?:\.\.\/)+/, ""); // strip leading ../
+    const file = path.resolve(root, rel);
+    const reportsDir = path.resolve(root, "reports");
+    if (file.startsWith(reportsDir + path.sep)) {
+      try {
+        return { content: fs.readFileSync(file, "utf8"), file: path.basename(file) };
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+  // 2. report number from the link label, e.g. [7] → reports/007*
+  const num = app.report.match(/\[(\d+)\]/);
+  if (num) {
+    const byNum = readReport(num[1], root);
+    if (byNum) return byNum;
+  }
+  // 3. legacy fallback: application number == report number.
+  return readReport(app.n, root);
+}
+
 /** The CANONICAL user-customization file the CLI/TUI reads. Durable facts the
  *  web assistant learns go HERE (single source of truth) inside a managed marker
  *  block — so the CLI sees them too. No web-only memory store (that would drift). */
