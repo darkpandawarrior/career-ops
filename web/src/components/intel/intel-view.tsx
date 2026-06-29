@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, BookOpen, Target, MessagesSquare, Trophy, Dumbbell, Building2, Clock, TrendingUp, TrendingDown } from "lucide-react";
+import { Loader2, BookOpen, Target, MessagesSquare, Trophy, Dumbbell, Building2, Clock, TrendingUp, TrendingDown, Wallet, Zap, HeartPulse, NotebookPen, History, UserRound } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { CoachState } from "@/lib/coach";
+import type { ProfileMeta } from "@/lib/profile-meta";
 
 type CadenceEntry = { company?: string; role?: string; status?: string; action?: string; due?: string; days?: number; [k: string]: unknown };
 
-export function IntelView({ coach }: { coach: CoachState | null }) {
+export function IntelView({ coach, profile }: { coach: CoachState | null; profile?: ProfileMeta | null }) {
   const [cadence, setCadence] = useState<{ loading: boolean; entries: CadenceEntry[]; available: boolean }>({ loading: true, entries: [], available: false });
   const [patterns, setPatterns] = useState<{ loading: boolean; result: unknown; available: boolean }>({ loading: true, result: null, available: false });
 
@@ -24,6 +25,8 @@ export function IntelView({ coach }: { coach: CoachState | null }) {
     <div className="mx-auto max-w-4xl px-6 py-8">
       <h1 className="font-display text-2xl tracking-tight text-landing">Intel</h1>
       <p className="mt-1 text-sm text-muted">Interview coaching, follow-up cadence, and outcome patterns.</p>
+
+      {profile && <ProfileBanner profile={profile} />}
 
       {/* Follow-up cadence */}
       <Section icon={Clock} title="Follow-up cadence">
@@ -91,16 +94,24 @@ export function IntelView({ coach }: { coach: CoachState | null }) {
           {coach.stories.length > 0 && (
             <Section icon={BookOpen} title={`Storybank (${coach.stories.length})`}>
               <div className="grid gap-2 sm:grid-cols-2">
-                {coach.stories.map((s) => (
-                  <div key={s.id} className="rounded-xl border border-border bg-surface/50 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-semibold text-brand">{s.id}</span>
-                      <span className="text-[10px] uppercase tracking-wide text-faint">{s.strength}</span>
-                    </div>
-                    <p className="mt-0.5 text-sm font-medium">{s.title}</p>
-                    <p className="mt-1 text-xs text-muted">{[s.skill, s.skill2].filter(Boolean).join(" · ")}</p>
-                  </div>
-                ))}
+                {coach.stories.map((s) => {
+                  const detail = coach.details[s.id];
+                  return (
+                    <details key={s.id} className="group rounded-xl border border-border bg-surface/50 p-3">
+                      <summary className="cursor-pointer list-none">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold text-brand">{s.id}</span>
+                          <span className="text-[10px] uppercase tracking-wide text-faint">{s.strength}</span>
+                        </div>
+                        <p className="mt-0.5 text-sm font-medium">{s.title}</p>
+                        <p className="mt-1 text-xs text-muted">{[s.skill, s.skill2].filter(Boolean).join(" · ")}</p>
+                      </summary>
+                      {detail?.body && (
+                        <p className="mt-2 whitespace-pre-wrap border-t border-border pt-2 text-xs text-muted">{detail.body}</p>
+                      )}
+                    </details>
+                  );
+                })}
               </div>
             </Section>
           )}
@@ -177,7 +188,102 @@ export function IntelView({ coach }: { coach: CoachState | null }) {
               {coach.drillQueue && <p className="mt-1 text-xs text-faint">Revisit: {coach.drillQueue}</p>}
             </Section>
           )}
+
+          {coach.coachingNotes.length > 0 && (
+            <Section icon={NotebookPen} title="Coaching notes">
+              <Bullets items={coach.coachingNotes} muted />
+            </Section>
+          )}
+
+          {coach.sessionLog.length > 0 && (
+            <Section icon={History} title="Session log">
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-surface/60 text-xs uppercase tracking-wide text-faint">
+                    <tr><th className="px-3 py-2 font-medium">Date</th><th className="px-3 py-2 font-medium">Commands</th><th className="px-3 py-2 font-medium">Outcomes</th></tr>
+                  </thead>
+                  <tbody>
+                    {coach.sessionLog.map((s, i) => (
+                      <tr key={i} className="border-t border-border">
+                        <td className="px-3 py-2 text-xs tabular-nums text-faint">{s.date}</td>
+                        <td className="px-3 py-2 text-muted">{s.commands}</td>
+                        <td className="px-3 py-2 text-muted">{s.outcomes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Section>
+          )}
+
+          {coach.profileBullets.length > 0 && (
+            <Section icon={UserRound} title="Coach profile">
+              <Bullets items={coach.profileBullets} muted />
+            </Section>
+          )}
         </>
+      )}
+    </div>
+  );
+}
+
+function ProfileBanner({ profile }: { profile: ProfileMeta }) {
+  const [health, setHealth] = useState<{ loading: boolean; out: string | null }>({ loading: false, out: null });
+  const runHealth = async () => {
+    setHealth({ loading: true, out: null });
+    try {
+      const r = await fetch("/api/ops/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ op: "pipeline-health" }),
+      });
+      const d = await r.json();
+      setHealth({ loading: false, out: d.output || d.error || "(no output)" });
+    } catch {
+      setHealth({ loading: false, out: "Health check failed." });
+    }
+  };
+  return (
+    <div className="mt-5 rounded-2xl border border-border bg-surface/50 p-4">
+      <div className="grid gap-4 sm:grid-cols-4">
+        <div>
+          <p className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-faint"><Wallet className="size-3" /> Target comp</p>
+          <p className="mt-1 text-sm text-foreground">{profile.targetRange || "—"}</p>
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-faint">Archetypes</p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {profile.archetypes.length
+              ? profile.archetypes.slice(0, 5).map((a) => (
+                  <span key={a.name} className={cn("rounded-md px-1.5 py-0.5 text-[11px]", a.fit === "primary" ? "bg-brand-soft text-brand" : "bg-surface-hover text-muted")}>
+                    {a.name}
+                  </span>
+                ))
+              : <span className="text-sm text-muted">{profile.primaryRoles.join(", ") || "—"}</span>}
+          </div>
+        </div>
+        <div>
+          <p className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-faint"><Zap className="size-3" /> Superpowers</p>
+          <ul className="mt-1 space-y-0.5">
+            {profile.superpowers.slice(0, 4).map((s, i) => (
+              <li key={i} className="line-clamp-1 text-xs text-muted">{s}</li>
+            ))}
+            {profile.superpowers.length === 0 && <li className="text-sm text-muted">—</li>}
+          </ul>
+        </div>
+        <div>
+          <p className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-faint"><HeartPulse className="size-3" /> System</p>
+          <button
+            onClick={runHealth}
+            disabled={health.loading}
+            className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
+          >
+            {health.loading ? <Loader2 className="size-3.5 animate-spin" /> : <HeartPulse className="size-3.5" />} Health check
+          </button>
+        </div>
+      </div>
+      {health.out && (
+        <pre className="mt-3 max-h-40 overflow-auto rounded-lg border border-border bg-surface/60 px-3 py-2 text-[11px] text-foreground/80 whitespace-pre-wrap">{health.out}</pre>
       )}
     </div>
   );
