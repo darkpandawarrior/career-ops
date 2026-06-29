@@ -7,6 +7,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { ScanHistory, AgentInboxItem } from "@/lib/career-ops";
+import type { PortalsMeta } from "@/lib/portals-meta";
+import { COMMAND_CATALOG } from "@/lib/commands";
 
 const OPS = [
   { op: "pipeline-health", label: "Pipeline health", icon: HeartPulse, hint: "Verify pending URLs", heavy: false },
@@ -24,7 +26,15 @@ function statusTone(s: string): string {
   return "bg-surface-hover text-muted";
 }
 
-export function OpsView({ scans, inbox }: { scans: ScanHistory; inbox: AgentInboxItem[] }) {
+export function OpsView({
+  scans,
+  inbox,
+  portals = { companies: [], queries: [] },
+}: {
+  scans: ScanHistory;
+  inbox: AgentInboxItem[];
+  portals?: PortalsMeta;
+}) {
   const [q, setQ] = useState("");
   const [running, setRunning] = useState<string | null>(null);
   const [out, setOut] = useState<{ label: string; output: string; code: number | null } | null>(null);
@@ -163,6 +173,56 @@ export function OpsView({ scans, inbox }: { scans: ScanHistory; inbox: AgentInbo
           </ul>
         )}
       </section>
+
+      {/* commands + tracked companies + queries */}
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
+        {COMMAND_CATALOG.map((g) => (
+          <div key={g.group} className="rounded-2xl border border-border bg-surface/40 p-4">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">{g.group}</h3>
+            <ul className="mt-2 space-y-1">
+              {g.commands.map((c) => (
+                <li key={c.cmd}>
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(c.cmd)}
+                    title={`${c.desc} — click to copy`}
+                    className="w-full truncate rounded px-1.5 py-1 text-left font-mono text-[11px] text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+                  >
+                    {c.cmd}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+        <div className="rounded-2xl border border-border bg-surface/40 p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+            Tracked companies <span className="text-faint">{portals.companies.filter((c) => c.enabled).length}</span>
+          </h3>
+          <div className="mt-2 flex max-h-44 flex-wrap gap-1 overflow-auto">
+            {portals.companies.length === 0 && <span className="text-xs text-faint">none in portals.yml</span>}
+            {portals.companies.map((c) =>
+              c.url ? (
+                <a key={c.name} href={c.url} target="_blank" rel="noreferrer" title={c.notes || c.url}
+                  className={cn("rounded-md px-1.5 py-0.5 text-[11px] transition-colors hover:bg-surface-hover", c.enabled ? "bg-surface-hover text-muted" : "text-faint line-through")}>
+                  {c.name}
+                </a>
+              ) : (
+                <span key={c.name} className={cn("rounded-md px-1.5 py-0.5 text-[11px]", c.enabled ? "bg-surface-hover text-muted" : "text-faint line-through")}>{c.name}</span>
+              ),
+            )}
+          </div>
+          {portals.queries.length > 0 && (
+            <>
+              <h4 className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-faint">Search queries</h4>
+              <ul className="mt-1 space-y-0.5">
+                {portals.queries.slice(0, 12).map((q) => (
+                  <li key={q.name} className={cn("truncate text-[11px]", q.enabled ? "text-muted" : "text-faint line-through")}>{q.name}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* scan history */}
       <section className="mt-8">
