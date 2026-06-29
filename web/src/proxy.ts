@@ -50,6 +50,10 @@ export function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Run on app routes + API, skip Next internals and static assets.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // Run on app routes + API, skip ALL Next internals (static, image, data, and
+  // the dev HMR WebSocket at _next/webpack-hmr) plus static assets. Excluding the
+  // whole _next/ tree — not just _next/static|_next/image — is what keeps the
+  // proxy off the HMR upgrade request; otherwise it 500s the handshake
+  // (ERR_INVALID_HTTP_RESPONSE) and live-reload silently dies in dev.
+  matcher: ["/((?!_next/|favicon.ico).*)"],
 };
