@@ -21,20 +21,36 @@ function levelTone(job: ScoredJob): Tone {
 }
 
 const SECTIONS = [
-  { key: "all", label: "All" },
   { key: "recommended", label: "Recommended" },
   { key: "review", label: "Review" },
+  { key: "sources", label: "Sources" },
+  { key: "all", label: "All" },
 ] as const;
 type SectionKey = (typeof SECTIONS)[number]["key"];
 
-export function JobBoard({ initial }: { initial: JobDashboard }) {
+const SCORE_TABS = [
+  { min: 0, label: "All" },
+  { min: 5, label: "Good+" },
+  { min: 7, label: "Strong+" },
+  { min: 9, label: "Excellent" },
+] as const;
+
+export function JobBoard({
+  initial,
+  rejectedCompanies = [],
+}: {
+  initial: JobDashboard;
+  rejectedCompanies?: string[];
+}) {
   const [data, setData] = useState<JobDashboard>(initial);
   const [q, setQ] = useState("");
   const [minScore, setMinScore] = useState(0);
-  const [section, setSection] = useState<SectionKey>("all");
+  const [section, setSection] = useState<SectionKey>("recommended");
+  const [hideRejected, setHideRejected] = useState(true);
   const [busy, setBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchLog, setSearchLog] = useState<string[]>([]);
+  const rejectedSet = useMemo(() => new Set(rejectedCompanies.map((c) => c.toLowerCase())), [rejectedCompanies]);
 
   const reScore = async () => {
     setBusy(true);
@@ -82,12 +98,15 @@ export function JobBoard({ initial }: { initial: JobDashboard }) {
     }
   };
 
+  const isSources = section === "sources";
+
   const jobs = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return data.jobs
-      .filter((j) => j.type !== "searchLead")
-      .filter((j) => (section === "all" ? true : j.section === section))
-      .filter((j) => Number(j.score) >= minScore)
+    const base = data.jobs.filter((j) => (isSources ? j.type === "searchLead" : j.type !== "searchLead"));
+    return base
+      .filter((j) => (section === "all" || isSources ? true : j.section === section))
+      .filter((j) => (isSources ? true : Number(j.score) >= minScore))
+      .filter((j) => (isSources || !hideRejected ? true : !rejectedSet.has((j.company ?? "").toLowerCase().trim())))
       .filter((j) =>
         !needle
           ? true
@@ -95,8 +114,28 @@ export function JobBoard({ initial }: { initial: JobDashboard }) {
               .toLowerCase()
               .includes(needle),
       )
-      .sort((a, b) => Number(b.score) - Number(a.score));
-  }, [data.jobs, q, minScore, section]);
+      .sort((a, b) => (isSources ? String(a.title).localeCompare(String(b.title)) : Number(b.score) - Number(a.score)));
+  }, [data.jobs, q, minScore, section, isSources, hideRejected, rejectedSet]);
+
+  // Score distribution (real jobs) for the doughnut.
+  const dist = useMemo(() => {
+    const real = data.jobs.filter((j) => j.type !== "searchLead");
+    const b = { excellent: 0, strong: 0, possible: 0, low: 0 };
+    for (const j of real) {
+      const s = Number(j.score);
+      if (s >= 9) b.excellent++;
+      else if (s >= 7) b.strong++;
+      else if (s >= 5) b.possible++;
+      else b.low++;
+    }
+    return b;
+  }, [data.jobs]);
+
+  const sectionCount = (key: SectionKey) => {
+    if (key === "sources") return data.jobs.filter((j) => j.type === "searchLead").length;
+    const real = data.jobs.filter((j) => j.type !== "searchLead");
+    return key === "all" ? real.length : real.filter((j) => j.section === key).length;
+  };
 
   const cfgInvalid = !data.searchConfig.valid;
 
@@ -157,11 +196,12 @@ export function JobBoard({ initial }: { initial: JobDashboard }) {
         </div>
       )}
 
-      {/* stat strip */}
-      <div className="mt-5 grid grid-cols-3 gap-3">
+      {/* stat strip + score distribution */}
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat icon={Inbox} value={data.stats.total} label="scored roles" />
         <Stat icon={Sparkles} value={data.stats.excellent} label="excellent (8+)" featured />
         <Stat icon={SlidersHorizontal} value={data.searchPlan?.queries ?? "—"} label="search queries" />
+        <ScoreDonut dist={dist} />
       </div>
 
       {/* invalid-config banner */}
@@ -203,20 +243,40 @@ export function JobBoard({ initial }: { initial: JobDashboard }) {
                 section === s.key ? "bg-brand-soft text-brand" : "text-muted hover:bg-surface-hover",
               )}
             >
-              {s.label}
+              {s.label} <span className="tabular-nums opacity-60">{sectionCount(s.key)}</span>
             </button>
           ))}
         </div>
-        <select
-          value={minScore}
-          onChange={(e) => setMinScore(Number(e.target.value))}
-          className="rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-muted outline-none focus:border-brand/50"
-        >
-          <option value={0}>Any score</option>
-          <option value={5}>5+</option>
-          <option value={7}>7+ (Strong)</option>
-          <option value={9}>9+ (Excellent)</option>
-        </select>
+        {!isSources && (
+          <>
+            <div className="flex overflow-hidden rounded-md border border-border">
+              {SCORE_TABS.map((t) => (
+                <button
+                  key={t.min}
+                  onClick={() => setMinScore(t.min)}
+                  className={cn(
+                    "px-2.5 py-2 text-xs transition-colors",
+                    minScore === t.min ? "bg-brand-soft text-brand" : "text-muted hover:bg-surface-hover",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {rejectedCompanies.length > 0 && (
+              <button
+                onClick={() => setHideRejected((v) => !v)}
+                title="Hide roles from companies that already rejected you"
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md border px-2.5 py-2 text-xs transition-colors",
+                  hideRejected ? "border-red-500/40 bg-red-500/10 text-red-500" : "border-border text-muted hover:bg-surface-hover",
+                )}
+              >
+                ⛔ Rejected {hideRejected ? "off" : "on"}
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {/* list */}
@@ -259,7 +319,63 @@ function Stat({
   );
 }
 
+const DONUT = [
+  { key: "excellent", label: "Excellent", color: "var(--color-brand)" },
+  { key: "strong", label: "Strong", color: "#10b981" },
+  { key: "possible", label: "Possible", color: "#f59e0b" },
+  { key: "low", label: "Low", color: "#a1a1aa" },
+] as const;
+
+function ScoreDonut({ dist }: { dist: { excellent: number; strong: number; possible: number; low: number } }) {
+  const total = dist.excellent + dist.strong + dist.possible + dist.low;
+  let acc = 0;
+  const stops = DONUT.map((d) => {
+    const v = dist[d.key];
+    const from = total ? (acc / total) * 360 : 0;
+    acc += v;
+    const to = total ? (acc / total) * 360 : 0;
+    return `${d.color} ${from}deg ${to}deg`;
+  }).join(", ");
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-border bg-surface/50 p-4">
+      <div
+        className="relative size-14 shrink-0 rounded-full"
+        style={{ background: total ? `conic-gradient(${stops})` : "var(--color-surface-hover)" }}
+      >
+        <div className="absolute inset-[22%] grid place-items-center rounded-full bg-surface text-xs font-semibold tabular-nums">
+          {total}
+        </div>
+      </div>
+      <ul className="space-y-0.5 text-[11px]">
+        {DONUT.map((d) => (
+          <li key={d.key} className="flex items-center gap-1.5 text-faint">
+            <span className="size-2 rounded-sm" style={{ background: d.color }} />
+            {d.label} <span className="tabular-nums text-foreground">{dist[d.key]}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function JobCard({ job }: { job: ScoredJob }) {
+  // Source leads (search queries) have no score — render a compact card.
+  if (job.type === "searchLead") {
+    return (
+      <li className="flex items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-2.5">
+        <Radar className="size-4 shrink-0 text-faint" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm">{job.title || job.company}</span>
+          {job.source && <span className="block truncate text-xs text-faint">{String(job.source)}</span>}
+        </span>
+        {job.url && (
+          <a href={job.url} target="_blank" rel="noreferrer" className="text-faint hover:text-brand">
+            <ExternalLink className="size-3.5" />
+          </a>
+        )}
+      </li>
+    );
+  }
   const tone = levelTone(job);
   const skills = [...(job.matchedSkills ?? []), ...(job.supportingSkills ?? [])].slice(0, 8);
   const gated = (job.gates?.length ?? 0) > 0;
