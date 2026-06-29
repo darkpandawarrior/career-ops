@@ -126,6 +126,32 @@ spawn bridge (the `/api/run` pattern — never reimplemented).
 - `docs/MULTI_PROFILE.md`: registry format, migration usage, `?profile=` + cookie
   behavior, rollback, and a staging build/deploy section.
 
+## Full legacy migration (Ops, Intel, job search, control)
+
+Beyond Phases 0–5, the remaining legacy dashboard surfaces were ported so the 2.0
+app is a superset of `dashboard-web`, and turned into a single control center:
+
+- **Ops** (`/ops`) — scan-history table (`scan-history.tsv`), the operations
+  console (scan / scan+verify / liveness / pipeline-health, spawning the real
+  `.mjs`), and the agent inbox (queue + remove tasks). `/api/scans`, `/api/ops/run`.
+- **Intel** (`/intel`) — interview-coach state (`coach.ts` ports `parseCoachState`:
+  storybank, outcomes, question bank, company patterns, drills, loops), plus
+  rejection-pattern analysis (`analyze-patterns.mjs`) and full follow-up cadence.
+  `/api/coach`, `/api/patterns`, `/api/cadence`.
+- **Job search** — `job-search-cli.mjs` runs the real `refreshJobSearch` (crawls
+  portals + ATS/remote feeds + queries → scored `job-dashboard.json`), streamed via
+  `/api/jobs/refresh`; the board's "Run search" button drives it live.
+- **⌘K command palette** (`command-palette.tsx`) — navigate, run ops, and copy
+  career-ops / interview-coach CLI commands (`commands.ts`). Global control surface.
+- **Tracker control** — `tracker-edit.ts` + `/api/notes`, `/api/pipeline-toggle`,
+  `/api/queue` (profile-aware, atomic writes).
+- **Profile management** — `/api/profiles/create` + inline switcher creator.
+
+**Engine-vs-data split:** web-shipped bridge scripts resolve via `engineScript()`
+against the code root (the server's `web/..`), while data resolves via
+`CAREER_OPS_ROOT` — so a dev install with a separate data checkout still finds the
+web-only bridges.
+
 ## Data-contract compliance
 
 The web app remains read-only over user data except the sanctioned writes
