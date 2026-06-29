@@ -105,7 +105,7 @@ test('requires explicit targeting, skill, home-country, and compensation validat
   assert.ok(invalid.errors.length >= 4);
   assert.ok(invalid.errors.some((error) => error.includes('Years of experience')));
   assert.ok(invalid.errors.some((error) => error.includes('Experience level')));
-  assert.ok(invalid.errors.some((error) => error.includes('five demonstrated skills')));
+  assert.ok(invalid.errors.some((error) => error.includes('at least one skill')));
   assert.ok(invalid.errors.some((error) => error.includes('Relocation')));
   assert.ok(invalid.errors.some((error) => error.includes('local, remote, or international')));
   assert.ok(invalid.errors.some((error) => error.includes('Notice period')));

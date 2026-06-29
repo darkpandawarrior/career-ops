@@ -125,11 +125,12 @@
               <p class="eyebrow">Candidate Discovery</p>
               <h2>Choose the profile signals HireSignal should use</h2>
             </div>
-            <span id="reviewProgress">Step 1 of 4</span>
+            <span id="reviewProgress">Step 1 of 2</span>
           </div>
 
-          <form id="reviewForm">
-            <section class="review-step" data-step="0">
+          <form id="reviewForm" class="discovery-review-grid">
+            <section class="review-step candidate-profile-panel" data-step="0">
+              <p class="eyebrow">Candidate Profile</p>
               <h3>Personal details</h3>
               <p>Confirm contact information extracted from the resume.</p>
               <div class="form-grid">
@@ -144,10 +145,11 @@
               <div id="personalEvidence" class="evidence-note"></div>
             </section>
 
-            <section class="review-step" data-step="0">
+            <section class="review-step candidate-profile-panel" data-step="0">
               <h3>Experience and summary</h3>
               <p>Dates provide an estimate; edit it if overlapping or incomplete roles distort the result.</p>
               <div class="form-grid">
+                <label class="wide chip-field">Current role *<input id="reviewCurrentRole" type="hidden" required><div id="currentRolePicker" class="chip-picker"></div><span class="chip-add"><input id="currentRoleInput" placeholder="Search or add your current role"><button id="currentRoleAdd" type="button">Set</button></span></label>
                 <label>Total years *<input id="reviewYears" type="number" min="0" step="0.1" required></label>
                 <label>Experience level *
                   <select id="reviewSeniority" required>
@@ -168,34 +170,31 @@
               <div id="experienceEvidence" class="evidence-note"></div>
             </section>
 
-            <section class="review-step" data-step="1" hidden>
+            <section class="review-step candidate-profile-panel" data-step="0">
               <h3>Skills</h3>
-              <p>Choose the skills that should shape discovery and application fit. Only evidence-backed or explicitly confirmed skills receive full credit.</p>
+              <p>Confirm the skills HireSignal should use as evidence for application fit.</p>
               <div class="form-grid">
-                <label class="wide chip-field">Demonstrated skills *<textarea id="reviewSkillsDemonstrated" class="chip-source" required></textarea><div id="skillsDemonstratedPicker" class="chip-picker"></div><span class="chip-add"><input id="skillsDemonstratedInput" placeholder="Search or add a skill"><button id="skillsDemonstratedAdd" type="button">Add</button></span></label>
-                <label class="wide chip-field">Confirmed but unlisted<textarea id="reviewSkillsConfirmed" class="chip-source"></textarea><div id="skillsConfirmedPicker" class="chip-picker"></div><span class="chip-add"><input id="skillsConfirmedInput" placeholder="Search or add a skill"><button id="skillsConfirmedAdd" type="button">Add</button></span></label>
-                <label class="wide chip-field">Supporting skills<textarea id="reviewSkillsSupporting" class="chip-source"></textarea><div id="skillsSupportingPicker" class="chip-picker"></div><span class="chip-add"><input id="skillsSupportingInput" placeholder="Search or add a skill"><button id="skillsSupportingAdd" type="button">Add</button></span></label>
-                <label class="wide chip-field">Currently learning<textarea id="reviewSkillsLearning" class="chip-source"></textarea><div id="skillsLearningPicker" class="chip-picker"></div><span class="chip-add"><input id="skillsLearningInput" placeholder="Search or add a skill"><button id="skillsLearningAdd" type="button">Add</button></span></label>
-                <label class="wide chip-field">Exclude from targeting<textarea id="reviewSkillsExcluded" class="chip-source"></textarea><div id="skillsExcludedPicker" class="chip-picker"></div><span class="chip-add"><input id="skillsExcludedInput" placeholder="Search or add a skill"><button id="skillsExcludedAdd" type="button">Add</button></span></label>
+                <label class="wide chip-field">Skills *<textarea id="reviewSkillsDemonstrated" class="chip-source" required></textarea><div id="skillsDemonstratedPicker" class="chip-picker"></div><span class="chip-add"><input id="skillsDemonstratedInput" placeholder="Search or add a skill"><button id="skillsDemonstratedAdd" type="button">Add</button></span></label>
+                <label class="wide">Education<textarea id="reviewEducation" rows="2" placeholder="Degree, diploma, or other education"></textarea></label>
+                <label class="wide">Certifications and licences<textarea id="reviewCertifications" rows="2" placeholder="One per line or comma-separated"></textarea></label>
               </div>
-              <p class="field-help">Use comma-separated skill names. Confirm at least five demonstrated skills.</p>
+              <p class="field-help">Custom skills are always allowed. Confirm at least one skill.</p>
               <div id="skillsEvidence" class="evidence-list"></div>
             </section>
 
-            <section class="review-step" data-step="1" hidden>
-              <h3>Target roles and seniority</h3>
+            <section class="review-step job-preferences-panel" data-step="0">
+              <p class="eyebrow">Job Preferences</p>
+              <h3>Interested roles and industries</h3>
               <p>Titles expand job discovery. Final ranking relies more heavily on skills, experience, eligibility, notice period, and education.</p>
               <div class="form-grid">
-                <label class="wide chip-field">Primary target roles *<textarea id="reviewTargetRoles" class="chip-source" required></textarea><div id="targetRolesPicker" class="chip-picker"></div><span class="chip-add"><input id="targetRolesInput" placeholder="Search or add a role"><button id="targetRolesAdd" type="button">Add</button></span></label>
-                <label class="wide chip-field">Adjacent roles<textarea id="reviewAdjacentRoles" class="chip-source"></textarea><div id="adjacentRolesPicker" class="chip-picker"></div><span class="chip-add"><input id="adjacentRolesInput" placeholder="Search or add an adjacent role"><button id="adjacentRolesAdd" type="button">Add</button></span></label>
-                <label class="wide chip-field">Excluded titles<textarea id="reviewExcludedTitles" class="chip-source"></textarea><div id="excludedTitlesPicker" class="chip-picker"></div><span class="chip-add"><input id="excludedTitlesInput" placeholder="Search or add an excluded title"><button id="excludedTitlesAdd" type="button">Add</button></span></label>
+                <label class="wide chip-field">Interested roles *<textarea id="reviewTargetRoles" class="chip-source" required></textarea><div id="targetRolesPicker" class="chip-picker"></div><span class="chip-add"><input id="targetRolesInput" placeholder="Search or add an interested role"><button id="targetRolesAdd" type="button">Add</button></span></label>
                 <label class="wide chip-field">Target industries or domains<input id="reviewIndustries" type="hidden"><div id="industriesPicker" class="chip-picker"></div><span class="chip-add"><input id="industriesInput" placeholder="Search or add an industry"><button id="industriesAdd" type="button">Add</button></span></label>
               </div>
-              <p class="field-help">Use comma-separated role titles. Include spelling and level variants.</p>
+              <p class="field-help">Choose multiple roles or add any custom profession.</p>
               <div id="rolesEvidence" class="evidence-list"></div>
             </section>
 
-            <section class="review-step" data-step="2" hidden>
+            <section class="review-step job-preferences-panel" data-step="0">
               <h3>Location and remote policy</h3>
               <p>Remote eligibility cannot be inferred from a resume. These answers directly control filtering.</p>
               <div class="form-grid">
@@ -203,6 +202,8 @@
                 <label>Relocation *
                   <select id="reviewRelocation" required><option value="">Choose</option><option>open</option><option>limited</option><option>closed</option></select>
                 </label>
+                <label>Work mode<select id="reviewWorkMode"><option value="any">Any</option><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="on-site">On-site</option></select></label>
+                <label>Employment type<select id="reviewEmploymentType"><option value="any">Any</option><option value="full-time">Full-time</option><option value="part-time">Part-time</option><option value="contract">Contract</option><option value="internship">Internship</option><option value="freelance">Freelance</option></select></label>
                 <fieldset class="wide scope-choice">
                   <legend>Job-search scope *</legend>
                   <label class="checkbox"><input id="reviewScopeLocal" type="checkbox"> Local roles in my home country</label>
@@ -217,7 +218,7 @@
               </div>
             </section>
 
-            <section class="review-step" data-step="2" hidden>
+            <section class="review-step job-preferences-panel" data-step="0">
               <h3>Compensation</h3>
               <p>This is never inferred from the resume. Leave amounts blank if you do not want a compensation gate.</p>
               <div class="form-grid">
@@ -227,7 +228,7 @@
               </div>
             </section>
 
-            <section class="review-step" data-step="3" hidden>
+            <section class="review-step review-confirm-panel" data-step="1" hidden>
               <h3>Confirm and search</h3>
               <p>Validate the reviewed profile, then search for jobs. The previous profile is removed only after the replacement profile's first search succeeds.</p>
               <div id="reviewErrors" class="extraction-warnings" hidden></div>

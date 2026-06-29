@@ -113,7 +113,18 @@ export async function rollbackProfileReplacement(root, draftId) {
 export function generateUserFiles(review, extraction) {
   const minimumYears = review.experience_years == null ? null : Math.max(0, Math.floor(review.experience_years));
   const maximumYears = review.experience_years == null ? null : Math.max(minimumYears, Math.ceil(review.experience_years + 3));
-  const education = extractEducationEvidence(extraction);
+  const interestedRoles = review.interested_roles?.length
+    ? review.interested_roles : [...review.target_roles, ...review.adjacent_roles];
+  const currentRole = review.current_role || review.target_roles[0] || interestedRoles[0] || '';
+  const unifiedSkills = review.skills.all?.length ? review.skills.all : [
+    ...review.skills.demonstrated, ...review.skills.confirmed_unlisted,
+    ...review.skills.supporting, ...review.skills.learning,
+  ];
+  const inferredEducation = extractEducationEvidence(extraction);
+  const education = {
+    levels: [...new Set([...(review.education || []), ...inferredEducation.levels])],
+    certifications: [...new Set([...(review.certifications || []), ...inferredEducation.certifications])],
+  };
   const profile = {
     candidate: {
       full_name: review.candidate.full_name,
@@ -125,6 +136,8 @@ export function generateUserFiles(review, extraction) {
       github: review.candidate.github || '',
     },
     target_roles: {
+      current: currentRole,
+      interested: interestedRoles,
       primary: review.target_roles,
       archetypes: [
         ...review.target_roles.map((name) => ({ name, level: review.seniority || '', fit: 'primary' })),
@@ -159,18 +172,18 @@ export function generateUserFiles(review, extraction) {
     cv: { output_format: 'html' },
   };
   const jobSearch = {
+    current_role: currentRole,
+    interested_roles: interestedRoles,
     titles: {
-      strong: review.target_roles,
-      adjacent: review.adjacent_roles,
-      exclude: review.excluded_titles,
+      interested: interestedRoles,
     },
     skills: {
-      demonstrated: review.skills.demonstrated,
-      confirmed_unlisted: review.skills.confirmed_unlisted,
-      supporting: review.skills.supporting,
-      learning: review.skills.learning,
-      recommended_gaps: [],
-      excluded: review.skills.excluded,
+      all: unifiedSkills,
+      evidence: {
+        demonstrated: review.skills.demonstrated,
+        confirmed_unlisted: review.skills.confirmed_unlisted,
+        supporting: review.skills.supporting,
+      },
     },
     seniority: {
       minimum_years: minimumYears,
@@ -181,6 +194,7 @@ export function generateUserFiles(review, extraction) {
       notice_period: review.availability.notice_period,
     },
     education,
+    employment_types: review.employment_type === 'any' ? [] : [review.employment_type],
     location: review.location,
     compensation: {
       home_country: {

@@ -25,7 +25,12 @@ test('generates valid career-ops user files from a reviewed draft', async () => 
   assert.equal(yaml.load(files['config/profile.yml']).candidate.full_name, 'Alex Morgan');
   assert.equal(yaml.load(files['config/profile.yml']).availability.notice_period, '30 days');
   assert.ok(yaml.load(files['portals.yml']).tracked_companies.length >= 15);
-  assert.deepEqual(yaml.load(files['config/job-search.yml']).titles.strong, ['Senior Backend Engineer']);
+  const searchConfig = yaml.load(files['config/job-search.yml']);
+  assert.deepEqual(searchConfig.titles.interested, ['Senior Backend Engineer', 'Platform Engineer']);
+  assert.equal(searchConfig.current_role, 'Senior Backend Engineer');
+  assert.ok(searchConfig.skills.all.includes('Java'));
+  assert.equal(searchConfig.skills.demonstrated, undefined);
+  assert.deepEqual(searchConfig.skills.evidence.supporting, ['Kafka']);
   assert.deepEqual(yaml.load(files['config/job-search.yml']).location.search_scopes, ['local', 'remote']);
   assert.deepEqual(yaml.load(files['config/job-search.yml']).education, {
     levels: ["Bachelor's degree"],

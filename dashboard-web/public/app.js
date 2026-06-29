@@ -30,16 +30,11 @@ const ids = [
   'reviewPanel', 'backToExtractionBtn', 'reviewProgress', 'reviewForm',
   'reviewName', 'reviewEmail', 'reviewPhone', 'reviewLocation', 'reviewLinkedin',
   'reviewGithub', 'reviewPortfolio', 'personalEvidence', 'reviewYears',
-  'reviewSeniority', 'reviewNoticePeriod', 'reviewSummary', 'experienceEvidence', 'reviewSkillsDemonstrated',
-  'reviewSkillsConfirmed', 'reviewSkillsSupporting', 'reviewSkillsLearning',
-  'reviewSkillsExcluded', 'skillsDemonstratedPicker', 'skillsDemonstratedInput', 'skillsDemonstratedAdd',
-  'skillsConfirmedPicker', 'skillsConfirmedInput', 'skillsConfirmedAdd',
-  'skillsSupportingPicker', 'skillsSupportingInput', 'skillsSupportingAdd',
-  'skillsLearningPicker', 'skillsLearningInput', 'skillsLearningAdd',
-  'skillsExcludedPicker', 'skillsExcludedInput', 'skillsExcludedAdd',
+  'reviewSeniority', 'reviewNoticePeriod', 'reviewSummary', 'reviewCurrentRole',
+  'currentRolePicker', 'currentRoleInput', 'currentRoleAdd', 'reviewEducation', 'reviewCertifications',
+  'experienceEvidence', 'reviewSkillsDemonstrated',
+  'skillsDemonstratedPicker', 'skillsDemonstratedInput', 'skillsDemonstratedAdd',
   'skillsEvidence', 'reviewTargetRoles', 'targetRolesPicker', 'targetRolesInput', 'targetRolesAdd',
-  'reviewAdjacentRoles', 'adjacentRolesPicker', 'adjacentRolesInput', 'adjacentRolesAdd',
-  'reviewExcludedTitles', 'excludedTitlesPicker', 'excludedTitlesInput', 'excludedTitlesAdd',
   'reviewIndustries', 'industriesPicker', 'industriesInput', 'industriesAdd',
   'rolesEvidence', 'reviewHomeCountry', 'homeCountryPicker', 'homeCountryInput', 'homeCountryAdd', 'reviewRelocation',
   'reviewScopeLocal', 'reviewScopeRemote', 'reviewScopeInternational',
@@ -47,7 +42,7 @@ const ids = [
   'reviewRemoteRegions', 'remoteRegionsPicker', 'remoteRegionsInput', 'remoteRegionsAdd',
   'reviewInternationalLocations', 'internationalLocationsPicker', 'internationalLocationsInput', 'internationalLocationsAdd',
   'internationalLocationsLabel', 'reviewRemoteEligibility',
-  'reviewVisaRequired', 'reviewCurrency', 'reviewMinimumAnnual', 'reviewTargetAnnual',
+  'reviewVisaRequired', 'reviewWorkMode', 'reviewEmploymentType', 'reviewCurrency', 'reviewMinimumAnnual', 'reviewTargetAnnual',
   'reviewErrors', 'reviewStepErrors', 'reviewPreview', 'reviewPrevBtn', 'reviewNextBtn', 'validateReviewBtn',
   'activationPreview', 'activationConfirm', 'activationProgress', 'confirmAndSearchBtn',
   'totalCount', 'excellentCount', 'sourceCount',
@@ -60,13 +55,8 @@ const ids = [
 const els = Object.fromEntries(ids.map((id) => [id, document.querySelector(`#${id}`)]));
 const listControls = [
   ['reviewSkillsDemonstrated', 'skillsDemonstratedPicker', 'skillsDemonstratedInput', 'skillsDemonstratedAdd', 'multi', 'skills'],
-  ['reviewSkillsConfirmed', 'skillsConfirmedPicker', 'skillsConfirmedInput', 'skillsConfirmedAdd', 'multi', 'skills'],
-  ['reviewSkillsSupporting', 'skillsSupportingPicker', 'skillsSupportingInput', 'skillsSupportingAdd', 'multi', 'skills'],
-  ['reviewSkillsLearning', 'skillsLearningPicker', 'skillsLearningInput', 'skillsLearningAdd', 'multi', 'skills'],
-  ['reviewSkillsExcluded', 'skillsExcludedPicker', 'skillsExcludedInput', 'skillsExcludedAdd', 'multi', 'skills'],
+  ['reviewCurrentRole', 'currentRolePicker', 'currentRoleInput', 'currentRoleAdd', 'single', 'roles'],
   ['reviewTargetRoles', 'targetRolesPicker', 'targetRolesInput', 'targetRolesAdd', 'multi', 'roles'],
-  ['reviewAdjacentRoles', 'adjacentRolesPicker', 'adjacentRolesInput', 'adjacentRolesAdd', 'multi', 'roles'],
-  ['reviewExcludedTitles', 'excludedTitlesPicker', 'excludedTitlesInput', 'excludedTitlesAdd', 'multi', 'roles'],
   ['reviewIndustries', 'industriesPicker', 'industriesInput', 'industriesAdd', 'multi', 'industries'],
   ['reviewHomeCountry', 'homeCountryPicker', 'homeCountryInput', 'homeCountryAdd', 'single', 'countries'],
   ['reviewPreferredLocations', 'preferredLocationsPicker', 'preferredLocationsInput', 'preferredLocationsAdd', 'multi', 'locations'],
@@ -536,16 +526,13 @@ function populateReview(inference) {
   els.reviewNoticePeriod.value = inference.availability?.notice_period || '';
   const demonstrated = inference.skills?.filter((skill) => skill.suggested_state === 'demonstrated') || [];
   const supporting = inference.skills?.filter((skill) => skill.suggested_state === 'supporting') || [];
-  els.reviewSkillsDemonstrated.value = demonstrated.map((skill) => skill.name).join(', ');
-  els.reviewSkillsSupporting.value = supporting.map((skill) => skill.name).join(', ');
-  els.reviewSkillsConfirmed.value = '';
-  els.reviewSkillsLearning.value = '';
-  els.reviewSkillsExcluded.value = '';
+  els.reviewSkillsDemonstrated.value = [...demonstrated, ...supporting].map((skill) => skill.name).join(', ');
   const primary = inference.target_roles?.filter((role) => role.suggested_fit === 'primary') || [];
   const adjacent = inference.target_roles?.filter((role) => role.suggested_fit === 'adjacent') || [];
-  els.reviewTargetRoles.value = primary.map((role) => role.name).join(', ');
-  els.reviewAdjacentRoles.value = adjacent.map((role) => role.name).join(', ');
-  els.reviewExcludedTitles.value = '';
+  els.reviewCurrentRole.value = primary[0]?.name || inference.experience?.roles?.[0]?.title || '';
+  els.reviewTargetRoles.value = [...primary, ...adjacent].map((role) => role.name).join(', ');
+  els.reviewEducation.value = (inference.education || []).map((item) => item.name || item.value || item).join('\n');
+  els.reviewCertifications.value = (inference.certifications || []).map((item) => item.name || item.value || item).join('\n');
   els.reviewIndustries.value = '';
   els.reviewHomeCountry.value = inferCountry(candidate.location?.value || '');
   els.reviewPreferredLocations.value = candidate.location?.value || '';
@@ -557,6 +544,8 @@ function populateReview(inference) {
   els.reviewScopeInternational.checked = false;
   els.reviewRemoteEligibility.checked = true;
   els.reviewVisaRequired.checked = false;
+  els.reviewWorkMode.value = 'any';
+  els.reviewEmploymentType.value = 'any';
   updateScopeFields();
   els.reviewCurrency.value = '';
   els.reviewMinimumAnnual.value = '';
@@ -618,11 +607,10 @@ function validateReviewStep(step) {
     if (els.reviewYears.value === '') messages.push('Enter years of experience. Use 0 if there is no employment experience.');
     if (!els.reviewSeniority.value) messages.push('Choose an experience level.');
   }
-  if (step === 1) {
-    if (csv(els.reviewSkillsDemonstrated.value).length < 5) messages.push('Confirm at least five demonstrated skills.');
-    if (csv(els.reviewTargetRoles.value).length === 0) messages.push('Add at least one primary target role.');
-  }
-  if (step === 2) {
+  if (step === 0) {
+    if (!els.reviewCurrentRole.value.trim()) messages.push('Current role is required.');
+    if (csv(els.reviewSkillsDemonstrated.value).length === 0) messages.push('Confirm at least one skill.');
+    if (csv(els.reviewTargetRoles.value).length === 0) messages.push('Add at least one interested role.');
     if (!els.reviewNoticePeriod.value.trim()) messages.push('Choose the notice period.');
     if (!els.reviewHomeCountry.value.trim()) messages.push('Home country is required.');
     if (!els.reviewRelocation.value) messages.push('Choose a relocation preference.');
@@ -715,6 +703,11 @@ function renderActivationPreview(activation) {
 }
 
 function collectReview() {
+  const unifiedSkills = csv(els.reviewSkillsDemonstrated.value);
+  const inferredDemonstrated = new Set((state.inference?.skills || [])
+    .filter((skill) => skill.suggested_state === 'demonstrated').map((skill) => skill.name.toLowerCase()));
+  const inferredSupporting = new Set((state.inference?.skills || [])
+    .filter((skill) => skill.suggested_state === 'supporting').map((skill) => skill.name.toLowerCase()));
   return {
     candidate: {
       full_name: els.reviewName.value,
@@ -728,21 +721,26 @@ function collectReview() {
     summary: els.reviewSummary.value,
     experience_years: els.reviewYears.value,
     seniority: els.reviewSeniority.value,
+    current_role: els.reviewCurrentRole.value,
     availability: {
       notice_period: els.reviewNoticePeriod.value,
     },
+    interested_roles: csv(els.reviewTargetRoles.value),
     target_roles: csv(els.reviewTargetRoles.value),
-    adjacent_roles: csv(els.reviewAdjacentRoles.value),
-    excluded_titles: csv(els.reviewExcludedTitles.value),
+    adjacent_roles: [],
+    excluded_titles: [],
+    education: csv(els.reviewEducation.value.replaceAll('\n', ',')),
+    certifications: csv(els.reviewCertifications.value.replaceAll('\n', ',')),
     preferences: {
       domains: csv(els.reviewIndustries.value),
     },
     skills: {
-      demonstrated: csv(els.reviewSkillsDemonstrated.value),
-      confirmed_unlisted: csv(els.reviewSkillsConfirmed.value),
-      supporting: csv(els.reviewSkillsSupporting.value),
-      learning: csv(els.reviewSkillsLearning.value),
-      excluded: csv(els.reviewSkillsExcluded.value),
+      all: unifiedSkills,
+      demonstrated: unifiedSkills.filter((skill) => inferredDemonstrated.has(skill.toLowerCase())),
+      confirmed_unlisted: unifiedSkills.filter((skill) => !inferredDemonstrated.has(skill.toLowerCase()) && !inferredSupporting.has(skill.toLowerCase())),
+      supporting: unifiedSkills.filter((skill) => inferredSupporting.has(skill.toLowerCase())),
+      learning: [],
+      excluded: [],
     },
     location: {
       home_country: els.reviewHomeCountry.value,
@@ -753,7 +751,9 @@ function collectReview() {
       search_scopes: selectedSearchScopes(),
       international_locations: csv(els.reviewInternationalLocations.value),
       visa_sponsorship_required: els.reviewVisaRequired.checked,
+      work_mode: els.reviewWorkMode.value,
     },
+    employment_type: els.reviewEmploymentType.value,
     compensation: {
       currency: els.reviewCurrency.value,
       minimum_annual: els.reviewMinimumAnnual.value,

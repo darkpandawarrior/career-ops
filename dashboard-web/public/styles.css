@@ -2132,6 +2132,38 @@ header.topbar {
   justify-content: flex-end;
 }
 
+.discovery-review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.candidate-profile-panel { grid-column: 1; }
+.job-preferences-panel { grid-column: 2; }
+.review-confirm-panel,
+.discovery-review-grid > .wizard-actions,
+.discovery-review-grid > .extraction-warnings { grid-column: 1 / -1; }
+.candidate-profile-panel,
+.job-preferences-panel {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+
+@media (max-width: 800px) {
+  .discovery-review-grid { grid-template-columns: 1fr; }
+  .candidate-profile-panel,
+  .job-preferences-panel,
+  .review-confirm-panel,
+  .discovery-review-grid > .wizard-actions,
+  .discovery-review-grid > .extraction-warnings { grid-column: 1; }
+  .candidate-profile-panel { order: 1; }
+  .job-preferences-panel { order: 2; }
+  .discovery-review-grid > .extraction-warnings,
+  .discovery-review-grid > .wizard-actions { order: 3; }
+}
+
 .text-button {
   background: none;
   border: none;

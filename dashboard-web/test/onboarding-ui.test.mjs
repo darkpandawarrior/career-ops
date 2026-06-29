@@ -6,12 +6,22 @@ import { BASE_OPTION_CATALOG, ROLE_CATALOG } from '../public/option-catalog.js';
 
 const publicFile = (name) => new URL(`../public/${name}`, import.meta.url);
 
-test('candidate review is condensed into four grouped onboarding steps', async () => {
+test('candidate review separates profile and preferences in a responsive two-column layout', async () => {
   const html = await readFile(publicFile('index.html'), 'utf8');
-  const steps = [...html.matchAll(/class="review-step" data-step="(\d)"/g)].map((match) => Number(match[1]));
-  assert.deepEqual([...new Set(steps)], [0, 1, 2, 3]);
-  assert.match(html, /id="reviewProgress">Step 1 of 4/);
-  assert.ok(steps.length > 4, 'related sections should share a grouped step');
+  const css = await readFile(publicFile('styles.css'), 'utf8');
+  assert.match(html, /Candidate Profile/);
+  assert.match(html, /Job Preferences/);
+  assert.match(html, /id="reviewProgress">Step 1 of 2/);
+  assert.match(css, /\.discovery-review-grid[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\)/);
+  assert.match(css, /@media \(max-width: 800px\)[\s\S]*\.discovery-review-grid \{ grid-template-columns: 1fr; \}/);
+});
+
+test('only unified current role, skills, and interested role controls are user-facing', async () => {
+  const html = await readFile(publicFile('index.html'), 'utf8');
+  for (const id of ['reviewCurrentRole', 'reviewSkillsDemonstrated', 'reviewTargetRoles']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const label of ['Adjacent roles', 'Excluded titles', 'Confirmed but unlisted', 'Supporting skills', 'Currently learning', 'Exclude from targeting']) {
+    assert.doesNotMatch(html, new RegExp(label));
+  }
 });
 
 test('profile choices use searchable controls backed by local catalogs', async () => {

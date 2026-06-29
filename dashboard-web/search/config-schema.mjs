@@ -20,7 +20,7 @@ export function normalizeJobSearchConfig(input = {}) {
   const legacyCore = cleanStrings(source.skills?.core);
   const unifiedSkills = cleanStrings(source.skills?.all);
   const skills = Object.fromEntries(
-    SKILL_KEYS.map((key) => [key, cleanStrings(source.skills?.[key])]),
+    SKILL_KEYS.map((key) => [key, cleanStrings(source.skills?.evidence?.[key] ?? source.skills?.[key])]),
   );
   skills.demonstrated = unique([...skills.demonstrated, ...legacyCore]);
   const classifiedSkills = unique(SKILL_KEYS.flatMap((key) => skills[key]));
@@ -47,6 +47,7 @@ export function normalizeJobSearchConfig(input = {}) {
 
   const weights = normalizeWeights(source.weights);
   return {
+    current_role: cleanString(source.current_role),
     titles: {
       interested: interestedRoles,
       strong: legacyStrong.length ? legacyStrong : interestedRoles,
@@ -67,6 +68,7 @@ export function normalizeJobSearchConfig(input = {}) {
       levels: cleanStrings(source.education?.levels),
       certifications: cleanStrings(source.education?.certifications),
     },
+    employment_types: cleanStrings(source.employment_types || source.employment_type),
     location: {
       home_country: cleanString(source.location?.home_country),
       preferred_locations: cleanStrings(source.location?.preferred_locations),
