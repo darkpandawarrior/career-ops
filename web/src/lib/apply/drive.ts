@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+﻿import { spawn } from "node:child_process";
 import type { Page, Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -7,17 +7,17 @@ import type { DriveStep } from "./issue";
 
 export type { DriveStep };
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AGENTIC DRIVE LOOP — the backend gets "as intelligent as Claude Code + Playwright":
-// observe (ref-tagged snapshot) → the LLM picks ONE action → WE execute it on OUR
-// headed session → observe again → adapt. We orchestrate the loop (CLI-agnostic in
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// AGENTIC DRIVE LOOP â€” the backend gets "as intelligent as Claude Code + Playwright":
+// observe (ref-tagged snapshot) â†’ the LLM picks ONE action â†’ WE execute it on OUR
+// headed session â†’ observe again â†’ adapt. We orchestrate the loop (CLI-agnostic in
 // principle; Claude-first via --resume) and execute every action ourselves, so:
-//   • NEVER-SUBMIT is by CONSTRUCTION — the action vocabulary has no "submit", and
+//   â€¢ NEVER-SUBMIT is by CONSTRUCTION â€” the action vocabulary has no "submit", and
 //     we refuse to click any submit/apply-final control. The human submits.
-//   • everything stays in OUR session (screenshots, handoff, the streamed UI).
+//   â€¢ everything stays in OUR session (screenshots, handoff, the streamed UI).
 // HYBRID = drive only until a fillable application form is reached, then hand back
 // to deterministic fill+verify. FULL = keep driving (fill the fields too).
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type DriveResult = { reached: boolean; turns: number; reason: string; steps: DriveStep[] };
 
@@ -54,12 +54,10 @@ async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
   });
 }
 
-/** One planner turn (Claude-first: --resume keeps the loop's context cheaply). */
-function plannerTurn(binPath: string, prompt: string, resumeId: string | null): Promise<{ out: string; sessionId: string | null }> {
-  const base = resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt];
-  const args = [...base, "--output-format", "json", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"];
+/** One planner turn. Args are built by the caller (CLI-agnostic). */
+function plannerTurn(binPath: string, args: string[]): Promise<{ out: string; sessionId: string | null }> {
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
@@ -79,7 +77,7 @@ function plannerTurn(binPath: string, prompt: string, resumeId: string | null): 
         out = j.result ?? buf;
         sessionId = j.session_id ?? null;
       } catch {
-        /* non-json (other CLI) → use raw */
+        /* non-json (other CLI) â†’ use raw */
       }
       resolve({ out, sessionId });
     });
@@ -116,9 +114,10 @@ export async function driveSession(
 ): Promise<DriveResult> {
   const resolved = resolveCli(cliId);
   const steps: DriveStep[] = [];
-  if (!resolved || cliId !== "claude") {
-    return { reached: false, turns: 0, reason: "Agentic drive currently needs Claude Code (browser-driving CLI).", steps };
+  if (!resolved) {
+    return { reached: false, turns: 0, reason: `CLI '${cliId}' not found.`, steps };
   }
+  const isClaude = cliId === "claude";
   const shot = async () => {
     try {
       return `data:image/jpeg;base64,${(await page.screenshot({ type: "jpeg", quality: 38 })).toString("base64")}`;
@@ -130,42 +129,56 @@ export async function driveSession(
   const goalText =
     goal === "reach"
       ? `Your goal: navigate to the actual fillable JOB APPLICATION form (click 'Apply', pass any interstitial/pre-screen, reach the page with the Name/Email/Resume fields). Do NOT fill anything yet. Reply {"action":"reached_form"} once the form with those fields is visible.`
-      : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit — when everything is filled and you're on the final page, reply {"action":"done"}.
+      : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit â€” when everything is filled and you're on the final page, reply {"action":"done"}.
 ANSWERS (match by the field's label):
-${answersBlock || "(no answers provided — just reach/observe)"}`;
+${answersBlock || "(no answers provided â€” just reach/observe)"}`;
+  // Claude keeps context cheaply via --resume; other CLIs have no resume equivalent
+  // so we rebuild the full prompt (including goalText + answersBlock) on every turn.
   let resumeId: string | null = null;
   let lastUrl = page.url();
 
-  const stopVerb = goal === "reach" ? '{"action":"reached_form"}            STOP — the fillable application form is now visible' : '{"action":"done"}                    STOP — every answer is filled (you NEVER submit; the human does)';
+  const stopVerb = goal === "reach" ? '{"action":"reached_form"}            STOP â€” the fillable application form is now visible' : '{"action":"done"}                    STOP â€” every answer is filled (you NEVER submit; the human does)';
+  const fullPrompt = async (snap: { text: string }) =>
+    `You are an agent driving a real web browser for a job seeker (we execute your actions; the human submits at the end). ${goalText}
+You NEVER submit a form â€” there is no submit action; the human does that.
+Reply with EXACTLY ONE action as a JSON object, nothing else:
+  {"action":"click","ref":"e3"}            click an element
+  {"action":"type","ref":"e4","text":"â€¦"}  type into a field
+  {"action":"select","ref":"e9","value":"â€¦"} pick an option
+  {"action":"scroll"}                        scroll down to reveal more
+  ${stopVerb}
+  {"action":"stuck","reason":"â€¦"}            you can't proceed (login/captcha/dead-end)
+
+Page: "${await page.title().catch(() => "")}" (${page.url()})
+Elements:
+${snap.text}`;
+
   for (let turn = 1; turn <= budget; turn++) {
     if (goal === "reach" && (await isFormReady().catch(() => false))) return { reached: true, turns: turn - 1, reason: "form-reached", steps };
     await dropNewTabs(page); // any "Apply" link/popup navigates in OUR tab, not a new one
     const frame = page.mainFrame();
     const snap = await snapshot(frame).catch(() => ({ text: "", n: 0 }));
-    const prompt =
-      turn === 1
-        ? `You are an agent driving a real web browser for a job seeker (we execute your actions; the human submits at the end). ${goalText}
-You NEVER submit a form — there is no submit action; the human does that.
-Reply with EXACTLY ONE action as a JSON object, nothing else:
-  {"action":"click","ref":"e3"}            click an element
-  {"action":"type","ref":"e4","text":"…"}  type into a field
-  {"action":"select","ref":"e9","value":"…"} pick an option
-  {"action":"scroll"}                        scroll down to reveal more
-  ${stopVerb}
-  {"action":"stuck","reason":"…"}            you can't proceed (login/captcha/dead-end)
 
-Page: "${await page.title().catch(() => "")}" (${page.url()})
-Elements:
-${snap.text}`
-        : `New page state after your last action.
+    // Claude: brief resume-prompt on subsequent turns (--resume carries conversation context).
+    // Other CLIs: full prompt every turn (stateless, need complete context each time).
+    const prompt =
+      isClaude && turn > 1
+        ? `New page state after your last action.
 Page: "${await page.title().catch(() => "")}" (${page.url()})
 Elements:
 ${snap.text}
 
-Reply ONE action JSON.`;
+Reply ONE action JSON.`
+        : await fullPrompt(snap);
 
-    const { out, sessionId } = await plannerTurn(resolved.binPath, prompt, resumeId);
-    if (sessionId) resumeId = sessionId;
+    const args = isClaude
+      ? [...(resumeId ? ["-p", "--resume", resumeId, prompt] : ["-p", prompt]),
+         "--output-format", "json", "--strict-mcp-config",
+         "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"]
+      : resolved.spec.args(prompt);
+
+    const { out, sessionId } = await plannerTurn(resolved.binPath, args);
+    if (isClaude && sessionId) resumeId = sessionId;
     const act = parseAction(out);
     if (!act) {
       const s: DriveStep = { turn, action: "parse-error", detail: out.slice(0, 80), thumb: await shot() };
@@ -183,7 +196,7 @@ Reply ONE action JSON.`;
       return { reached: false, turns: turn, reason: act.reason || "stuck", steps };
     }
 
-    // execute the action on OUR session — NEVER submit.
+    // execute the action on OUR session â€” NEVER submit.
     let detail = "";
     let note = "";
     try {
@@ -225,3 +238,9 @@ Reply ONE action JSON.`;
   }
   return { reached: await isFormReady().catch(() => false), turns: budget, reason: "budget-exhausted", steps };
 }
+
+
+
+
+
+

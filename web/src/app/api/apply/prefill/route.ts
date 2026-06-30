@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+﻿import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
@@ -12,7 +12,7 @@ export const maxDuration = 320;
 
 /**
  * Pull a JSON object out of an LLM's text answer, tolerating code fences,
- * trailing prose, and — crucially — TRUNCATION (the planner getting killed
+ * trailing prose, and â€” crucially â€” TRUNCATION (the planner getting killed
  * mid-output on a big form). When the object is incomplete we salvage the
  * largest valid prefix so the fields that DID finish still come through.
  */
@@ -45,7 +45,7 @@ function extractJsonObject(text: string): { obj: Record<string, unknown> | null;
     try {
       return { obj: JSON.parse(s.slice(start, end + 1)) as Record<string, unknown>, truncated: false };
     } catch {
-      /* malformed even though balanced — fall through to salvage */
+      /* malformed even though balanced â€” fall through to salvage */
     }
   }
 
@@ -68,7 +68,7 @@ function extractJsonObject(text: string): { obj: Record<string, unknown> | null;
   return { obj: null, truncated: true };
 }
 
-// AI pre-fill (STREAMING NDJSON). The user's BYO CLI (read-only PLANNER — no
+// AI pre-fill (STREAMING NDJSON). The user's BYO CLI (read-only PLANNER â€” no
 // browser access) drafts an answer per field from cv.md / profile / the job's
 // report. We stream a live diagnostic log of every step (spawn, heartbeats,
 // exit code/signal, parse outcome) so a stuck/empty prefill is observable on the
@@ -130,7 +130,7 @@ export async function POST(req: Request) {
         .map((f) => `${f.id}\t${f.type}${f.required ? "*" : ""}\t${f.label}${f.options ? `\t[options: ${f.options.join(" | ")}]` : ""}`)
         .join("\n");
       const mem = readMemory(dataRoot).trim();
-      // Inline the candidate's REAL files into the prompt — we're LOCAL (same
+      // Inline the candidate's REAL files into the prompt â€” we're LOCAL (same
       // machine, the very data the planner would Read anyway), so the planner needs
       // ZERO tool round-trips: this kills the ~50s of startup file-reads + the
       // mid-draft plateau that made prefill feel hung. cv.md is the source of truth;
@@ -140,7 +140,7 @@ export async function POST(req: Request) {
       try {
         cv = fs.readFileSync(path.join(dataRoot, "cv.md"), "utf8");
       } catch {
-        /* no cv.md → fall back to letting the planner read files itself */
+        /* no cv.md â†’ fall back to letting the planner read files itself */
       }
       const haveCv = cv.trim().length > 0;
       let profile = "";
@@ -160,51 +160,51 @@ export async function POST(req: Request) {
           if (hit) report = fs.readFileSync(path.join(dir, hit), "utf8").slice(0, 12000);
         }
       } catch {
-        /* no matching report → fine, it's optional context */
+        /* no matching report â†’ fine, it's optional context */
       }
       const ctxBlock = haveCv
         ? `\n\n--- THE CANDIDATE'S REAL DATA (ground EVERY answer in this; invent NOTHING) ---\nCV (cv.md):\n"""\n${cv.slice(0, 16000)}\n"""${profile ? `\n\nProfile (config/profile.yml):\n"""\n${profile.slice(0, 4000)}\n"""` : ""}${report ? `\n\nPrior evaluation report for this role:\n"""\n${report}\n"""` : ""}`
         : `\nRead cv.md and config/profile.yml; if a matching report for this company exists in reports/, read it too.`;
-      const prompt = `You are pre-filling a job application for the user (company/role: ${s.title}). Ground EVERY answer in the candidate's REAL data below — never invent facts.${mem ? `\n\nDurable notes about the user (prior answers they chose to remember):\n${mem}` : ""}${ctxBlock}
+      const prompt = `You are pre-filling a job application for the user (company/role: ${s.title}). Ground EVERY answer in the candidate's REAL data below â€” never invent facts.${mem ? `\n\nDurable notes about the user (prior answers they chose to remember):\n${mem}` : ""}${ctxBlock}
 
-FIELDS (id ⇥ type ⇥ label ⇥ options):
+FIELDS (id â‡¥ type â‡¥ label â‡¥ options):
 ${fieldsList}
 
 For each field give the best answer:
-- identity/contact (name, email, phone, github, linkedin, location) → from the data above.
-- free-text (Why us?, cover-letter, "most impactful thing you've built", etc.) → a concise, honest, concrete answer in the candidate's own voice (no buzzwords, active voice, real metrics only). Keep each under ~120 words.
-- select/radio → choose the best-matching option using the EXACT option text from the list.
-- NEVER auto-answer SENSITIVE or CONSENT fields → set needs_confirmation:true and value:"" (the user decides these themselves):
-  · legal / work-authorization / visa / sponsorship · salary / compensation expectations
-  · demographic / EEO / veteran / disability / "voluntary self-identification"
-  · CONSENT / acknowledgement / policy / guidelines / "I agree" / "I have read" / "I understand" / any Yes-No confirmation of terms — the user must READ and agree themselves.
+- identity/contact (name, email, phone, github, linkedin, location) â†’ from the data above.
+- free-text (Why us?, cover-letter, "most impactful thing you've built", etc.) â†’ a concise, honest, concrete answer in the candidate's own voice (no buzzwords, active voice, real metrics only). Keep each under ~120 words.
+- select/radio â†’ choose the best-matching option using the EXACT option text from the list.
+- NEVER auto-answer SENSITIVE or CONSENT fields â†’ set needs_confirmation:true and value:"" (the user decides these themselves):
+  Â· legal / work-authorization / visa / sponsorship Â· salary / compensation expectations
+  Â· demographic / EEO / veteran / disability / "voluntary self-identification"
+  Â· CONSENT / acknowledgement / policy / guidelines / "I agree" / "I have read" / "I understand" / any Yes-No confirmation of terms â€” the user must READ and agree themselves.
 
-Output ONLY a compact JSON object mapping each field id → {"value": "...", "needs_confirmation": boolean}. No prose, no markdown, no code fence.`;
+Output ONLY a compact JSON object mapping each field id â†’ {"value": "...", "needs_confirmation": boolean}. No prose, no markdown, no code fence.`;
 
-      log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
+      log(`Form: "${s.title}" Â· ${s.fields.length} fields Â· prompt ${prompt.length} chars Â· memory ${mem.length} chars`);
       log(`Planner: ${cliId} (${binPath})`);
-      log(`Context: CV ${cv.length}c${profile ? ` + profile ${profile.length}c` : ""}${report ? ` + report ${report.length}c` : ""}${haveCv ? " — inlined, no file reads (fast path)" : " — none inlined; planner will read files"}`);
+      log(`Context: CV ${cv.length}c${profile ? ` + profile ${profile.length}c` : ""}${report ? ` + report ${report.length}c` : ""}${haveCv ? " â€” inlined, no file reads (fast path)" : " â€” none inlined; planner will read files"}`);
 
       const isClaude = cliId === "claude";
       // --output-format stream-json (+ --verbose --include-partial-messages) streams
       // the answer token-by-token so the UI shows live progress instead of a dead
       // "0 chars" wait (a big form = 1-2 min of drafting). Without it, `claude -p`
-      // buffers everything and emits nothing until the whole turn ends → looks hung.
-      // --strict-mcp-config with no --mcp-config loads ZERO MCP servers → faster
+      // buffers everything and emits nothing until the whole turn ends â†’ looks hung.
+      // --strict-mcp-config with no --mcp-config loads ZERO MCP servers â†’ faster
       // startup (the planner only reads local files; it doesn't need the user's
-      // playwright/gmail/linear/… servers).
+      // playwright/gmail/linear/â€¦ servers).
       const args = isClaude
         ? haveCv
-          ? // fast path: everything is inlined → NO tools → no file-read round-trips
+          ? // fast path: everything is inlined â†’ NO tools â†’ no file-read round-trips
             ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"]
           : // fallback (no cv.md inlined): let the planner read the files itself
             ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
         : spec.args(prompt);
       // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
       const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
-      log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)…`);
+      log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)â€¦`);
 
-      // Consent/sensitive detector — used BOTH while streaming (so a policy "Yes"
+      // Consent/sensitive detector â€” used BOTH while streaming (so a policy "Yes"
       // never even flashes into the UI) and in the final post-filter. Scoped to
       // Yes/No controls so a free-text essay mentioning "guidelines" isn't nuked.
       const CONSENT_RX = /\b(policy|policies|guideline|terms|consent|acknowledg|i agree|i have read|i understand|i certify|code of conduct|privacy|gdpr|self.?identif|gender|veteran|disab|ethnic|\brace\b|hispanic|latino|sexual orientation|pronoun|transgender)\b/i;
@@ -216,11 +216,11 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
 
       const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
         // stdin = /dev/null so the CLI doesn't wait 3s for piped input.
-        const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, shell: process.platform === "win32", stdio: ["ignore", "pipe", "pipe"] });
         let buf = "";
         let lineBuf = "";
         let firstByteAt = 0;
-        // Stream each ANSWER the instant its JSON entry `"coN":{…}` closes → the UI
+        // Stream each ANSWER the instant its JSON entry `"coN":{â€¦}` closes â†’ the UI
         // fills fields top-to-bottom (the shimmer recedes like a wave) instead of
         // all-at-once at the end. The value-object is flat (no nested braces except
         // inside strings), so this brace/string-aware regex only matches a COMPLETE
@@ -238,7 +238,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
             try {
               v = JSON.parse(m[2]);
             } catch {
-              continue; // value not fully closed yet → wait for more deltas
+              continue; // value not fully closed yet â†’ wait for more deltas
             }
             emittedKeys.add(id);
             const consent = isConsent(id);
@@ -258,7 +258,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
           flushFields();
         };
         const hb = setInterval(() => {
-          log(`…running ${Math.round((Date.now() - t0) / 1000)}s · ${buf.length} chars drafted`);
+          log(`â€¦running ${Math.round((Date.now() - t0) / 1000)}s Â· ${buf.length} chars drafted`);
         }, 4000);
         child.stdout.on("data", (d: Buffer) => {
           const chunk = d.toString();
@@ -267,7 +267,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
             return;
           }
           // Claude stream-json = NDJSON; accumulate ONLY the assistant text deltas
-          // (content_block_delta.text) — the drafted answer — into buf. A marker can
+          // (content_block_delta.text) â€” the drafted answer â€” into buf. A marker can
           // split across chunks, so buffer partial lines and parse line-by-line.
           lineBuf += chunk;
           let nl: number;
@@ -282,7 +282,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
                 if (typeof text === "string") onText(text);
               }
             } catch {
-              /* partial / non-json line — ignore */
+              /* partial / non-json line â€” ignore */
             }
           }
         });
@@ -291,7 +291,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
           if (e) log(`stderr: ${e.slice(0, 160).replace(/\s+/g, " ")}`);
         });
         const killer = setTimeout(() => {
-          log("TIMEOUT reached → SIGTERM");
+          log("TIMEOUT reached â†’ SIGTERM");
           try {
             child.kill("SIGTERM");
           } catch {
@@ -311,7 +311,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
         });
       });
 
-      log(`Planner exited code=${result.code} signal=${result.signal} · ${result.buf.length} chars total`);
+      log(`Planner exited code=${result.code} signal=${result.signal} Â· ${result.buf.length} chars total`);
       log(`output head: ${result.buf.slice(0, 100).replace(/\s+/g, " ") || "(empty)"}`);
       log(`output tail: ${result.buf.slice(-100).replace(/\s+/g, " ") || "(empty)"}`);
 
@@ -322,13 +322,13 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       const { obj, truncated } = extractJsonObject(result.buf);
       if (!obj) {
         return fail(
-          result.signal ? "planner was killed mid-answer (form too large/slow) — couldn't recover any fields" : "couldn't parse the planner's answer as JSON",
+          result.signal ? "planner was killed mid-answer (form too large/slow) â€” couldn't recover any fields" : "couldn't parse the planner's answer as JSON",
           result.buf.slice(-300),
         );
       }
       // CONSENT GUARD (belt-and-suspenders): even if a policy / "I agree" value
       // slipped through (or wasn't streamed), force it blank + needs_confirmation so
-      // the HUMAN agrees themselves. (isConsent is defined above — reused here.)
+      // the HUMAN agrees themselves. (isConsent is defined above â€” reused here.)
       let guarded = 0;
       for (const [id, v] of Object.entries(obj)) {
         if (!isConsent(id)) continue;
@@ -340,7 +340,7 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
       }
       if (guarded) log(`Consent guard: left ${guarded} policy/consent field${guarded === 1 ? "" : "s"} blank for you to confirm`);
       const count = Object.keys(obj).length;
-      log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output — some fields may be missing)" : ""}`);
+      log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output â€” some fields may be missing)" : ""}`);
       emit({ t: "done", answers: obj, truncated, count });
       controller.close();
     },
@@ -348,3 +348,6 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
 
   return new Response(stream, { headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" } });
 }
+
+
+

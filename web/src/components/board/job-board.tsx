@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -59,7 +59,7 @@ export function JobBoard({
   const { jobs: workerJobs, startJob } = useJobs();
 
   // Link each posting to its evaluate-worker (by URL) so a card can show
-  // Evaluate → Evaluating… → score — mirrors pipeline-view's jobByUrl logic.
+  // Evaluate â†’ Evaluatingâ€¦ â†’ score â€” mirrors pipeline-view's jobByUrl logic.
   const jobByUrl = useMemo(() => {
     const m = new Map<string, (typeof workerJobs)[number]>();
     for (const j of workerJobs) {
@@ -103,13 +103,13 @@ export function JobBoard({
           if (!line.trim()) continue;
           try {
             const ev = JSON.parse(line);
-            if (ev.type === "phase") setSearchPhase((p) => Math.max(p, ev.phase)); // monotonic — never regress
+            if (ev.type === "phase") setSearchPhase((p) => Math.max(p, ev.phase)); // monotonic â€” never regress
             else if (ev.type === "tick") setSearchElapsed(ev.elapsed);
             else if (ev.type === "log") setSearchLog((l) => [...l, ev.message]);
-            else if (ev.type === "error") { failed = true; setSearchLog((l) => [...l, `⚠ ${ev.message}`]); }
+            else if (ev.type === "error") { failed = true; setSearchLog((l) => [...l, `âš  ${ev.message}`]); }
             else if (ev.type === "done") {
               setSearchPhase(5); // all complete
-              setSearchLog((l) => [...l, `✓ Done — ${ev.stats?.total ?? 0} roles scored.`]);
+              setSearchLog((l) => [...l, `âœ“ Done â€” ${ev.stats?.total ?? 0} roles scored.`]);
             }
           } catch {
             /* ignore non-JSON */
@@ -119,7 +119,7 @@ export function JobBoard({
       if (!failed) await reScore(); // reload the freshly-written board
     } catch {
       failed = true;
-      setSearchLog((l) => [...l, "⚠ Search failed (network)."]);
+      setSearchLog((l) => [...l, "âš  Search failed (network)."]);
     } finally {
       setSearching(false);
       if (failed) setSearchPhase(0);
@@ -176,7 +176,7 @@ export function JobBoard({
           <p className="mt-1 text-sm text-muted">
             {data.diagnostics.note}
             {data.generatedAt && (
-              <span className="text-faint"> · fed {new Date(data.generatedAt).toLocaleDateString()}</span>
+              <span className="text-faint"> Â· fed {new Date(data.generatedAt).toISOString().slice(0, 10)}</span>
             )}
           </p>
         </div>
@@ -219,7 +219,7 @@ export function JobBoard({
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat icon={Inbox} value={data.stats.total} label="scored roles" />
         <Stat icon={Sparkles} value={data.stats.excellent} label="excellent (8+)" featured />
-        <Stat icon={SlidersHorizontal} value={data.searchPlan?.queries ?? "—"} label="search queries" />
+        <Stat icon={SlidersHorizontal} value={data.searchPlan?.queries ?? "â€”"} label="search queries" />
         <ScoreDonut dist={dist} />
       </div>
 
@@ -235,7 +235,7 @@ export function JobBoard({
               ))}
             </ul>
             <Link href="/onboarding" className="mt-1 inline-block text-brand hover:underline">
-              Finish onboarding →
+              Finish onboarding â†’
             </Link>
           </div>
         </div>
@@ -248,7 +248,7 @@ export function JobBoard({
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Filter by role, company, skill…"
+            placeholder="Filter by role, company, skillâ€¦"
             className="w-full rounded-md border border-border bg-surface py-2 pl-8 pr-3 text-sm outline-none focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
           />
         </div>
@@ -291,7 +291,7 @@ export function JobBoard({
                   hideRejected ? "border-red-500/40 bg-red-500/10 text-red-500" : "border-border text-muted hover:bg-surface-hover",
                 )}
               >
-                ⛔ Rejected {hideRejected ? "off" : "on"}
+                â›” Rejected {hideRejected ? "off" : "on"}
               </button>
             )}
             <button
@@ -324,7 +324,7 @@ export function JobBoard({
                 <span className="truncate">{company || "Unknown"}</span>
                 {rejectedSet.has((company ?? "").toLowerCase().trim()) && (
                   <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                    ⛔ rejected
+                    â›” rejected
                   </span>
                 )}
                 <span className="ml-auto shrink-0 tabular-nums text-xs text-faint">{group.length}</span>
@@ -337,7 +337,7 @@ export function JobBoard({
                     rejected={rejectedSet.has((j.company ?? "").toLowerCase().trim())}
                     worker={j.url ? jobByUrl.get(j.url) : undefined}
                     onEvaluate={() =>
-                      startJob({ title: `Evaluate · ${j.company}`, subtitle: j.title, kind: "evaluate", input: String(j.url), page: "/board" })
+                      startJob({ title: `Evaluate Â· ${j.company}`, subtitle: j.title, kind: "evaluate", input: String(j.url), page: "/board" })
                     }
                   />
                 ))}
@@ -354,7 +354,7 @@ export function JobBoard({
               rejected={rejectedSet.has((j.company ?? "").toLowerCase().trim())}
               worker={j.url ? jobByUrl.get(j.url) : undefined}
               onEvaluate={() =>
-                startJob({ title: `Evaluate · ${j.company}`, subtitle: j.title, kind: "evaluate", input: String(j.url), page: "/board" })
+                startJob({ title: `Evaluate Â· ${j.company}`, subtitle: j.title, kind: "evaluate", input: String(j.url), page: "/board" })
               }
             />
           ))}
@@ -415,11 +415,11 @@ function RefreshProgress({
     <div className="mt-4 overflow-hidden rounded-2xl border border-border bg-surface/60">
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
         {done ? <Check className="size-4 text-emerald-500" /> : <Radar className="size-4 animate-pulse text-brand" />}
-        <span className="text-sm font-medium">{done ? "Search complete" : "Scanning for new jobs…"}</span>
+        <span className="text-sm font-medium">{done ? "Search complete" : "Scanning for new jobsâ€¦"}</span>
         <span className="ml-auto text-xs tabular-nums text-faint">{elapsed}s</span>
         {!searching && (
           <button onClick={onDismiss} className="text-faint transition-colors hover:text-foreground" aria-label="Dismiss">
-            <Circle className="hidden" />✕
+            <Circle className="hidden" />âœ•
           </button>
         )}
       </div>
@@ -519,7 +519,7 @@ function JobCard({
   worker?: { id: string; status: "running" | "done" | "error"; result?: { score: number | null; tone: "good" | "warn" | "bad" | "muted" } };
   onEvaluate?: () => void;
 }) {
-  // Source leads (search queries) have no score — render a compact card.
+  // Source leads (search queries) have no score â€” render a compact card.
   if (job.type === "searchLead") {
     return (
       <li className="flex items-center gap-3 rounded-xl border border-border bg-surface/40 px-4 py-2.5">
@@ -567,7 +567,7 @@ function JobCard({
             <h3 className="truncate font-medium text-foreground">{job.title}</h3>
             {rejected && (
               <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                ⛔ previously rejected
+                â›” previously rejected
               </span>
             )}
             {job.url && (
@@ -584,7 +584,7 @@ function JobCard({
           </div>
           <p className="truncate text-sm text-muted">
             {job.company}
-            {job.location ? ` · ${job.location}` : ""}
+            {job.location ? ` Â· ${job.location}` : ""}
           </p>
 
           <p className="mt-1.5 text-xs text-brand">{job.priority}</p>
@@ -613,7 +613,7 @@ function JobCard({
             <div className="mt-2.5 flex items-center gap-3">
               {worker?.status === "running" ? (
                 <Link href={`/jobs/${worker.id}`} className="inline-flex items-center gap-1.5 text-xs font-medium text-brand">
-                  <Loader2 className="size-3.5 animate-spin" /> Evaluating…
+                  <Loader2 className="size-3.5 animate-spin" /> Evaluatingâ€¦
                 </Link>
               ) : worker?.status === "done" ? (
                 <Link href={`/jobs/${worker.id}`} className="inline-flex items-center gap-1.5 text-xs">
@@ -629,7 +629,7 @@ function JobCard({
                   type="button"
                   onClick={onEvaluate}
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-brand"
-                  title="Evaluate this posting — spins up a worker on your CLI"
+                  title="Evaluate this posting â€” spins up a worker on your CLI"
                 >
                   <Sparkles className="size-3.5" /> Evaluate
                 </button>
@@ -714,3 +714,4 @@ function SkillRow({ label, tone, skills }: { label: string; tone: keyof typeof S
     </div>
   );
 }
+

@@ -18,7 +18,7 @@ import type { DiscoveredOffer } from "./scan";
  */
 export type AddResult = { added: number; error?: string };
 
-export function addOffersToPipeline(offers: DiscoveredOffer[]): Promise<AddResult> {
+export function addOffersToPipeline(offers: DiscoveredOffer[], root: string = careerOpsRoot()): Promise<AddResult> {
   const clean = offers
     .filter((o) => o && typeof o.url === "string" && /^https?:\/\//i.test(o.url))
     .map((o) => ({
@@ -56,9 +56,11 @@ process.stdin.on("end", () => {
 `;
 
   return new Promise((resolve) => {
+    // cwd = engine root (where scan.mjs's writers live); CAREER_OPS_ROOT points
+    // those writers at the ACTIVE profile's data/ so adds never land in the wrong tracker.
     const child = spawn(process.execPath, ["--input-type=module", "-e", code], {
       cwd: careerOpsRoot(),
-      env: process.env,
+      env: { ...process.env, CAREER_OPS_ROOT: root },
     });
     let out = "";
     let err = "";

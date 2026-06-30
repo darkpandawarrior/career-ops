@@ -1,13 +1,14 @@
-import { spawn } from "node:child_process";
+﻿import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
+import { runOnboarding } from "@/lib/onboarding/run";
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
-// the USER'S OWN CLI headless — the web never ships a heavyweight parser, and the
+// the USER'S OWN CLI headless â€” the web never ships a heavyweight parser, and the
 // real CV NEVER leaves the machine (local-first, PII-safe). This route is a
 // PROPOSER: it produces candidate markdown only; the actual write to cv.md happens
 // via the existing POST /api/cv after the user confirms (propose-then-confirm).
@@ -15,7 +16,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Prefer the CANONICAL core mode (single source of truth — CLI + web parse CVs
+// Prefer the CANONICAL core mode (single source of truth â€” CLI + web parse CVs
 // identically); fall back to the inline prompt until modes/cv-ingest.md lands
 // (exactly how the explore route handles a missing discover.md).
 function readCanonicalMode(): string | null {
@@ -38,25 +39,25 @@ function ingestPrompt(source: string): string {
 FORMAT (match exactly; omit a section if the source lacks it; INVENT NOTHING):
 \`# CV -- {Full Name}\`
 then bold contact lines directly under the title (no "Contact" section):
-\`**Location:** …\` / \`**Email:** …\` / \`**LinkedIn:** …\` / \`**Portfolio:** …\` / \`**GitHub:** …\`
-\`## Professional Summary\` — a 2-4 line summary, only from facts present.
-\`## Work Experience\` — each role as: \`### {Company} -- {Location}\`, then \`**{Job Title}**\` on its own line, then \`{Start}-{End or Present}\` on its own line, then bullet points (preserve EVERY quantified achievement verbatim).
-\`## Projects\` — flat bullets: \`- **{Name}** ({type}) -- {what + hero metric}\`.
-\`## Education\` — flat bullets: \`- {Degree}, {Institution} ({year})\`.
-\`## Skills\` — grouped bullets: \`- **{Category}:** {comma list}\`.
-Use \`--\` (double hyphen), NEVER an em dash (ATS rule). Preserve every company/title/date/metric. Clean, don't rewrite — it's THEIR CV.
+\`**Location:** â€¦\` / \`**Email:** â€¦\` / \`**LinkedIn:** â€¦\` / \`**Portfolio:** â€¦\` / \`**GitHub:** â€¦\`
+\`## Professional Summary\` â€” a 2-4 line summary, only from facts present.
+\`## Work Experience\` â€” each role as: \`### {Company} -- {Location}\`, then \`**{Job Title}**\` on its own line, then \`{Start}-{End or Present}\` on its own line, then bullet points (preserve EVERY quantified achievement verbatim).
+\`## Projects\` â€” flat bullets: \`- **{Name}** ({type}) -- {what + hero metric}\`.
+\`## Education\` â€” flat bullets: \`- {Degree}, {Institution} ({year})\`.
+\`## Skills\` â€” grouped bullets: \`- **{Category}:** {comma list}\`.
+Use \`--\` (double hyphen), NEVER an em dash (ATS rule). Preserve every company/title/date/metric. Clean, don't rewrite â€” it's THEIR CV.
 
 OUTPUT PROTOCOL:
 - You are a PROPOSER: do NOT write any file. Emit ONLY the markdown wrapped EXACTLY between a line \`<<cv:start>>\` and a line \`<<cv:end>>\` (each on its own line, never inside a code fence).
 - After \`<<cv:end>>\`, emit ONE more line: \`<<cv:seed>>{"title":"<their current/target role>","roles":["<3-5 role keywords>"],"location":"<their location or 'Remote'>"}\`
 - If the source is unreadable or empty, emit ONLY: \`<<cv:error>>{"reason":"unreadable"}\` and stop.
-- Narrate one short line BEFORE \`<<cv:start>>\` (e.g. "Reading your CV…").
+- Narrate one short line BEFORE \`<<cv:start>>\` (e.g. "Reading your CVâ€¦").
 
 ${source}`;
 }
 
-const TEXT_SRC = (t: string) => `SOURCE (the user's CV, pasted as text — convert it):\n"""\n${t.slice(0, 24000)}\n"""`;
-const FILE_SRC = (p: string) => `SOURCE: the user's CV is the file at this local path — READ it with your file/Read tool, then convert it:\n${p}`;
+const TEXT_SRC = (t: string) => `SOURCE (the user's CV, pasted as text â€” convert it):\n"""\n${t.slice(0, 24000)}\n"""`;
+const FILE_SRC = (p: string) => `SOURCE: the user's CV is the file at this local path â€” READ it with your file/Read tool, then convert it:\n${p}`;
 
 export async function POST(req: Request) {
   const ctype = req.headers.get("content-type") || "";
@@ -76,16 +77,27 @@ export async function POST(req: Request) {
       cliId = String(form.get("cliId") || "");
       const file = form.get("file");
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
-      // Reading a PDF/DOCX from a path needs the CLI's file tool, which only Claude
-      // is granted here. Tell non-Claude users plainly instead of failing opaquely.
-      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
-        return Response.json({ error: "PDF upload needs Claude Code — paste your CV text instead." }, { status: 400 });
-      }
       const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
       tempFile = path.join(dir, `cv${ext}`); // outside the repo, basename-only
-      fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII → owner-only
-      promptSource = FILE_SRC(tempFile);
+      fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII â†’ owner-only
+      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
+        // Non-Claude CLIs can't read arbitrary files via tool calls. Extract the PDF
+        // text locally via pdfjs (zero tokens, same bridge the onboarding flow uses),
+        // then hand the text to the CLI exactly like the paste path.
+        const extraction = await runOnboarding("extract-text", [tempFile, ext], {});
+        cleanupTemp(tempFile);
+        tempFile = null;
+        if (!extraction.ok || !extraction.text) {
+          return Response.json(
+            { error: (extraction.error as string) || "Could not read PDF â€” paste your CV text instead." },
+            { status: 422 },
+          );
+        }
+        promptSource = TEXT_SRC(extraction.text as string);
+      } else {
+        promptSource = FILE_SRC(tempFile);
+      }
     } else {
       return Response.json({ error: "unsupported content-type" }, { status: 400 });
     }
@@ -121,11 +133,13 @@ export async function POST(req: Request) {
 
   let child;
   try {
-    child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot } });
+    child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, shell: process.platform === "win32" });
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
   }
+
+  if (resolved.spec.promptViaStdin) { child.stdin?.write(prompt); child.stdin?.end(); }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -217,3 +231,9 @@ function cleanupTemp(file: string) {
     /* best-effort */
   }
 }
+
+
+
+
+
+

@@ -14,7 +14,7 @@ export async function GET() {
   if (!fs.existsSync(script)) return Response.json({ available: false, metadata: null, entries: [] });
   const dataRoot = await requestRoot();
   const stdout = await new Promise<string>((resolve) => {
-    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, timeout: 12_000 }, (_e, out) => resolve(out || ""));
+    execFile("node", [script, "--json"], { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, timeout: 12_000 }, (err, out) => resolve(err ? "" : out || ""));
   });
   try {
     const start = stdout.indexOf("{");

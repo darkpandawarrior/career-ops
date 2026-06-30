@@ -41,7 +41,7 @@ export async function POST(req: Request) {
   try {
     await fs.writeFile(tmp, Buffer.from(await file.arrayBuffer()));
     const result = await runOnboarding("extract", [tmp, ext], {});
-    return NextResponse.json(result, { status: result.ok ? 200 : 422 });
+    return NextResponse.json({ ...result, text: result.ok ? result.text ?? "" : "" }, { status: result.ok ? 200 : 422 });
   } catch (err) {
     return NextResponse.json({ ok: false, error: String((err as Error)?.message ?? err) }, { status: 500 });
   } finally {

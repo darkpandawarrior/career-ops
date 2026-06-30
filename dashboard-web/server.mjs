@@ -38,7 +38,7 @@ const PORT = Number(process.env.CAREER_DASHBOARD_PORT || 4173);
 const DEMO = process.env.CAREER_DASHBOARD_DEMO === '1';
 const PROFILES_REGISTRY = path.join(ENGINE_ROOT, 'profiles.yml');
 const profileRefreshes = new Map();
-const COACH_STATE = path.resolve(ENGINE_ROOT, '../interview-coach-skill/coaching_state.md');
+const GLOBAL_COACH_STATE = path.resolve(ENGINE_ROOT, '../interview-coach-skill/coaching_state.md');
 
 // ── Per-profile path resolver ─────────────────────────────────────────────────
 function resolveProfileRoot(urlObj) {
@@ -122,10 +122,18 @@ const COMMANDS = {
 // ── Tracker helpers ──────────────────────────────────────────────────────────
 const readT = (f) => existsSync(f) ? readFileSync(f, 'utf-8') : '';
 
+function profileEnv(root) {
+  return {
+    ...process.env,
+    CAREER_OPS_ROOT: root,
+    CAREER_OPS_PORTALS: path.join(root, 'portals.yml'),
+    CAREER_OPS_PROFILE: path.join(root, 'config/profile.yml'),
+  };
+}
+
 function execJson(script, args = [], root = DEFAULT_ROOT) {
   return new Promise((resolve) => {
-    const env = { ...process.env, CAREER_OPS_ROOT: root };
-    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env, timeout: 180_000 }, (err, stdout, stderr) => {
+    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env: profileEnv(root), timeout: 180_000 }, (err, stdout, stderr) => {
       try { resolve({ ok: true, data: JSON.parse(stdout) }); }
       catch { resolve({ ok: !err, output: (stdout || '') + (stderr || '') }); }
     });
@@ -134,8 +142,7 @@ function execJson(script, args = [], root = DEFAULT_ROOT) {
 
 function execText(script, args = [], root = DEFAULT_ROOT) {
   return new Promise((resolve) => {
-    const env = { ...process.env, CAREER_OPS_ROOT: root };
-    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env, timeout: 180_000 }, (err, stdout, stderr) => {
+    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env: profileEnv(root), timeout: 180_000 }, (err, stdout, stderr) => {
       resolve({ ok: !err, output: (stdout || '') + (stderr || '') });
     });
   });
@@ -203,8 +210,19 @@ function sectionOf(text, name) {
   return m ? m[1].trim() : '';
 }
 
-function parseCoachState() {
-  const text = readT(COACH_STATE);
+function resolveCoachStatePath(root) {
+  // Profile-local coaching state takes priority (any profile can have one at <root>/coaching_state.md)
+  const local = path.join(root, 'coaching_state.md');
+  if (existsSync(local)) return local;
+  // Global coaching state is only for the engine root (Alex's profile)
+  if (path.resolve(root) === ENGINE_ROOT) return GLOBAL_COACH_STATE;
+  return null;
+}
+
+function parseCoachState(root = ENGINE_ROOT) {
+  const statePath = resolveCoachStatePath(root);
+  if (!statePath) return null;
+  const text = readT(statePath);
   if (!text) return null;
   const stories = [];
   for (const m of sectionOf(text, 'Storybank').matchAll(/^\| (S\d+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| [^|]+ \| ([^|]+) \|/gm)) {
@@ -263,7 +281,7 @@ function buildTrackerData(root) {
   const scan = parseScanHistory(root);
   const portals = parsePortals(root);
   const inbox = parseAgentInbox(root);
-  const coach = parseCoachState();
+  const coach = parseCoachState(root);
   const reports = listReports(root);
   return {
     apps, pipeline, scan, portals, inbox, coach, reports, commands: COMMANDS, states: CANONICAL_STATES,
@@ -578,7 +596,7 @@ export async function route(req, res) {
 
 export function spawnNode(args, dataRoot, spawnImpl = spawn) {
   return new Promise((resolve) => {
-    const env = { ...process.env, ...(dataRoot && dataRoot !== ENGINE_ROOT ? { CAREER_OPS_ROOT: dataRoot } : {}) };
+    const env = dataRoot && dataRoot !== ENGINE_ROOT ? profileEnv(dataRoot) : { ...process.env };
     let child;
     try {
       child = spawnImpl(process.execPath, args, {

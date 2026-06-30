@@ -103,6 +103,7 @@ function inferFromText(text, extraWarnings = []) {
     diagnostics: extraction.diagnostics,
     warnings: [...extraWarnings, ...(extraction.warnings || [])],
     prefill: toPrefill(inferred),
+    text: extraction.text || text || "",
   };
 }
 
@@ -126,9 +127,29 @@ async function runExtract(filePath, extension) {
   return inferFromText(text, extracted?.warnings || []);
 }
 
+/**
+ * Extract raw text from a PDF without running inference — used by the web's
+ * /api/cv/ingest route when a non-Claude CLI is active (those CLIs can't read
+ * files directly; the web extracts the text locally via pdfjs, then passes it
+ * to the CLI as plain text just like the paste flow).
+ */
+async function runExtractText(filePath, extension) {
+  if (!filePath) return { ok: false, error: "no file provided" };
+  try {
+    const extracted = await extractFile(filePath, extension || ".pdf");
+    const text = String(extracted?.text || "");
+    if (!text.trim()) {
+      return { ok: false, error: "No selectable text found — this PDF may be a scanned image. Paste your CV text instead." };
+    }
+    return { ok: true, text };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+}
+
 async function runActivate(root, input) {
   if (!root) return { ok: false, error: "activate requires a target root" };
-  const text = String(input.text || "");
+  const text = String(input.text || input.review?.sourceText || "");
   const extraction = structureResume(text);
   const validation = validateReviewDraft(input.review || {});
   if (!validation.valid) return { ok: false, error: "review_invalid", errors: validation.errors };
@@ -176,6 +197,7 @@ async function main() {
     let out;
     if (step === "infer") out = await runInfer(input);
     else if (step === "extract") out = await runExtract(process.argv[3], process.argv[4]);
+    else if (step === "extract-text") out = await runExtractText(process.argv[3], process.argv[4]);
     else if (step === "activate") out = await runActivate(root, input);
     else out = { ok: false, error: `unknown step: ${step}` };
     process.stdout.write(JSON.stringify(out));

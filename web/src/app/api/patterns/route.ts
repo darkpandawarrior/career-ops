@@ -22,7 +22,7 @@ export async function GET() {
       "node",
       [script, "--json"],
       { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, timeout: 45_000, maxBuffer: 8 * 1024 * 1024 },
-      (_e, out) => resolve(out || ""),
+      (err, out) => resolve(err ? "" : out || ""),
     );
   });
   // The script may print human text before the JSON block — grab the last {...}.

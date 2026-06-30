@@ -11,5 +11,5 @@ export const dynamic = "force-dynamic";
 // rejection-pattern analysis and the full follow-up cadence.
 export default async function IntelPage() {
   const root = await requestRoot();
-  return <IntelView coach={readCoachState()} profile={readProfileMeta(root)} />;
+  return <IntelView coach={readCoachState(root)} profile={readProfileMeta(root)} />;
 }

@@ -1,0 +1,280 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --color-accent: #3ddc84; /* Android green */
+  --color-accent-dim: #2bb86c;
+  --color-ink: #0b0f0d;
+  --color-surface: #111613;
+  --color-card: #171e1a;
+  --color-line: #243029;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Subtle dot-grid in hero section */
+#top {
+  background-image: radial-gradient(circle, rgba(61, 220, 132, 0.07) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-ink);
+  color: #e8efe9;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background-color: var(--color-accent);
+  color: var(--color-ink);
+}
+
+/* Résumé route renders on light background */
+html.resume-mode body {
+  background-color: #e4e4e7;
+}
+
+/* Scroll-reveal */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.6s ease-out,
+    transform 0.6s ease-out;
+}
+
+.reveal.revealed {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+  }
+  .resume {
+    font-size: 11px;
+  }
+}
+
+/* --- Motion ------------------------------------------------------------ */
+
+/* Hero phone: gentle idle float */
+@keyframes phone-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.phone-float {
+  animation: phone-float 5s ease-in-out infinite;
+}
+
+/* GPS track draws itself in a loop */
+@keyframes gps-draw {
+  0% {
+    stroke-dashoffset: 200;
+  }
+  60%,
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.gps-draw {
+  stroke-dasharray: 200;
+  animation: gps-draw 4s ease-in-out infinite;
+}
+
+/* Location dot pulse */
+@keyframes gps-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    r: 4;
+  }
+  50% {
+    opacity: 0.45;
+    r: 6;
+  }
+}
+
+.gps-pulse {
+  animation: gps-pulse 1.6s ease-in-out infinite;
+}
+
+/* Navigation icon wiggle */
+@keyframes nav-wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-14deg);
+  }
+  75% {
+    transform: rotate(14deg);
+  }
+}
+
+.nav-wiggle {
+  animation: nav-wiggle 2.4s ease-in-out infinite;
+}
+
+/* Scroll bot: walking bob layered under the scroll-driven swing */
+@keyframes bot-bob {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -4px;
+  }
+}
+
+.bot-bob {
+  animation: bot-bob 0.9s ease-in-out infinite;
+}
+
+/* Hero entrance */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise-in {
+  animation: rise-in 0.7s ease-out both;
+}
+
+.rise-in-1 {
+  animation-delay: 0.08s;
+}
+.rise-in-2 {
+  animation-delay: 0.16s;
+}
+.rise-in-3 {
+  animation-delay: 0.24s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .phone-float,
+  .gps-draw,
+  .gps-pulse,
+  .nav-wiggle,
+  .bot-bob,
+  .rise-in {
+    animation: none;
+  }
+}
+
+/* --- Project detail: alive / modern / futuristic ---------------------- */
+
+/* Animated aurora wash behind hero / section headers */
+@keyframes aurora-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.aurora {
+  background:
+    radial-gradient(60% 130% at 15% 0%, rgba(61, 220, 132, 0.20), transparent 60%),
+    radial-gradient(55% 110% at 92% 8%, rgba(43, 184, 108, 0.16), transparent 55%),
+    linear-gradient(125deg, rgba(61, 220, 132, 0.10), transparent 45%, rgba(61, 220, 132, 0.07));
+  background-size: 220% 220%;
+  animation: aurora-shift 16s ease-in-out infinite;
+}
+
+/* Breathing accent glow for the featured media */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(61, 220, 132, 0.18), 0 0 26px -8px rgba(61, 220, 132, 0.30); }
+  50% { box-shadow: 0 0 0 1px rgba(61, 220, 132, 0.34), 0 0 46px -6px rgba(61, 220, 132, 0.5); }
+}
+.glow-pulse { animation: glow-pulse 4.5s ease-in-out infinite; }
+
+@keyframes float-soft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.float-soft { animation: float-soft 6s ease-in-out infinite; }
+
+/* Phone-style device frame for screenshots & videos */
+.device {
+  border-radius: 1.75rem;
+  border: 7px solid #0c100e;
+  background: #000;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--color-line), 0 22px 60px -22px rgba(0, 0, 0, 0.85),
+    0 0 50px -22px rgba(61, 220, 132, 0.35);
+}
+
+/* Gallery thumbs: lift + glow on hover */
+.gallery-item {
+  transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.35s ease,
+    border-color 0.35s ease;
+}
+.gallery-item:hover {
+  transform: translateY(-6px) scale(1.025);
+  box-shadow: 0 14px 44px -14px rgba(61, 220, 132, 0.5);
+  z-index: 1;
+}
+
+/* Lightbox entrance */
+@keyframes lb-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.lb-in { animation: lb-in 0.25s ease-out both; }
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in { animation: fade-in 0.2s ease-out both; }
+
+/* Mermaid diagrams scale to their container */
+.mermaid-wrap svg { max-width: 100%; height: auto; }
+
+/* Hide scrollbar on the screenshot carousel (keep scroll/swipe) */
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Animated accent underline / sheen */
+@keyframes sheen {
+  0% { background-position: -150% 0; }
+  100% { background-position: 250% 0; }
+}
+.sheen {
+  background: linear-gradient(100deg, transparent 20%, rgba(61, 220, 132, 0.55) 50%, transparent 80%);
+  background-size: 200% 100%;
+  animation: sheen 3.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora,
+  .glow-pulse,
+  .float-soft,
+  .sheen {
+    animation: none;
+  }
+}
