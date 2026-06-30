@@ -11,23 +11,23 @@ const ENGINE = fs.mkdtempSync(path.join(os.tmpdir(), "co-cli-route-"));
 fs.writeFileSync(
   path.join(ENGINE, "profiles.yml"),
   `profiles:
-  - name: siddharth
-    display_name: Siddharth Pandalai
-    root: profiles/siddharth
-  - name: lakshita
-    display_name: Lakshita
-    root: profiles/lakshita
+  - name: alex
+    display_name: Alex Doe
+    root: profiles/alex
+  - name: jordan
+    display_name: Jordan
+    root: profiles/jordan
 `,
 );
 
-// The tmp profile dir the route writes/reads cli.yml under for the "siddharth"
-// header. requestRoot() resolves profiles/siddharth relative to ENGINE.
-const PROFILE_ROOT = path.resolve(ENGINE, "profiles/siddharth");
+// The tmp profile dir the route writes/reads cli.yml under for the "alex"
+// header. requestRoot() resolves profiles/alex relative to ENGINE.
+const PROFILE_ROOT = path.resolve(ENGINE, "profiles/alex");
 
 vi.mock("@/lib/career-ops", () => ({ careerOpsRoot: () => ENGINE }));
 
 // Mutable header value the next/headers mock returns for x-co-profile.
-let headerValue: string | null = "siddharth";
+let headerValue: string | null = "alex";
 vi.mock("next/headers", () => ({
   headers: vi.fn(async () => ({ get: (k: string) => (k === "x-co-profile" ? headerValue : null) })),
 }));
@@ -52,7 +52,7 @@ function makeDetected(id: string, installed: boolean) {
 const cliConfigPath = () => path.join(PROFILE_ROOT, "config", "cli.yml");
 
 beforeEach(() => {
-  headerValue = "siddharth";
+  headerValue = "alex";
   detected = KNOWN.map((c) => makeDetected(c.id, false));
   // Clean any cli.yml from a prior test so reads start fresh.
   fs.rmSync(path.join(PROFILE_ROOT, "config"), { recursive: true, force: true });
@@ -206,16 +206,16 @@ describe("POST /api/cli", () => {
   });
 
   it("writes to the profile-scoped root (different header -> different file)", async () => {
-    headerValue = "lakshita";
-    const lakshitaRoot = path.resolve(ENGINE, "profiles/lakshita");
-    fs.rmSync(path.join(lakshitaRoot, "config"), { recursive: true, force: true });
+    headerValue = "jordan";
+    const jordanRoot = path.resolve(ENGINE, "profiles/jordan");
+    fs.rmSync(path.join(jordanRoot, "config"), { recursive: true, force: true });
 
     const res = await POST(
       new Request("http://localhost/api/cli", { method: "POST", body: JSON.stringify({ cliId: "codex" }) }),
     );
     expect(res.status).toBe(200);
-    expect(fs.existsSync(path.join(lakshitaRoot, "config", "cli.yml"))).toBe(true);
-    // siddharth's file must NOT have been touched.
+    expect(fs.existsSync(path.join(jordanRoot, "config", "cli.yml"))).toBe(true);
+    // alex's file must NOT have been touched.
     expect(fs.existsSync(cliConfigPath())).toBe(false);
   });
 });

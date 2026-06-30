@@ -165,7 +165,7 @@ function storybankOf(md: string | null): string {
 
 /**
  * Assemble the DEEP generation context — not just the CV, but every indexed
- * source that gives the portfolio cv-siddharth-level depth: the structured
+ * source that gives the portfolio cv-alex-level depth: the structured
  * profile, the personalization notes, the interview STORYBANK (titled wins +
  * earned-secret insights → rich case studies), and a digest of evaluation
  * reports. `cv` is returned separately so the route can gate on it; `extra` is

@@ -122,7 +122,7 @@ describe("isRememberable — the gold (open-ended reusable facts)", () => {
   });
 
   it("matches identity regex case-insensitively (regex has /i flag)", () => {
-    expect(isRememberable(field({ label: "EMAIL ADDRESS" }), "siddharth@example.com")).toBe(false);
+    expect(isRememberable(field({ label: "EMAIL ADDRESS" }), "alex@example.com")).toBe(false);
   });
 
   it("treats a label with no sensitive/identity/consent keyword as rememberable", () => {

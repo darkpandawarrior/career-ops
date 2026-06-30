@@ -16,7 +16,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 export async function GET(req: Request) {
   // ACTIVE profile root — "fresh matches" must read THIS candidate's scan history,
-  // never the engine root's (that surfaced Siddharth's Android roles on Lakshita's Today).
+  // never the engine root's (that surfaced Alex's Android roles on Jordan's Today).
   const root = await requestRoot();
   const days = Math.min(30, Math.max(1, Number(new URL(req.url).searchParams.get("days")) || 7));
   const cutoff = Date.now() - days * 86_400_000;

@@ -1,12 +1,12 @@
 // The data contract for a generated portfolio site. The user's AI CLI fills this
 // shape from their cv.md + profile.yml; the renderer (render.ts) turns it into a
-// single self-contained HTML page. Mirrors the proven cv-siddharth `profile.ts`.
+// single self-contained HTML page. Mirrors the proven cv-alex `profile.ts`.
 
 export type Metric = { value: string; label: string; detail?: string };
 export type ExperiencePoint = { label?: string; text: string };
 export type Experience = { company: string; role: string; period: string; points: ExperiencePoint[] };
 // A case study is a full narrative (problem → approach → outcome), not just a blurb
-// — matching the depth of the real cv-siddharth reference site.
+// — matching the depth of the real cv-alex reference site.
 export type CaseStudy = {
   title: string;
   metric?: string;

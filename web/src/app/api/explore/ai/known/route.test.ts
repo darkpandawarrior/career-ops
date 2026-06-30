@@ -77,9 +77,9 @@ describe("GET /api/explore/ai/known", () => {
   });
 
   it("resolves the ACTIVE profile root and passes it to assembleDedupContext", async () => {
-    h.requestRootMock.mockResolvedValue("/profiles/lakshita");
+    h.requestRootMock.mockResolvedValue("/profiles/jordan");
     await GET();
-    expect(h.assemble).toHaveBeenCalledWith("/profiles/lakshita");
+    expect(h.assemble).toHaveBeenCalledWith("/profiles/jordan");
   });
 
   it("fails soft with an empty array when assembleDedupContext throws", async () => {

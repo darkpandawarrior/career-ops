@@ -167,14 +167,14 @@ describe("POST /api/explore/ai — streaming (generic CLI)", () => {
   });
 
   it("spawns the resolved binary with the spec's args and the prompt, scoped to the data root via env", async () => {
-    h.dataRoot = "/profiles/siddharth";
+    h.dataRoot = "/profiles/alex";
     await collect(makeReq({ query: "staff android", cliId: "codex" }), (child) => child.emit("close"));
     expect(h.lastSpawn!.bin).toBe("/usr/local/bin/codex");
     // spec.args(prompt) => ["exec", <prompt>]; the prompt embeds the user intent.
     expect(h.lastSpawn!.args[0]).toBe("exec");
     expect(h.lastSpawn!.args[1]).toContain("staff android");
     const env = h.lastSpawn!.opts.env as Record<string, string>;
-    expect(env.CAREER_OPS_ROOT).toBe("/profiles/siddharth");
+    expect(env.CAREER_OPS_ROOT).toBe("/profiles/alex");
     expect(h.lastSpawn!.opts.cwd).toBe("/fake/engine/root");
   });
 

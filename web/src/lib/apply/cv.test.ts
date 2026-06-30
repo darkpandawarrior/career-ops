@@ -94,7 +94,7 @@ describe("resolveTailoredCv", () => {
   });
 
   it("resolves a PDF whose name contains the full company slug", () => {
-    const p = writePdf("siddharth-acme-corp-cv.pdf");
+    const p = writePdf("alex-acme-corp-cv.pdf");
     expect(resolveTailoredCv("Acme Corp")).toBe(p);
   });
 

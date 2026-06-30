@@ -16,13 +16,13 @@ A registry file, **`profiles.yml`**, at the data root maps a slug → a data roo
 
 ```yaml
 profiles:
-  - name: siddharth                 # slug — must match ^[a-z0-9_-]+$
-    display_name: Siddharth Pandalai
-    root: profiles/siddharth        # relative to the data root (engine root)
+  - name: alex                 # slug — must match ^[a-z0-9_-]+$
+    display_name: Alex Doe
+    root: profiles/alex        # relative to the data root (engine root)
     color: "#0284c7"                # optional accent color (hex)
-  - name: lakshita
-    display_name: Lakshita
-    root: profiles/lakshita
+  - name: jordan
+    display_name: Jordan
+    root: profiles/jordan
     color: "#dd7627"
 ```
 
@@ -72,26 +72,26 @@ Missing files are skipped (a partial install is valid).
 Preview first (recommended — writes nothing):
 
 ```
-node migrate-profile.mjs siddharth --display-name "Siddharth Pandalai" --dry-run
+node migrate-profile.mjs alex --display-name "Alex Doe" --dry-run
 ```
 
 Apply (copy — non-destructive, leaves the root data in place):
 
 ```
-node migrate-profile.mjs siddharth --display-name "Siddharth Pandalai" --color "#0284c7"
+node migrate-profile.mjs alex --display-name "Alex Doe" --color "#0284c7"
 ```
 
 Migrate a candidate whose data lives in another checkout:
 
 ```
-node migrate-profile.mjs lakshita --display-name "Lakshita" \
+node migrate-profile.mjs jordan --display-name "Jordan" \
      --root /path/to/her/career-ops
 ```
 
 Move instead of copy (relocates the data; drops a `MIGRATED.md` note):
 
 ```
-node migrate-profile.mjs siddharth --display-name "Siddharth Pandalai" --move
+node migrate-profile.mjs alex --display-name "Alex Doe" --move
 ```
 
 The tool is **idempotent**: re-running never duplicates the `profiles.yml` entry.
@@ -107,7 +107,7 @@ source without `--force`. Exit code is `0` on success, non-zero on any error
 Selection is driven by a query parameter and made sticky by a cookie.
 
 - **`?profile=<slug>`** — open any dashboard URL with this query param to view that
-  profile's data, e.g. `http://localhost:3000/?profile=siddharth`.
+  profile's data, e.g. `http://localhost:3000/?profile=alex`.
 - **Stickiness (`co-profile` cookie)** — `web/src/proxy.ts` (Next 16's renamed
   `middleware`) resolves the slug once per request and forwards it to every
   page/route handler as the `x-co-profile` request header. When `?profile=` is
@@ -125,7 +125,7 @@ Selection is driven by a query parameter and made sticky by a cookie.
 For CLI/cron runs against a specific profile, point the engine at that data root:
 
 ```
-CAREER_OPS_ROOT=/path/to/checkout/profiles/siddharth node verify-pipeline.mjs
+CAREER_OPS_ROOT=/path/to/checkout/profiles/alex node verify-pipeline.mjs
 ```
 
 ### Per-profile AI CLI selection (`config/cli.yml`)
@@ -147,7 +147,7 @@ The dashboard runs every AI action — the assistant, AI search, CV parsing, and
   key; that path is gone.
 
 > One install can host several candidates, each with a different engine
-> (e.g. Siddharth → `claude`, Lakshita → `codex`) without collisions.
+> (e.g. Alex → `claude`, Jordan → `codex`) without collisions.
 
 ---
 

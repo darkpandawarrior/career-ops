@@ -73,6 +73,6 @@ describe("buildProjectFiles (reads the real bundled template)", () => {
     expect(byName["index.html"]).toContain("Ada Lovelace");
     expect(byName["index.html"]).not.toContain("__NAME__");
     // no other candidate's identity leaked in from the template
-    expect(JSON.stringify(files)).not.toMatch(/Siddharth|darkpandawarrior/);
+    expect(JSON.stringify(files)).not.toMatch(/Alex|octocat/);
   });
 });

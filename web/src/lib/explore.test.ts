@@ -64,8 +64,8 @@ describe("hasExploreParams (regression: ?profile=slug must NOT count as a search
   });
 
   it("is false for unrelated params like profile / cache-busters", () => {
-    expect(hasExploreParams(new URLSearchParams("profile=lakshita"))).toBe(false);
-    expect(hasExploreParams(new URLSearchParams("profile=lakshita&_cb=123"))).toBe(false);
+    expect(hasExploreParams(new URLSearchParams("profile=jordan"))).toBe(false);
+    expect(hasExploreParams(new URLSearchParams("profile=jordan&_cb=123"))).toBe(false);
   });
 
   it("is true only when a real filter key is present", () => {

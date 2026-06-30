@@ -214,7 +214,7 @@ function resolveCoachStatePath(root) {
   // Profile-local coaching state takes priority (any profile can have one at <root>/coaching_state.md)
   const local = path.join(root, 'coaching_state.md');
   if (existsSync(local)) return local;
-  // Global coaching state is only for the engine root (Siddharth's profile)
+  // Global coaching state is only for the engine root (Alex's profile)
   if (path.resolve(root) === ENGINE_ROOT) return GLOBAL_COACH_STATE;
   return null;
 }

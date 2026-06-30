@@ -38,7 +38,7 @@ describe("readProfileMeta — full document", () => {
     writeProfile(
       [
         "candidate:",
-        "  full_name: Siddharth Pandalai",
+        "  full_name: Alex Doe",
         "narrative:",
         "  headline: Senior Android Engineer targeting Lead",
         "  superpowers:",
@@ -64,7 +64,7 @@ describe("readProfileMeta — full document", () => {
 
   it("reads scalar candidate / narrative / compensation fields", () => {
     const meta = readProfileMeta(ROOT)!;
-    expect(meta.fullName).toBe("Siddharth Pandalai");
+    expect(meta.fullName).toBe("Alex Doe");
     expect(meta.headline).toBe("Senior Android Engineer targeting Lead");
     expect(meta.targetRange).toBe("40-60 LPA");
     expect(meta.currency).toBe("INR");

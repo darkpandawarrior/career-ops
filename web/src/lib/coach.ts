@@ -8,7 +8,7 @@ import { careerOpsRoot } from "@/lib/career-ops";
  * Resolution order (per profile root):
  *   1. <profile_root>/coaching_state.md  — profile-local (federation absorb writes here)
  *   2. <engine_root>/../interview-coach-skill/coaching_state.md  — global, only for the
- *      engine-root profile (Siddharth). Other profiles get null if no local file exists.
+ *      engine-root profile (Alex). Other profiles get null if no local file exists.
  */
 
 export type CoachStory = { id: string; title: string; skill: string; skill2: string; strength: string };

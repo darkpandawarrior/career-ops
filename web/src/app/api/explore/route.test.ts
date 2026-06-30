@@ -110,14 +110,14 @@ describe("POST /api/explore — streaming envelope contract", () => {
   });
 
   it("forwards the parsed filters + resolved profile root to runDiscovery", async () => {
-    h.dataRoot = "/profiles/lakshita";
+    h.dataRoot = "/profiles/jordan";
     await POST(makeReq({ positive: ["android"], since: 10 })).then(readNdjson);
 
     expect(h.runDiscovery).toHaveBeenCalledTimes(1);
     const [filters, , root] = h.runDiscovery.mock.calls[0] as [ExploreFilters, unknown, string];
     expect(filters.positive).toEqual(["android"]);
     expect(filters.sinceDays).toBe(10);
-    expect(root).toBe("/profiles/lakshita");
+    expect(root).toBe("/profiles/jordan");
   });
 
   it("relays every ScanEvent runDiscovery reports, in order, between start and done", async () => {

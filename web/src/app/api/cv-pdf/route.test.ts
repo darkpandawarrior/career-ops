@@ -77,7 +77,7 @@ describe("GET /api/cv-pdf — input validation", () => {
   });
 
   it("404s when no PDF matches the company slug", async () => {
-    writePdf("cv-siddharth-google-2026.pdf", "google");
+    writePdf("cv-alex-google-2026.pdf", "google");
     const res = await get("Acme");
     expect(res.status).toBe(404);
     expect(await res.text()).toBe("no tailored CV found for this offer");
@@ -86,25 +86,25 @@ describe("GET /api/cv-pdf — input validation", () => {
 
 describe("GET /api/cv-pdf — serving the matching PDF", () => {
   it("streams the matching PDF inline as application/pdf with a filename", async () => {
-    writePdf("cv-siddharth-acme-2026-06.pdf", "acme body");
+    writePdf("cv-alex-acme-2026-06.pdf", "acme body");
     const res = await get("Acme");
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
-    expect(res.headers.get("Content-Disposition")).toBe('inline; filename="cv-siddharth-acme-2026-06.pdf"');
+    expect(res.headers.get("Content-Disposition")).toBe('inline; filename="cv-alex-acme-2026-06.pdf"');
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const bytes = new Uint8Array(await res.arrayBuffer());
     expect(new TextDecoder().decode(bytes)).toContain("acme body");
   });
 
   it("slugifies the company (spaces/punctuation → hyphens, lowercased) before matching", async () => {
-    writePdf("cv-siddharth-acme-corp-2026.pdf", "acme corp");
+    writePdf("cv-alex-acme-corp-2026.pdf", "acme corp");
     const res = await get("Acme Corp!");
     expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Disposition")).toContain("cv-siddharth-acme-corp-2026.pdf");
+    expect(res.headers.get("Content-Disposition")).toContain("cv-alex-acme-corp-2026.pdf");
   });
 
   it("matches the slug only at a token boundary (Meta must NOT serve Metabase's CV)", async () => {
-    writePdf("cv-siddharth-metabase-2026.pdf", "metabase");
+    writePdf("cv-alex-metabase-2026.pdf", "metabase");
     const res = await get("Meta");
     // 'metabase' contains 'meta' but not at a token boundary → no match.
     expect(res.status).toBe(404);
@@ -112,18 +112,18 @@ describe("GET /api/cv-pdf — serving the matching PDF", () => {
   });
 
   it("serves the newest PDF (highest mtime) when several match the company", async () => {
-    writePdf("cv-siddharth-acme-v1.pdf", "older", 1_000_000);
-    writePdf("cv-siddharth-acme-v2.pdf", "newer", 2_000_000);
+    writePdf("cv-alex-acme-v1.pdf", "older", 1_000_000);
+    writePdf("cv-alex-acme-v2.pdf", "newer", 2_000_000);
     const res = await get("Acme");
     expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Disposition")).toContain("cv-siddharth-acme-v2.pdf");
+    expect(res.headers.get("Content-Disposition")).toContain("cv-alex-acme-v2.pdf");
     const bytes = new Uint8Array(await res.arrayBuffer());
     expect(new TextDecoder().decode(bytes)).toContain("newer");
   });
 
   it("ignores non-PDF files that happen to contain the slug", async () => {
-    writePdf("cv-siddharth-acme.pdf", "the pdf");
-    fs.writeFileSync(path.join(OUTPUT_DIR, "cv-siddharth-acme.txt"), "not a pdf");
+    writePdf("cv-alex-acme.pdf", "the pdf");
+    fs.writeFileSync(path.join(OUTPUT_DIR, "cv-alex-acme.txt"), "not a pdf");
     fs.writeFileSync(path.join(OUTPUT_DIR, "notes-acme.md"), "not a pdf");
     const res = await get("Acme");
     expect(res.status).toBe(200);
@@ -131,7 +131,7 @@ describe("GET /api/cv-pdf — serving the matching PDF", () => {
   });
 
   it("matches the slug case-insensitively against the filename", async () => {
-    writePdf("CV-Siddharth-ACME-2026.pdf", "uppercase name");
+    writePdf("CV-Alex-ACME-2026.pdf", "uppercase name");
     const res = await get("acme");
     expect(res.status).toBe(200);
   });
