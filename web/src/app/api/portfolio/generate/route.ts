@@ -43,9 +43,10 @@ export async function POST(req: Request) {
   }
 
   const revise = body.instruction && body.base;
+  const sources = `--- cv.md ---\n${ctx.cv}\n\n${ctx.extra}`;
   const prompt = revise
-    ? `${mode}\n\n--- CURRENT PORTFOLIO JSON ---\n${JSON.stringify(body.base)}\n\n--- REVISION REQUESTED ---\n${body.instruction}\n\nReturn the FULL revised JSON object (same shape), applying the change. Keep everything truthful to the files below.\n\n--- cv.md ---\n${ctx.cv}\n\n--- config/profile.yml ---\n${ctx.profile}\n`
-    : `${mode}\n\n--- cv.md ---\n${ctx.cv}\n\n--- config/profile.yml ---\n${ctx.profile}\n\nEmit the portfolio JSON now.`;
+    ? `${mode}\n\n--- CURRENT PORTFOLIO JSON ---\n${JSON.stringify(body.base)}\n\n--- REVISION REQUESTED ---\n${body.instruction}\n\nReturn the FULL revised JSON object (same shape), applying the change. Keep everything truthful to the sources below.\n\n${sources}\n`
+    : `${mode}\n\n${sources}\n\nEmit the portfolio JSON now.`;
 
   const isClaude = cliId === "claude";
   const args = isClaude

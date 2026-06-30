@@ -31,13 +31,15 @@ describe("renderPortfolio", () => {
   it("renders work, experience, and skills sections when present", () => {
     const html = renderPortfolio({
       ...base,
-      caseStudies: [{ title: "GPS 50→95%", blurb: "sensor fusion", tags: ["Kotlin"] }],
+      caseStudies: [{ title: "GPS 50→95%", summary: "sensor fusion", problem: "low-signal users", approach: ["dead reckoning"], outcome: "95% accuracy", tags: ["Kotlin"] }],
       experience: [{ company: "Dice", role: "SDE-2", period: "2023—now", points: [{ label: "Lead", text: "led arch" }] }],
       skills: [{ group: "Arch", items: ["Compose", "MVVM"] }],
       metrics: [{ value: "95%", label: "accuracy" }],
     });
     expect(html).toContain('id="work"');
     expect(html).toContain("GPS 50→95%");
+    expect(html).toContain("Deep dive"); // rich case study renders the expandable
+    expect(html).toContain("low-signal users");
     expect(html).toContain('id="experience"');
     expect(html).toContain("<strong>Lead:</strong> led arch");
     expect(html).toContain('id="skills"');

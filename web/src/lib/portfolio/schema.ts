@@ -5,7 +5,17 @@
 export type Metric = { value: string; label: string; detail?: string };
 export type ExperiencePoint = { label?: string; text: string };
 export type Experience = { company: string; role: string; period: string; points: ExperiencePoint[] };
-export type CaseStudy = { title: string; blurb: string; tags?: string[] };
+// A case study is a full narrative (problem → approach → outcome), not just a blurb
+// — matching the depth of the real cv-siddharth reference site.
+export type CaseStudy = {
+  title: string;
+  metric?: string;
+  summary: string;
+  problem?: string;
+  approach?: string[];
+  outcome?: string;
+  tags?: string[];
+};
 export type SkillGroup = { group: string; items: string[] };
 
 export type PortfolioData = {
@@ -69,8 +79,17 @@ export function coercePortfolio(raw: unknown): PortfolioData | null {
 
   const caseStudies: CaseStudy[] = arr(r.caseStudies)
     .map((c) => (c && typeof c === "object" ? (c as Record<string, unknown>) : {}))
-    .map((c) => ({ title: str(c.title), blurb: str(c.blurb), tags: strList(c.tags).slice(0, 6) }))
-    .filter((c) => c.title)
+    .map((c) => ({
+      title: str(c.title),
+      metric: str(c.metric) || undefined,
+      // `summary` is the headline narrative; tolerate the older `blurb` key.
+      summary: str(c.summary) || str(c.blurb),
+      problem: str(c.problem) || undefined,
+      approach: strList(c.approach).slice(0, 8),
+      outcome: str(c.outcome) || undefined,
+      tags: strList(c.tags).slice(0, 6),
+    }))
+    .filter((c) => c.title && c.summary)
     .slice(0, 8);
 
   const skills: SkillGroup[] = arr(r.skills)

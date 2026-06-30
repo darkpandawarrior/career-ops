@@ -38,14 +38,28 @@ export function renderPortfolio(d: PortfolioData): string {
     .join("\n");
 
   const cases = (d.caseStudies ?? [])
-    .map(
-      (c) => `        <article class="card">
+    .map((c) => {
+      const deep =
+        c.problem || (c.approach ?? []).length || c.outcome
+          ? `<details class="deep"><summary>Deep dive</summary>
+            ${c.problem ? `<p class="dd-label">Problem</p><p>${esc(c.problem)}</p>` : ""}
+            ${(c.approach ?? []).length ? `<p class="dd-label">Approach</p><ul>${(c.approach ?? []).map((a) => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
+            ${c.outcome ? `<p class="dd-label">Outcome</p><p>${esc(c.outcome)}</p>` : ""}
+          </details>`
+          : "";
+      return `        <article class="card">
+          ${c.metric ? `<div class="card-metric">${esc(c.metric)}</div>` : ""}
           <h3>${esc(c.title)}</h3>
-          <p>${esc(c.blurb)}</p>
+          <p>${esc(c.summary)}</p>
           ${(c.tags ?? []).length ? `<div class="tags">${(c.tags ?? []).map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
-        </article>`,
-    )
+          ${deep}
+        </article>`;
+    })
     .join("\n");
+
+  const competencies = (d.competencies ?? []).length
+    ? `<div class="competencies">${(d.competencies ?? []).map((c) => `<span class="chip">${esc(c)}</span>`).join("")}</div>`
+    : "";
 
   const exp = (d.experience ?? [])
     .map(
@@ -132,8 +146,19 @@ export function renderPortfolio(d: PortfolioData): string {
   .card{ border:1px solid var(--border); background:var(--surface); border-radius:16px; padding:22px; }
   .card h3{ font-size:18px; margin-bottom:8px; }
   .card p{ color:var(--muted); font-size:15px; }
+  .card-metric{ display:inline-block; font-family:"Space Grotesk"; font-weight:700; font-size:13px; color:var(--accent); background:var(--accent-soft); border-radius:6px; padding:3px 10px; margin-bottom:10px; }
   .tags{ display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
   .tag{ font-size:12px; color:var(--accent); background:var(--accent-soft); border-radius:6px; padding:3px 9px; }
+  .deep{ margin-top:14px; border-top:1px solid var(--border); padding-top:12px; }
+  .deep summary{ cursor:pointer; color:var(--accent); font-size:13px; font-weight:600; list-style:none; }
+  .deep summary::-webkit-details-marker{ display:none; }
+  .deep[open] summary{ margin-bottom:10px; }
+  .dd-label{ color:var(--faint); font-size:11px; text-transform:uppercase; letter-spacing:.1em; margin:12px 0 4px; }
+  .deep ul{ list-style:none; display:grid; gap:6px; }
+  .deep li{ color:var(--muted); font-size:14px; padding-left:16px; position:relative; }
+  .deep li::before{ content:""; position:absolute; left:0; top:8px; width:5px; height:5px; border-radius:50%; background:var(--accent); }
+  .competencies{ display:flex; flex-wrap:wrap; gap:8px; margin-top:28px; }
+  .chip{ font-size:13px; color:var(--muted); border:1px solid var(--border); border-radius:999px; padding:5px 13px; }
   /* experience */
   .job{ padding:22px 0; border-top:1px solid var(--border); }
   .job:first-child{ border-top:0; padding-top:0; }
@@ -176,6 +201,7 @@ export function renderPortfolio(d: PortfolioData): string {
     ${d.github ? `<a class="btn ghost" href="${href(d.github)}" target="_blank" rel="noreferrer">GitHub</a>` : ""}
   </div>
   ${metrics ? `<div class="metrics">\n${metrics}\n  </div>` : ""}
+  ${competencies}
 </div></header>
 
 ${

@@ -40,11 +40,13 @@ describe("coercePortfolio", () => {
     const d = coercePortfolio({
       name: "X",
       skills: [{ group: "Arch", items: ["a", "", "b"] }, { group: "", items: ["x"] }],
-      caseStudies: [{ title: "Win", blurb: "did it", tags: ["k", "j"] }, { blurb: "no title" }],
+      caseStudies: [{ title: "Win", blurb: "did it", tags: ["k", "j"] }, { title: "No summary" }],
     })!;
     expect(d.skills).toEqual([{ group: "Arch", items: ["a", "b"] }]);
+    // 'blurb' is tolerated as a legacy alias for 'summary'; a case study with no
+    // summary at all is dropped.
     expect(d.caseStudies).toHaveLength(1);
-    expect(d.caseStudies![0]).toMatchObject({ title: "Win", tags: ["k", "j"] });
+    expect(d.caseStudies![0]).toMatchObject({ title: "Win", summary: "did it", tags: ["k", "j"] });
   });
 });
 

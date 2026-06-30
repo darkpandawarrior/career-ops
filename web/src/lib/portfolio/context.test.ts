@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readPortfolio, writePortfolio, deletePortfolio, buildPortfolioContext, DEPLOY_README } from "./context";
+import { readPortfolio, writePortfolio, deletePortfolio, restoreVersion, finalizeVersion, buildPortfolioContext, DEPLOY_README } from "./context";
 import type { PortfolioData } from "./schema";
 
 let ROOT: string;
@@ -35,10 +35,16 @@ describe("writePortfolio + readPortfolio round trip", () => {
     expect(s.html).toContain("Ada Lovelace");
   });
 
-  it("snapshots a version when a stamp is supplied", () => {
+  it("snapshots versions (newest first) when a stamp is supplied", () => {
     writePortfolio(data, ROOT, "2026-06-30T00-00-00-000Z");
+    writePortfolio({ ...data, tagline: "v2" }, ROOT, "2026-06-30T01-00-00-000Z");
     const s = readPortfolio(ROOT);
-    expect(s.versions).toEqual(["2026-06-30T00-00-00-000Z.html"]);
+    expect(s.versions.map((v) => v.stamp)).toEqual([
+      "2026-06-30T01-00-00-000Z",
+      "2026-06-30T00-00-00-000Z",
+    ]);
+    expect(s.versions.every((v) => !v.isFinal)).toBe(true);
+    expect(s.final).toBeNull();
   });
 
   it("writes under the PASSED root (per-profile isolation)", () => {
@@ -46,6 +52,40 @@ describe("writePortfolio + readPortfolio round trip", () => {
     writePortfolio(data, ROOT);
     expect(readPortfolio(other).exists).toBe(false); // sibling root untouched
     fs.rmSync(other, { recursive: true, force: true });
+  });
+});
+
+describe("restoreVersion", () => {
+  it("makes a past version the current draft and re-renders its html", () => {
+    writePortfolio({ ...data, tagline: "ORIGINAL" }, ROOT, "v1");
+    writePortfolio({ ...data, tagline: "LATER" }, ROOT, "v2");
+    expect(readPortfolio(ROOT).data?.tagline).toBe("LATER");
+
+    const r = restoreVersion("v1", ROOT)!;
+    expect(r.data.tagline).toBe("ORIGINAL");
+    expect(r.html).toContain("ORIGINAL");
+    expect(readPortfolio(ROOT).data?.tagline).toBe("ORIGINAL"); // current draft updated
+  });
+  it("returns null for an unknown version", () => {
+    writePortfolio(data, ROOT, "v1");
+    expect(restoreVersion("ghost", ROOT)).toBeNull();
+  });
+});
+
+describe("finalizeVersion", () => {
+  it("bookmarks a version as production (reflected in readPortfolio), clearable", () => {
+    writePortfolio(data, ROOT, "v1");
+    expect(finalizeVersion("v1", ROOT)).toBe(true);
+    const s = readPortfolio(ROOT);
+    expect(s.final).toBe("v1");
+    expect(s.versions.find((v) => v.stamp === "v1")?.isFinal).toBe(true);
+    // clearing
+    finalizeVersion("", ROOT);
+    expect(readPortfolio(ROOT).final).toBeNull();
+  });
+  it("rejects finalizing an unknown version", () => {
+    writePortfolio(data, ROOT, "v1");
+    expect(finalizeVersion("ghost", ROOT)).toBe(false);
   });
 });
 
@@ -62,12 +102,24 @@ describe("deletePortfolio", () => {
 });
 
 describe("buildPortfolioContext", () => {
-  it("reads cv.md + config/profile.yml from the root, defaulting to empty", () => {
-    expect(buildPortfolioContext(ROOT)).toEqual({ cv: "", profile: "" });
+  it("returns empty cv + extra for a bare root", () => {
+    expect(buildPortfolioContext(ROOT)).toEqual({ cv: "", extra: "" });
+  });
+
+  it("reads cv.md separately and folds the deeper sources into extra", () => {
     fs.writeFileSync(path.join(ROOT, "cv.md"), "# My CV");
     fs.mkdirSync(path.join(ROOT, "config"));
     fs.writeFileSync(path.join(ROOT, "config", "profile.yml"), "name: Ada");
-    expect(buildPortfolioContext(ROOT)).toEqual({ cv: "# My CV", profile: "name: Ada" });
+    fs.mkdirSync(path.join(ROOT, "modes"));
+    fs.writeFileSync(path.join(ROOT, "modes", "_profile.md"), "voice: dry wit");
+    fs.writeFileSync(path.join(ROOT, "coaching_state.md"), "## Storybank\n| ID | Title |\n| S1 | A big win |");
+
+    const ctx = buildPortfolioContext(ROOT);
+    expect(ctx.cv).toBe("# My CV");
+    expect(ctx.extra).toContain("name: Ada");
+    expect(ctx.extra).toContain("voice: dry wit");
+    expect(ctx.extra).toContain("Storybank");
+    expect(ctx.extra).toContain("A big win");
   });
 });
 

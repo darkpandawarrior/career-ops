@@ -8,8 +8,8 @@ export const dynamic = "force-dynamic";
 /** Current per-profile portfolio draft. */
 export async function GET() {
   const root = await requestRoot();
-  const { exists, data, html, versions } = readPortfolio(root);
-  return NextResponse.json({ exists, data, html, versions });
+  const { exists, data, html, versions, final } = readPortfolio(root);
+  return NextResponse.json({ exists, data, html, versions, final });
 }
 
 /** Discard the active profile's draft. */

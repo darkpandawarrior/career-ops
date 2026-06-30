@@ -71,9 +71,10 @@ describe("GET /api/portfolio", () => {
 
     const body = await (await GET()).json();
     expect(body.versions).toEqual([
-      "2026-06-30T00-00-00-000Z.html",
-      "2026-06-01T00-00-00-000Z.html",
+      { stamp: "2026-06-30T00-00-00-000Z", isFinal: false },
+      { stamp: "2026-06-01T00-00-00-000Z", isFinal: false },
     ]);
+    expect(body.final).toBeNull();
   });
 
   it("reflects raw on-disk data.json content (not a re-coerced copy)", async () => {
