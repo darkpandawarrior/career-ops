@@ -212,8 +212,8 @@ export function ConfigForm() {
                   </p>
                 )}
                 <p className="mt-2 text-[11px] leading-relaxed text-faint">
-                  CV parsing, AI job search, evaluation, and apply prefill work with any CLI.
-                  Only <span className="text-muted">agentic form-filling</span> (auto-browser drive) needs Claude Code.
+                  All features — CV parsing, AI job search, evaluation, apply prefill, and agentic
+                  browser drive — work with any installed CLI.
                 </p>
               </div>
             )}
