@@ -212,8 +212,8 @@ export function ConfigForm() {
                   </p>
                 )}
                 <p className="mt-2 text-[11px] leading-relaxed text-faint">
-                  Best on <span className="text-muted">Claude Code</span> (live progress, the agentic apply + AI search,
-                  reliable evaluation persistence). Other CLIs work for the core flows with reduced features.
+                  CV parsing, AI job search, evaluation, and apply prefill work with any CLI.
+                  Only <span className="text-muted">agentic form-filling</span> (auto-browser drive) needs Claude Code.
                 </p>
               </div>
             )}

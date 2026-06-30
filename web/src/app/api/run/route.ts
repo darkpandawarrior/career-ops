@@ -209,11 +209,11 @@ export async function POST(req: Request) {
         if (code && code !== 0 && !sawError) {
           send({ type: "error", msg: "The CLI exited with an error — is it installed and authenticated?" });
         } else if (!emittedText && !sawError) {
-          send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)" });
+          send({ type: "error", msg: "The CLI produced no output — is it installed and authenticated?" });
         } else if (persists && countReports() <= reportsBefore) {
           // The worker ran but never wrote the report/tracker row (e.g. a CLI
           // without file-write authorization) — surface it instead of a fake score.
-          send({ type: "error", msg: "This evaluation didn't save a report, so it's not in your tracker. Full evaluation is verified on Claude Code." });
+          send({ type: "error", msg: "This evaluation ran but didn't save a report — the CLI needs file-write access to persist results (Claude Code and Codex have this by default). Verify it's authenticated and try again." });
         } else {
           send({ type: "done" });
         }

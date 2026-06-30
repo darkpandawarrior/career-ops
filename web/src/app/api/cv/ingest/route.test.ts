@@ -52,13 +52,19 @@ const h = vi.hoisted(() => {
   });
   // resolveCli is mutable per-test: default returns a fake claude resolution.
   const resolveCliMock = vi.fn();
-  return { state, spawnMock, resolveCliMock };
+  // runOnboarding mock — used only for the non-Claude PDF extraction path.
+  const runOnboardingMock = vi.fn();
+  return { state, spawnMock, resolveCliMock, runOnboardingMock };
 });
 
 vi.mock("node:child_process", () => ({ spawn: h.spawnMock }));
 
 vi.mock("@/lib/clis", () => ({
   resolveCli: h.resolveCliMock,
+}));
+
+vi.mock("@/lib/onboarding/run", () => ({
+  runOnboarding: h.runOnboardingMock,
 }));
 
 vi.mock("@/lib/career-ops", () => ({
@@ -179,13 +185,45 @@ describe("POST /api/cv/ingest — multipart branch validation", () => {
     expect(h.spawnMock).not.toHaveBeenCalled();
   });
 
-  it("rejects a PDF upload for a non-Claude cli with a clear 400 message", async () => {
+  it("extracts PDF text locally via the bridge for a non-Claude cli, then spawns CLI with text prompt", async () => {
+    h.resolveCliMock.mockReturnValue(fakeResolved("Gemini CLI", "/fake/bin/gemini"));
+    h.runOnboardingMock.mockResolvedValue({ ok: true, text: "John Doe — Software Engineer" });
+
     const form = new FormData();
     form.set("cliId", "gemini");
     form.set("file", new File([new Uint8Array([1, 2, 3])], "resume.pdf", { type: "application/pdf" }));
     const res = await POST(new Request("http://localhost/api/cv/ingest", { method: "POST", body: form }));
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("PDF upload needs Claude Code — paste your CV text instead.");
+
+    // Bridge was called to extract text (no CLI file access needed).
+    expect(h.runOnboardingMock).toHaveBeenCalledWith(
+      "extract-text",
+      expect.arrayContaining([expect.stringContaining(".pdf")]),
+      {},
+    );
+    // CLI was then spawned with a TEXT_SRC prompt (not a FILE_SRC path).
+    expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
+    expect(h.spawnMock).toHaveBeenCalledTimes(1);
+    const prompt = h.state.spawnArgs.args[1] as string; // gemini: ["exec", prompt]
+    expect(prompt).toContain("pasted as text");
+    expect(prompt).toContain("John Doe — Software Engineer");
+
+    const bodyPromise = readBody(res);
+    h.state.lastChild.stdout.emit("data", Buffer.from("<<cv:start>>\n# CV -- John Doe\n<<cv:end>>"));
+    h.state.lastChild.emit("close");
+    expect(await bodyPromise).toContain("# CV -- John Doe");
+  });
+
+  it("returns 422 when PDF text extraction fails for a non-Claude cli", async () => {
+    h.resolveCliMock.mockReturnValue(fakeResolved("Codex", "/fake/bin/codex"));
+    h.runOnboardingMock.mockResolvedValue({ ok: false, error: "No selectable text found — this PDF may be a scanned image." });
+
+    const form = new FormData();
+    form.set("cliId", "codex");
+    form.set("file", new File([new Uint8Array([1, 2, 3])], "resume.pdf", { type: "application/pdf" }));
+    const res = await POST(new Request("http://localhost/api/cv/ingest", { method: "POST", body: form }));
+
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toBe("No selectable text found — this PDF may be a scanned image.");
     expect(h.spawnMock).not.toHaveBeenCalled();
   });
 });

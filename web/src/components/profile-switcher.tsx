@@ -47,13 +47,10 @@ export function ProfileSwitcher() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  // Single-profile mode → render nothing.
-  if (!profiles || profiles.length === 0) return null;
+  // Still loading → render nothing (avoid flash).
+  if (!profiles) return null;
 
-  // The server (via the x-co-profile header) is the source of truth for "active".
-  const active = profiles.find((p) => p.active) ?? null;
-  const activeSlug = active?.name ?? null;
-
+  // switchTo must be defined before any early return that references it.
   const switchTo = (slug: string | null) => {
     const q = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
     // Explicit empty `profile=` tells middleware to clear the sticky cookie.
@@ -64,6 +61,38 @@ export function ProfileSwitcher() {
     router.refresh(); // force the dynamic server components to re-read the new root
     setOpen(false);
   };
+
+  // No profiles.yml yet (single-profile or fresh clone): show a minimal switcher so
+  // the user can reach "New profile" without needing CLI access.
+  if (profiles.length === 0) {
+    return (
+      <div ref={ref} className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-2 text-sm transition-colors hover:bg-surface-hover"
+        >
+          <UserRound className="size-4 text-muted" />
+          <span className="min-w-0 flex-1 truncate text-left text-muted">Default profile</span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-faint" />
+        </button>
+        {open && (
+          <div className="absolute left-0 right-0 z-40 mt-1 overflow-hidden rounded-md border border-border bg-surface shadow-lg">
+            <CreateProfile
+              onCreated={(slug) => {
+                setProfiles(null);
+                switchTo(slug);
+              }}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // The server (via the x-co-profile header) is the source of truth for "active".
+  const active = profiles.find((p) => p.active) ?? null;
+  const activeSlug = active?.name ?? null;
 
   const dot = (color: string | null) => (
     <span

@@ -5,6 +5,7 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
+import { runOnboarding } from "@/lib/onboarding/run";
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
 // the USER'S OWN CLI headless — the web never ships a heavyweight parser, and the
@@ -76,16 +77,27 @@ export async function POST(req: Request) {
       cliId = String(form.get("cliId") || "");
       const file = form.get("file");
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
-      // Reading a PDF/DOCX from a path needs the CLI's file tool, which only Claude
-      // is granted here. Tell non-Claude users plainly instead of failing opaquely.
-      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
-        return Response.json({ error: "PDF upload needs Claude Code — paste your CV text instead." }, { status: 400 });
-      }
       const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
       tempFile = path.join(dir, `cv${ext}`); // outside the repo, basename-only
       fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII → owner-only
-      promptSource = FILE_SRC(tempFile);
+      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
+        // Non-Claude CLIs can't read arbitrary files via tool calls. Extract the PDF
+        // text locally via pdfjs (zero tokens, same bridge the onboarding flow uses),
+        // then hand the text to the CLI exactly like the paste path.
+        const extraction = await runOnboarding("extract-text", [tempFile, ext], {});
+        cleanupTemp(tempFile);
+        tempFile = null;
+        if (!extraction.ok || !extraction.text) {
+          return Response.json(
+            { error: (extraction.error as string) || "Could not read PDF — paste your CV text instead." },
+            { status: 422 },
+          );
+        }
+        promptSource = TEXT_SRC(extraction.text as string);
+      } else {
+        promptSource = FILE_SRC(tempFile);
+      }
     } else {
       return Response.json({ error: "unsupported content-type" }, { status: 400 });
     }

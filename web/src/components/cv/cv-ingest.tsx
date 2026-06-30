@@ -55,6 +55,12 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
         setPhase("error");
         return;
       }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({})) as { error?: string };
+        setErr(d.error || `Upload failed (${r.status}) — paste your CV text instead.`);
+        setPhase("error");
+        return;
+      }
       if (!r.body) {
         setErr("No response.");
         setPhase("error");
