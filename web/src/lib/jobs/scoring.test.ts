@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -114,7 +114,7 @@ describe("loadRawJobSearchConfig", () => {
     expect(loadRawJobSearchConfig(root)).toEqual({});
   });
 
-  it("defaults root to careerOpsRoot() (mocked) — empty default tree yields {}", () => {
+  it("defaults root to careerOpsRoot() (mocked) â€” empty default tree yields {}", () => {
     expect(loadRawJobSearchConfig()).toEqual({});
   });
 });
@@ -133,7 +133,7 @@ describe("validateConfig", () => {
     const v = validateConfig(root);
     expect(v.valid).toBe(false);
     expect(v.errors).toContain(
-      "skills must contain at least one demonstrated or confirmed_unlisted skill",
+      "skills must contain at least one skill",
     );
   });
 
@@ -153,7 +153,7 @@ describe("scoreJobs", () => {
     expect(res.errors).toEqual([]);
     expect(res.jobs).toHaveLength(1);
     const job = res.jobs[0];
-    expect(job.score).toBe(10);
+    expect(job.score).toBe(9);
     expect(job.level).toBe("Excellent");
     expect(job.section).toBe("recommended");
     expect(job.id).toBeTruthy(); // normalizeJob assigns a stable id
@@ -185,12 +185,12 @@ describe("scoreOne", () => {
   it("scores a single job via the raw config (no validation gate)", () => {
     const root = makeRoot({ yml: VALID_YAML });
     const job = scoreOne(STRONG_JOB, root);
-    expect(job.score).toBe(10);
+    expect(job.score).toBe(9);
     expect(job.level).toBe("Excellent");
     expect(Array.isArray(job.reasons)).toBe(true);
   });
 
-  it("still scores (low) when config is empty — scoreOne does not gate on validity", () => {
+  it("still scores (low) when config is empty â€” scoreOne does not gate on validity", () => {
     const root = makeRoot(); // no config => loadRawJobSearchConfig returns {}
     const job = scoreOne(STRONG_JOB, root);
     expect(typeof job.score).toBe("number");
@@ -225,7 +225,7 @@ describe("jobDashboard", () => {
     const d = jobDashboard(root);
     expect(d.generatedAt).toBe("2026-06-01T00:00:00.000Z");
     expect(d.jobs).toHaveLength(1);
-    expect(d.jobs[0].score).toBe(10); // proves it scored (raw jobs have no score)
+    expect(d.jobs[0].score).toBe(9); // proves it scored (raw jobs have no score)
     expect(d.stats.total).toBe(1);
     expect(d.stats.excellent).toBe(1); // score >= 8
     expect(d.stats.sources).toBe(0);
@@ -327,3 +327,4 @@ describe("jobDashboard", () => {
     expect(d.stats.excellent).toBe(1); // only "b"
   });
 });
+

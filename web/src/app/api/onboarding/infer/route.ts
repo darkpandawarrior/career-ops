@@ -21,5 +21,5 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Paste your resume text first." }, { status: 400 });
   }
   const result = await runOnboarding("infer", [], { text: body.text });
-  return NextResponse.json(result, { status: result.ok ? 200 : 422 });
+  return NextResponse.json({ ...result, text: body.text }, { status: result.ok ? 200 : 422 });
 }

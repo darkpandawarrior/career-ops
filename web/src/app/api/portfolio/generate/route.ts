@@ -54,7 +54,11 @@ export async function POST(req: Request) {
        "--permission-mode", "acceptEdits", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch"]
     : spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot } });
+  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, shell: process.platform === "win32" });
+  if (!isClaude && spec.promptViaStdin) {
+    child.stdin?.write(prompt);
+    child.stdin?.end();
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -114,3 +118,7 @@ export async function POST(req: Request) {
     headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" },
   });
 }
+
+
+
+

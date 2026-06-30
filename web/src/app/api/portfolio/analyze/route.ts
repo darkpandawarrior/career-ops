@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+﻿import { spawn } from "node:child_process";
 import { NextResponse } from "next/server";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     : resolved.spec.args(prompt);
 
   const out = await new Promise<string>((resolve) => {
-    const child = spawn(resolved.binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: root } });
+    const child = spawn(resolved.binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: root }, shell: process.platform === "win32" });
     let buf = "";
     const killer = setTimeout(() => { try { child.kill("SIGTERM"); } catch { /* */ } }, 150_000);
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
@@ -45,6 +45,9 @@ export async function POST(req: Request) {
   });
 
   const analysis = coerceAnalysis(extractPortfolioJson(out));
-  if (!analysis) return NextResponse.json({ error: "couldn't analyze — try again" }, { status: 502 });
+  if (!analysis) return NextResponse.json({ error: "couldn't analyze â€” try again" }, { status: 502 });
   return NextResponse.json({ analysis });
 }
+
+
+

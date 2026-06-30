@@ -103,6 +103,7 @@ function inferFromText(text, extraWarnings = []) {
     diagnostics: extraction.diagnostics,
     warnings: [...extraWarnings, ...(extraction.warnings || [])],
     prefill: toPrefill(inferred),
+    text: extraction.text || text || "",
   };
 }
 
@@ -148,7 +149,7 @@ async function runExtractText(filePath, extension) {
 
 async function runActivate(root, input) {
   if (!root) return { ok: false, error: "activate requires a target root" };
-  const text = String(input.text || "");
+  const text = String(input.text || input.review?.sourceText || "");
   const extraction = structureResume(text);
   const validation = validateReviewDraft(input.review || {});
   if (!validation.valid) return { ok: false, error: "review_invalid", errors: validation.errors };
