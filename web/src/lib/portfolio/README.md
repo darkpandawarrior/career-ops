@@ -14,6 +14,7 @@ Full feature + data-model doc: [`../../../../docs/PORTFOLIO.md`](../../../../doc
 | `context.ts` | per-profile read/write under `.career-ops-web/portfolio/`; versions + `restore`/`finalize`; `buildPortfolioContext()` (the role-agnostic data assembly); `saveLocalCopy()` |
 | `analyze.ts` | analyzer output contract + `coerceAnalysis()` + the analyze prompt |
 | `scaffold.ts` | `PortfolioData` → the full Vite project (reads the bundled `templates/portfolio-site/`, injects a compilable `profile.ts`, a chat persona, and a filled `index.html`) |
+| `import.ts` | the **inverse of scaffold** — `profileModuleToPortfolio(mod)` maps an existing portfolio-site `src/data/profile.ts` export surface back into `PortfolioData`, so a candidate who already has a finalized site can pull it in verbatim (no AI). Used by `POST /api/portfolio/import`. |
 | `zip.ts` | dependency-free STORE-method zip writer (deterministic) |
 
 **Design rules**

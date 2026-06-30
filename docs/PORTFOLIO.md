@@ -91,6 +91,15 @@ cv.md + profile.yml + storybank + reports
   the serializer turns `PortfolioData` into a compilable `src/data/profile.ts`, a
   data-driven chat persona, and a filled `index.html`. `Export project` zips it;
   `Save local copy` writes it under the (gitignored) `.career-ops-web/portfolio/`.
+- **Import** (`import.ts` + `POST /api/portfolio/import`): the inverse of the
+  serializer. A candidate who already maintains a portfolio-site (the same
+  `src/data/profile.ts` export surface this feature emits, e.g. a `cv-*` reference
+  site) can pull it into the dashboard **verbatim — no AI, no tokens, no
+  approximation**. `profileModuleToPortfolio()` maps the module's exports back into
+  `PortfolioData`; the route coerces, snapshots a version, and can `finalize: true`
+  to bookmark it as production in one call (the right move when the imported site is
+  already live). This is the path to "populate from my real site"; generation is for
+  candidates who don't have one yet.
 
 ## 4. Privacy
 

@@ -81,7 +81,7 @@ export function coercePortfolio(raw: unknown): PortfolioData | null {
               : { text: "" },
         )
         .filter((p) => p.text)
-        .slice(0, 8),
+        .slice(0, 12),
     }))
     .filter((e) => e.company || e.role)
     .slice(0, 8);
