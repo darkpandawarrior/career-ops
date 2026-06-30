@@ -39,7 +39,9 @@ export async function collect(): Promise<Diag> {
   }
   let cli = "";
   try {
-    cli = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || "";
+    // Per-profile CLI selection (/api/cli) — diagnostic should reflect the ACTIVE
+    // profile's engine, not a stale global localStorage value.
+    cli = (await (await fetch("/api/cli")).json()).selected || "";
   } catch {
     /* none */
   }

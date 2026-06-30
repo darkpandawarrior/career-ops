@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { addOffersToPipeline } from "@/lib/core/pipeline";
+import { requestRoot } from "@/lib/profile-registry";
 import type { DiscoveredOffer } from "@/lib/explore";
 
 export const runtime = "nodejs";
@@ -18,6 +19,8 @@ export async function POST(req: NextRequest) {
   }
   if (offers.length === 0) return Response.json({ added: 0 });
 
-  const result = await addOffersToPipeline(offers);
+  // Append to the ACTIVE profile's pipeline + scan-history, never the engine root's.
+  const root = await requestRoot();
+  const result = await addOffersToPipeline(offers, root);
   return Response.json(result);
 }

@@ -6,14 +6,6 @@ import { Sparkles, X, Settings } from "lucide-react";
 
 type Doctor = { available: boolean; onboardingNeeded: boolean; missing: string[]; warnings: string[] };
 
-function hasCli(): boolean {
-  try {
-    return !!JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId;
-  } catch {
-    return false;
-  }
-}
-
 const LABELS: Record<string, string> = {
   "cv.md": "your CV",
   "config/profile.yml": "your profile — target roles, comp, location",
@@ -30,11 +22,18 @@ export function OnboardingBanner() {
   const [cli, setCli] = useState(true); // assume until read (avoid CTA flash)
 
   useEffect(() => {
-    setCli(hasCli());
+    let cancelled = false;
+    // CLI selection is per-profile (config/cli.yml via /api/cli) — never the global
+    // localStorage key, which would be wrong/stale when switching profiles.
+    fetch("/api/cli")
+      .then((r) => r.json())
+      .then((c) => { if (!cancelled) setCli(!!c.selected); })
+      .catch(() => {});
     fetch("/api/doctor")
       .then((r) => r.json())
-      .then(setD)
+      .then((data) => { if (!cancelled) setD(data); })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   if (dismissed || !d || !d.onboardingNeeded) return null;

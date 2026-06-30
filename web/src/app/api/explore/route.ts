@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import fs from "node:fs";
 import { runDiscovery } from "@/lib/core/scan";
 import { rootScript } from "@/lib/career-ops";
+import { requestRoot } from "@/lib/profile-registry";
 import { parseExplorePatch, DEFAULT_FILTERS, type DiscoveredOffer, type ScanEvent } from "@/lib/explore";
 
 // Discovery is HTTP-bound across many ATS boards; give it room. It is FREE —
@@ -19,6 +20,8 @@ export async function POST(req: NextRequest) {
   }
 
   const filters = parseExplorePatch(body, DEFAULT_FILTERS);
+  // Scope the scan's data writes (scan-history, pipeline, cache) to the ACTIVE profile.
+  const root = await requestRoot();
 
   // Guard: a data-only checkout (or pre-onboarding) has no scanner. Fail soft.
   if (!fs.existsSync(rootScript("scan-ats-full"))) {
@@ -41,7 +44,7 @@ export async function POST(req: NextRequest) {
       send({ kind: "start", ats: filters.ats, sinceDays: filters.sinceDays, limit: filters.limitPerAts, free: true } satisfies ScanEvent);
       let offers: DiscoveredOffer[] = [];
       try {
-        offers = await runDiscovery(filters, (e: ScanEvent) => send(e));
+        offers = await runDiscovery(filters, (e: ScanEvent) => send(e), root);
       } catch (err) {
         send({ kind: "error", message: err instanceof Error ? err.message : "discovery failed" } satisfies ScanEvent);
       }

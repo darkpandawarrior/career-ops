@@ -37,8 +37,6 @@ export function useJobs() {
   if (!c) throw new Error("useJobs must be used within <JobsProvider>");
   return c;
 }
-
-const CONFIG_KEY = "career-ops:config";
 const JOBS_KEY = "career-ops:jobs";
 
 function parseVerdict(text: string): JobResult {
@@ -91,13 +89,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   const startJob = useCallback(
     (opts: StartOpts): string | null => {
-      let cliId: string | null = null;
-      try {
-        const raw = localStorage.getItem(CONFIG_KEY);
-        cliId = raw ? JSON.parse(raw).cliId || null : null;
-      } catch {
-        cliId = null;
-      }
       const id = `job-${Date.now()}-${seq.current++}`;
       const job: Job = {
         id,
@@ -114,12 +105,23 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       };
       setJobs((js) => [job, ...js]);
 
-      if (!cliId) {
-        patch(id, (j) => ({ ...j, status: "error", endedAt: Date.now(), steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config", ts: Date.now() }] }));
-        return id;
-      }
-
       (async () => {
+        // The CLI that runs this worker is PER-PROFILE (config/cli.yml via /api/cli),
+        // which auto-defaults to the first installed CLI — so workers run without the
+        // user first saving a config. Never the global localStorage key (would be
+        // empty / another profile's choice → the spurious "No CLI configured").
+        let cliId: string | null = null;
+        try {
+          const r = await fetch("/api/cli");
+          if (r.ok) cliId = ((await r.json()).selected as string | null) || null;
+        } catch {
+          cliId = null;
+        }
+        if (!cliId) {
+          patch(id, (j) => ({ ...j, status: "error", endedAt: Date.now(), steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config", ts: Date.now() }] }));
+          return;
+        }
+
         let text = "";
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
         const steps: JobStep[] = [];

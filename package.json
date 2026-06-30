@@ -34,7 +34,7 @@
     "dashboard:web": "node dashboard-web/server.mjs",
     "dashboard:check": "node --test dashboard-web/test/*.test.mjs",
     "dashboard:audit": "node dashboard-web/private-data-audit.mjs",
-    "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps"
+    "postinstall": "npx playwright install chromium --with-deps || echo 'Playwright optional — only needed for browser-based portal scanning. Run: npx playwright install chromium'"
   },
   "keywords": ["ai", "job-search", "claude-code", "opencode", "career", "hiresignal", "career-ops", "careerops", "automation"],
   "author": "Gagandeep Singh",

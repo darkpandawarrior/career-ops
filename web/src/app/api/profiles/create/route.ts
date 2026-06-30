@@ -3,6 +3,7 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { NextResponse } from "next/server";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { isValidSlug, registryPath, readRegistry } from "@/lib/profile-registry";
 
 export const runtime = "nodejs";
@@ -43,7 +44,9 @@ export async function POST(req: Request) {
     };
     if (!reg.profiles.find((p) => p.name === slug)) {
       reg.profiles.push({ name: slug, display_name, root: `profiles/${slug}`, color: b.color || "#0284c7" });
-      fs.writeFileSync(registryPath(), yaml.dump(reg), "utf8");
+      // profiles.yml is the SSOT for every profile — a torn write would orphan them
+      // all. Write atomically (temp + rename) with a backup of the prior registry.
+      atomicWriteWithBackup(registryPath(), yaml.dump(reg));
     }
     return NextResponse.json({ ok: true, slug, url: `/?profile=${slug}` });
   } catch (err) {

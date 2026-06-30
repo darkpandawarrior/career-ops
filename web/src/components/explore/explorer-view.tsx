@@ -6,7 +6,7 @@ import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
-import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
+import { paramsToFilters, paramsToAi, hasExploreParams, type ExploreFilters } from "@/lib/explore";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -44,12 +44,21 @@ export function ExplorerView({
   const [firstRun, setFirstRun] = useState(false);
 
   useEffect(() => {
-    try {
-      const id = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
-      setCli({ id, name: id ? CLI_NAMES[id] || id : undefined });
-    } catch {
-      setCli({ id: null });
-    }
+    // Active profile's CLI (server source of truth, auto-defaults to first installed).
+    let cancelled = false;
+    fetch("/api/cli")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const id = d.selected || null;
+        setCli({ id, name: id ? CLI_NAMES[id] || id : undefined });
+      })
+      .catch(() => {
+        if (!cancelled) setCli({ id: null });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Initialize once from the URL (shareable search) or the server seed — without
@@ -63,7 +72,9 @@ export function ExplorerView({
       setMode("ai");
       setAiIntent(ai);
     } else {
-      initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
+      // Only restore from the URL when it carries REAL filter params — a bare
+      // ?profile=slug must fall through to the server seed (the candidate's roles).
+      initFilters(hasExploreParams(sp) ? paramsToFilters(sp) : seed.filters);
       // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
       // banner (the "matches found from your CV, free" reveal).
       if (sp.get("run") === "1") {

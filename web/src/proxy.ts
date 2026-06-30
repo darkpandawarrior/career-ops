@@ -50,10 +50,16 @@ export function proxy(req: NextRequest) {
 }
 
 export const config = {
-  // Run on app routes + API, skip ALL Next internals (static, image, data, and
-  // the dev HMR WebSocket at _next/webpack-hmr) plus static assets. Excluding the
-  // whole _next/ tree — not just _next/static|_next/image — is what keeps the
-  // proxy off the HMR upgrade request; otherwise it 500s the handshake
-  // (ERR_INVALID_HTTP_RESPONSE) and live-reload silently dies in dev.
+  // Run on app routes + API; skip the whole _next/ tree (static, image, RSC data)
+  // and favicon so we don't resolve a profile for internal assets. This is a perf/
+  // correctness nicety only.
+  //
+  // NOTE: this matcher has NOTHING to do with the dev HMR WebSocket. In Next 16 the
+  // HMR upgrade (_next/webpack-hmr) is handled in the server's `upgrade` event and is
+  // routed straight to the hot-reloader before the proxy/middleware pipeline ever runs
+  // — `config.matcher` is never consulted for it. If HMR fails the handshake with
+  // ERR_INVALID_HTTP_RESPONSE, the cause is Next's cross-origin dev guard rejecting the
+  // origin (e.g. loading via 127.0.0.1), not this proxy. The fix lives in
+  // `next.config.mjs` (allowedDevOrigins), not here.
   matcher: ["/((?!_next/|favicon.ico).*)"],
 };

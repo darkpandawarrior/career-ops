@@ -53,7 +53,11 @@ function parseOfferLine(source: string, date: string, rest: string): Omit<Discov
   };
 }
 
-export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) => void): Promise<DiscoveredOffer[]> {
+export function runDiscovery(
+  filters: ExploreFilters,
+  onEvent: (e: ScanEvent) => void,
+  root: string = careerOpsRoot(),
+): Promise<DiscoveredOffer[]> {
   return new Promise((resolve) => {
     const tempPortals = writeTempPortals(filters);
     const ats = (filters.ats.length ? filters.ats : [...ATS_SOURCES]).filter((a) => (ATS_SOURCES as readonly string[]).includes(a));
@@ -68,9 +72,12 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       String(Math.max(1, filters.limitPerAts || 150)),
     ];
 
+    // cwd stays the engine root (where scan-ats-full.mjs + deps live); CAREER_OPS_ROOT
+    // points the script's DATA reads/writes at the active profile, and CAREER_OPS_PORTALS
+    // feeds it the ephemeral per-search filter — mirrors dashboard-web/server.mjs profileEnv.
     const child = spawn(process.execPath, args, {
       cwd: careerOpsRoot(),
-      env: { ...process.env, CAREER_OPS_PORTALS: tempPortals },
+      env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_PORTALS: tempPortals },
     });
 
     const offers: DiscoveredOffer[] = [];

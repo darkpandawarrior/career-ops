@@ -15,13 +15,13 @@ const PROFILE_HEADER = "x-co-profile";
  * the engine root, exactly like the legacy `dashboard-web/server.mjs`).
  *
  *   profiles:
- *     - name: siddharth
- *       display_name: Siddharth Pandalai
- *       root: profiles/siddharth        # relative to careerOpsRoot()
+ *     - name: alex
+ *       display_name: Alex Doe
+ *       root: profiles/alex        # relative to careerOpsRoot()
  *       color: "#0284c7"
- *     - name: lakshita
- *       display_name: Lakshita
- *       root: profiles/lakshita
+ *     - name: jordan
+ *       display_name: Jordan
+ *       root: profiles/jordan
  *
  * Backwards-compatible: when no registry exists (or a request carries no/invalid
  * `?profile`), callers fall back to the single-profile `careerOpsRoot()`.

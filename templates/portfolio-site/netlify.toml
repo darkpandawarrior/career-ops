@@ -1,0 +1,7 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+# The AI chat runs as a Netlify Function. Set an API key (GROQ/GEMINI/ANTHROPIC) in
+# Site settings → Environment variables for the chat; without one it shows a contact fallback.
+[functions]
+  directory = "api"

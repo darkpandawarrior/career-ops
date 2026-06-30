@@ -267,9 +267,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     if (runningRef.current) return;
     const intent = aiIntentRef.current.trim();
     if (!intent) return;
+    // Active profile's CLI from the server (auto-defaults to first installed),
+    // so AI search is gated per-profile — not on a global localStorage key.
     let cliId: string | null = null;
     try {
-      cliId = JSON.parse(localStorage.getItem("career-ops:config") || "{}").cliId || null;
+      const r = await fetch("/api/cli");
+      if (r.ok) cliId = ((await r.json()).selected as string | null) || null;
     } catch {
       cliId = null;
     }

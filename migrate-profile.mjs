@@ -12,9 +12,9 @@
  * (relative to the engine root), so one checkout can host several candidates:
  *
  *   profiles:
- *     - name: siddharth
- *       display_name: Siddharth Pandalai
- *       root: profiles/siddharth        # relative to the data root
+ *     - name: alex
+ *       display_name: Alex Doe
+ *       root: profiles/alex        # relative to the data root
  *       color: "#0284c7"
  *
  * This tool copies (default) or moves a single-profile install's USER-LAYER
@@ -27,8 +27,8 @@
  *   node migrate-profile.mjs <slug> --display-name "Full Name" \
  *        [--color "#dd7627"] [--root <dataRoot>] [--dry-run] [--move] [--force]
  *
- *   node migrate-profile.mjs siddharth --display-name "Siddharth Pandalai" --dry-run
- *   node migrate-profile.mjs siddharth --display-name "Siddharth Pandalai" --color "#0284c7"
+ *   node migrate-profile.mjs alex --display-name "Alex Doe" --dry-run
+ *   node migrate-profile.mjs alex --display-name "Alex Doe" --color "#0284c7"
  *
  * `<slug>` must match ^[a-z0-9_-]+$ (the same allowlist the dashboard enforces).
  * Default data root = process.env.CAREER_OPS_ROOT || process.cwd().
