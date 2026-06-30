@@ -45,45 +45,6 @@ function AutoVideo({ src, caption }: { src: string; caption: string }) {
   );
 }
 
-/** Renders a Mermaid diagram, dark-themed. mermaid is dynamically imported so
- *  it stays out of the main bundle (loads only on project detail pages). */
-function Mermaid({ code, id, accent = "#3ddc84", card = "#10231a" }: { code: string; id: string; accent?: string; card?: string }) {
-  const [svg, setSvg] = useState("");
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "loose",
-          theme: "base",
-          flowchart: { htmlLabels: true, curve: "basis", padding: 12 },
-          themeVariables: {
-            fontFamily: "Inter, system-ui, sans-serif",
-            background: "#171e1a",
-            primaryColor: card,
-            primaryBorderColor: accent,
-            primaryTextColor: "#e8efe9",
-            lineColor: accent,
-            secondaryColor: "#0f1512",
-            tertiaryColor: "#0f1512",
-            clusterBkg: "#0f1512",
-            clusterBorder: "#243029",
-          },
-        });
-        const { svg } = await mermaid.render(id, code);
-        if (alive) setSvg(svg);
-      } catch {
-        /* ignore render errors — diagram simply won't show */
-      }
-    })();
-    return () => { alive = false; };
-  }, [code, id, accent, card]);
-  if (!svg) return null;
-  return <div className="mermaid-wrap flex justify-center overflow-x-auto" dangerouslySetInnerHTML={{ __html: svg }} />;
-}
-
 export function ProjectDetail({ slug }: { slug: string }) {
   const project = projects.find((p) => p.slug === slug);
   // Prefer a curated, captioned set; fall back to the auto-generated gallery.
@@ -253,23 +214,10 @@ export function ProjectDetail({ slug }: { slug: string }) {
         </section>
       )}
 
-      {/* Architecture diagrams (Mermaid) */}
-      {d?.diagrams && d.diagrams.length > 0 && (
-        <section className="border-t border-line">
-          <div className="mx-auto max-w-5xl px-6 py-14">
-            <h2 className="reveal font-display mb-8 text-sm font-semibold uppercase tracking-widest text-accent/60">
-              How it's built
-            </h2>
-            <div className="grid gap-6 lg:grid-cols-2">
-              {d.diagrams.map((dg, i) => (
-                <div key={dg.title} className="reveal rounded-2xl border border-line bg-card p-5">
-                  <h3 className="mb-4 text-sm font-semibold text-zinc-200">{dg.title}</h3>
-                  <Mermaid code={dg.code} id={`mmd-${slug}-${i}`} accent={t?.accent} card={t?.card} />
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+      {/* Architecture diagrams removed from the generic template to keep exports
+          light (no mermaid/katex/cytoscape). Add them back per-project if needed. */}
+      {false && (
+        <section />
       )}
 
       {/* Tech stack */}

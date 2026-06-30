@@ -18,6 +18,9 @@ export type CaseStudy = {
 };
 export type SkillGroup = { group: string; items: string[] };
 export type Education = { school: string; degree: string; period: string };
+// A generic project/work item — role-neutral (an engineer's repo, a designer's
+// case, a marketer's campaign, a researcher's paper all fit).
+export type Project = { name: string; description: string; link?: string; tags?: string[] };
 
 export type PortfolioData = {
   name: string;
@@ -27,15 +30,18 @@ export type PortfolioData = {
   email?: string;
   github?: string;
   linkedin?: string;
+  website?: string;
   intro?: string;
   summary?: string;
   metrics?: Metric[];
   competencies?: string[];
   experience?: Experience[];
   caseStudies?: CaseStudy[];
+  projects?: Project[];
   skills?: SkillGroup[];
   education?: Education;
   availability?: string;
+  theme?: string;
 };
 
 const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
@@ -101,6 +107,12 @@ export function coercePortfolio(raw: unknown): PortfolioData | null {
     .filter((s) => s.group && s.items.length)
     .slice(0, 8);
 
+  const projects: Project[] = arr(r.projects)
+    .map((p) => (p && typeof p === "object" ? (p as Record<string, unknown>) : {}))
+    .map((p) => ({ name: str(p.name), description: str(p.description), link: str(p.link) || undefined, tags: strList(p.tags).slice(0, 6) }))
+    .filter((p) => p.name && p.description)
+    .slice(0, 8);
+
   const edu = r.education && typeof r.education === "object" ? (r.education as Record<string, unknown>) : null;
   const education =
     edu && (str(edu.school) || str(edu.degree))
@@ -115,14 +127,17 @@ export function coercePortfolio(raw: unknown): PortfolioData | null {
     email: str(r.email) || undefined,
     github: str(r.github) || undefined,
     linkedin: str(r.linkedin) || undefined,
+    website: str(r.website) || undefined,
     intro: str(r.intro) || undefined,
     summary: str(r.summary) || undefined,
     education,
     availability: str(r.availability) || undefined,
+    theme: str(r.theme) || undefined,
     competencies: strList(r.competencies).slice(0, 12),
     metrics,
     experience,
     caseStudies,
+    projects,
     skills,
   };
 }

@@ -30,7 +30,7 @@ export function serializeDataBlock(d: PortfolioData): string {
     phone: "",
     github: d.github ?? "",
     linkedin: d.linkedin ?? "",
-    portfolio: "",
+    portfolio: d.website ?? "",
     availability: d.availability ?? "",
     intro: d.intro ?? "",
     summary: d.summary ?? d.intro ?? "",
@@ -50,6 +50,19 @@ export function serializeDataBlock(d: PortfolioData): string {
     tags: c.tags ?? [],
   }));
   const skills = d.skills ?? [];
+  // Map our generic Project (name/description/link/tags) onto the template's richer
+  // Project interface so the exported Vite app's Projects section renders too.
+  const projects = (d.projects ?? []).map((p) => ({
+    slug: slug(p.name),
+    name: p.name,
+    tagline: p.description,
+    description: p.description,
+    stack: p.tags ?? [],
+    highlights: [] as string[],
+    links: p.link ? [{ label: "View", url: p.link }] : [],
+    status: "",
+    badges: [] as string[],
+  }));
   const j = (v: unknown) => JSON.stringify(v, null, 2);
   return [
     `export const profile = ${j(profile)};`,
@@ -61,7 +74,7 @@ export function serializeDataBlock(d: PortfolioData): string {
     `export const languages: string[] = [];`,
     `export const skills: { group: string; items: string[] }[] = ${j(skills)};`,
     `export const resumeSkills: { group: string; items: string[] }[] = ${j(skills)};`,
-    `export const projects: Project[] = [];`,
+    `export const projects: Project[] = ${j(projects)};`,
     `export const openSource: Contribution[] = [];`,
     `export const recentGrowth: GrowthItem[] = [];`,
   ].join("\n\n");

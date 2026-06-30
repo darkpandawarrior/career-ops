@@ -16,5 +16,13 @@ chat runs as a serverless function (`api/chat.ts`) — deploy to Vercel/Netlify 
 to work; on a static host (GitHub Pages) point `VITE_CHAT_API_URL` at a deployed
 function.
 
-**Deploy:** `dist/` is a static site (Netlify Drop / GitHub Pages / any host). For the
+
+## One-click deploy
+
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new)
+
+`netlify.toml` and `vercel.json` are included (build → `dist`, the chat as a function). Set an API key in the host's env vars for the AI chat.
+
+**Static deploy:** `dist/` is a static site (Netlify Drop / GitHub Pages / any host). For the
 chat, deploy the whole project to Vercel (`vercel deploy`) or Netlify.

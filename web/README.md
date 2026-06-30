@@ -32,11 +32,19 @@ of `web/`). Override with `CAREER_OPS_ROOT=/path/to/checkout` to point at a sepa
 
 ## Architecture notes
 
-- **Multi-profile.** `?profile=<slug>` → `src/proxy.ts` sets the `x-co-profile`
-  header → `src/lib/profile-registry.ts requestRoot()` resolves the active
-  candidate's data root. Every server page and API route threads that root into the
-  synchronous readers in `src/lib/career-ops.ts`. A route that forgets to pass the
-  root silently reads the engine root — the bug class the test suite guards against.
+- **Multi-profile + role-adaptive.** `?profile=<slug>` → `src/proxy.ts` sets the
+  `x-co-profile` header → `src/lib/profile-registry.ts requestRoot()` resolves the
+  active candidate's data root. Every server page and API route threads that root
+  into the synchronous readers in `src/lib/career-ops.ts`. A route that forgets to
+  pass the root silently reads the engine root — the bug class the test suite guards
+  against. The dashboard is designed to "transform for any role or user": features
+  read a fixed, layered, tolerant data contract (cv.md, profile.yml, storybank,
+  reports, pipeline) and adapt to whatever that person's field produces — see
+  [`../docs/PORTFOLIO.md`](../docs/PORTFOLIO.md) §1 (the meta structure).
+- **Portfolio generator** (`src/lib/portfolio/`, `/portfolio`). Generates a personal
+  portfolio website from the CV for any role — preview, refine, theme, version,
+  analyze, and export (single HTML or the full Vite project with an AI chat). See
+  [`src/lib/portfolio/README.md`](src/lib/portfolio/README.md).
 - **Per-profile AI CLI.** `GET/POST /api/cli` ↔ `<root>/config/cli.yml` (auto-defaults
   to the first installed CLI). The assistant, AI search, CV parsing, and the
   Evaluate/Apply workers all resolve their engine from here — never a global

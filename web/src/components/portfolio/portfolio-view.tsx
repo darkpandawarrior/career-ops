@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Sparkles, Download, RotateCcw, Trash2, Loader2, Wand2, Settings, FileText, History, Star, ClipboardCheck, ArrowRight, Package, FolderDown, BadgeCheck } from "lucide-react";
+import { Sparkles, Download, RotateCcw, Trash2, Loader2, Wand2, Settings, FileText, History, Star, ClipboardCheck, ArrowRight, Package, FolderDown, BadgeCheck, Palette } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { themeOptions } from "@/lib/portfolio/themes";
 import { PreviewFrame } from "./preview-frame";
 
 type Phase = "empty" | "generating" | "preview" | "error";
@@ -27,6 +28,7 @@ export function PortfolioView({ hasCv, initialHtml, initialExists, production = 
   const [instruction, setInstruction] = useState("");
   const [cliId, setCliId] = useState<string | null>(null);
   const [savedPath, setSavedPath] = useState("");
+  const [theme, setTheme] = useState("midnight");
   // The page may open on a marked production version; that's the default view.
   const [showingProduction, setShowingProduction] = useState(!!production);
   const busy = phase === "generating";
@@ -37,12 +39,19 @@ export function PortfolioView({ hasCv, initialHtml, initialExists, production = 
     setSavedPath(r?.path || "save failed");
   }
 
+  async function applyTheme(next: string) {
+    setTheme(next);
+    const r = await fetch("/api/portfolio/theme", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: next }) }).then((x) => x.json()).catch(() => null);
+    if (r?.html) setHtml(r.html);
+  }
+
   const loadState = useCallback(async () => {
     try {
       const d = await (await fetch("/api/portfolio")).json();
       setData(d.data ?? null);
       setVersions(d.versions ?? []);
       setFinal(d.final ?? null);
+      if (d.data?.theme) setTheme(d.data.theme);
     } catch { /* ignore */ }
   }, []);
 
@@ -168,6 +177,13 @@ export function PortfolioView({ hasCv, initialHtml, initialExists, production = 
             <button type="button" onClick={() => setShowVersions((v) => !v)} className="btn-ghost"><History className="size-4" /> Versions{versions.length ? ` (${versions.length})` : ""}</button>
             <button type="button" onClick={() => run({})} className="btn-ghost"><RotateCcw className="size-4" /> {showingProduction ? "Generate fresh" : "Regenerate"}</button>
             <button type="button" onClick={discard} className="btn-ghost text-red-400"><Trash2 className="size-4" /> Discard</button>
+            <label className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/50 px-3 py-1.5 text-sm">
+              <Palette className="size-4 text-brand" />
+              <span className="sr-only">Theme</span>
+              <select value={theme} onChange={(e) => applyTheme(e.target.value)} aria-label="Portfolio theme" className="bg-transparent text-sm outline-none">
+                {themeOptions().map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+              </select>
+            </label>
           </div>
           {savedPath && <p className="rounded-lg border border-border bg-surface/40 px-3 py-2 text-xs text-muted">Local project copy: <span className="font-mono text-foreground">{savedPath}</span> — <span className="text-faint">cd there, then <span className="font-mono">npm install &amp;&amp; npm run dev</span></span></p>}
 
