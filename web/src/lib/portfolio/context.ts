@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { renderPortfolio } from "./render";
+import { buildProjectFiles } from "./scaffold";
 import type { PortfolioData } from "./schema";
 
 // Per-profile portfolio drafts live under the web-managed (gitignored) dir, so a
@@ -78,6 +79,19 @@ export function writePortfolio(
   return { html };
 }
 
+/** Read a version's data + rendered html WITHOUT mutating the current draft (for
+ *  display, e.g. showing the marked production version by default). Null if unknown. */
+export function readVersion(stamp: string, root: string = careerOpsRoot()): { html: string; data: PortfolioData } | null {
+  const raw = safeRead(path.join(portfolioDir(root), "versions", `${stamp}.json`));
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw) as PortfolioData;
+    return { html: renderPortfolio(data), data };
+  } catch {
+    return null;
+  }
+}
+
 /** Make a past version the current draft (re-renders html). Does NOT snapshot a new
  *  version — restoring is navigation, not a new edit. Returns null if unknown. */
 export function restoreVersion(stamp: string, root: string = careerOpsRoot()): { html: string; data: PortfolioData } | null {
@@ -112,6 +126,19 @@ export function finalizeVersion(stamp: string, root: string = careerOpsRoot()): 
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, FINAL), stamp, "utf8");
   return true;
+}
+
+/** Write a local, editable copy of the FULL Vite project (template + this
+ *  candidate's data) under the profile's portfolio dir. Returns the path. */
+export function saveLocalCopy(data: PortfolioData, root: string = careerOpsRoot()): string {
+  const dir = path.join(portfolioDir(root), "site");
+  fs.rmSync(dir, { recursive: true, force: true }); // replace any prior copy
+  for (const f of buildProjectFiles(data)) {
+    const p = path.join(dir, f.name);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, f.content, "utf8");
+  }
+  return dir;
 }
 
 /** Discard the current draft (and versions). */

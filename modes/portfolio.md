@@ -26,6 +26,8 @@ that matters. Shape:
   "github": "https://github.com/handle",
   "linkedin": "https://linkedin.com/in/handle",
   "intro": "2–3 sentence first-person blurb for the hero. Concrete, not buzzwordy.",
+  "summary": "An ATS-friendly professional summary (keyword-dense, for the résumé view).",
+  "education": { "school": "University", "degree": "B.Tech, CS", "period": "2017 — 2021" },
   "availability": "One line: notice period + remote/location preference.",
   "metrics": [ { "value": "50k+", "label": "monthly active users", "detail": "short context" } ],
   "competencies": ["Top skill", "Another", "..."],

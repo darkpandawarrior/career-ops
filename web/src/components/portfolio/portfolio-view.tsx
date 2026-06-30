@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Sparkles, Download, RotateCcw, Trash2, Loader2, Wand2, Settings, FileText, History, Star, ClipboardCheck, ArrowRight } from "lucide-react";
+import { Sparkles, Download, RotateCcw, Trash2, Loader2, Wand2, Settings, FileText, History, Star, ClipboardCheck, ArrowRight, Package, FolderDown, BadgeCheck } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { PreviewFrame } from "./preview-frame";
 
@@ -13,7 +13,7 @@ type Analysis = { score?: number; strengths: string[]; gaps: string[]; suggestio
 
 const fmtStamp = (s: string) => s.replace(/T/, " ").replace(/-/g, (m, i) => (i < 10 ? "-" : ":")).replace(/Z$/, "").slice(0, 16);
 
-export function PortfolioView({ hasCv, initialHtml, initialExists }: { hasCv: boolean; initialHtml: string; initialExists: boolean }) {
+export function PortfolioView({ hasCv, initialHtml, initialExists, production = null }: { hasCv: boolean; initialHtml: string; initialExists: boolean; production?: string | null }) {
   const [phase, setPhase] = useState<Phase>(initialExists ? "preview" : "empty");
   const [html, setHtml] = useState(initialHtml);
   const [data, setData] = useState<unknown>(null);
@@ -26,7 +26,16 @@ export function PortfolioView({ hasCv, initialHtml, initialExists }: { hasCv: bo
   const [error, setError] = useState("");
   const [instruction, setInstruction] = useState("");
   const [cliId, setCliId] = useState<string | null>(null);
+  const [savedPath, setSavedPath] = useState("");
+  // The page may open on a marked production version; that's the default view.
+  const [showingProduction, setShowingProduction] = useState(!!production);
   const busy = phase === "generating";
+
+  async function saveLocal() {
+    setSavedPath("…");
+    const r = await fetch("/api/portfolio/save-local", { method: "POST" }).then((x) => x.json()).catch(() => null);
+    setSavedPath(r?.path || "save failed");
+  }
 
   const loadState = useCallback(async () => {
     try {
@@ -77,6 +86,7 @@ export function PortfolioView({ hasCv, initialHtml, initialExists }: { hasCv: bo
             setHtml(evt.html);
             setData(evt.data ?? null);
             setInstruction("");
+            setShowingProduction(false); // now viewing a fresh draft, not the production version
             setPhase("preview");
             void loadState();
           } else if (evt.kind === "error") {
@@ -142,13 +152,24 @@ export function PortfolioView({ hasCv, initialHtml, initialExists }: { hasCv: bo
 
       {phase === "preview" && (
         <div className="flex flex-col gap-4">
+          {showingProduction && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-brand/30 bg-brand-soft/40 px-3 py-2 text-sm">
+              <BadgeCheck className="size-4 text-brand" />
+              <span className="font-medium">Showing your production version</span>
+              <span className="text-faint">{production ? fmtStamp(production) : ""}</span>
+              <span className="ml-auto text-xs text-muted">Generate fresh or refine below — your production version is kept until you change it.</span>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
-            <a href="/api/portfolio/export" className="btn-primary"><Download className="size-4" /> Export ZIP</a>
+            <a href="/api/portfolio/export?format=project" className="btn-primary"><Package className="size-4" /> Export project</a>
+            <a href="/api/portfolio/export" className="btn-ghost"><Download className="size-4" /> HTML only</a>
+            <button type="button" onClick={saveLocal} className="btn-ghost"><FolderDown className="size-4" /> Save local copy</button>
             <button type="button" onClick={analyze} disabled={analyzing} className="btn-ghost disabled:opacity-50">{analyzing ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />} Analyze</button>
             <button type="button" onClick={() => setShowVersions((v) => !v)} className="btn-ghost"><History className="size-4" /> Versions{versions.length ? ` (${versions.length})` : ""}</button>
-            <button type="button" onClick={() => run({})} className="btn-ghost"><RotateCcw className="size-4" /> Regenerate</button>
+            <button type="button" onClick={() => run({})} className="btn-ghost"><RotateCcw className="size-4" /> {showingProduction ? "Generate fresh" : "Regenerate"}</button>
             <button type="button" onClick={discard} className="btn-ghost text-red-400"><Trash2 className="size-4" /> Discard</button>
           </div>
+          {savedPath && <p className="rounded-lg border border-border bg-surface/40 px-3 py-2 text-xs text-muted">Local project copy: <span className="font-mono text-foreground">{savedPath}</span> — <span className="text-faint">cd there, then <span className="font-mono">npm install &amp;&amp; npm run dev</span></span></p>}
 
           {showVersions && versions.length > 0 && (
             <div className="rounded-xl border border-border bg-surface/40 p-3">

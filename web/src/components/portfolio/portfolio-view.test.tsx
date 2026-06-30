@@ -67,7 +67,7 @@ describe("PortfolioView — gating states", () => {
 });
 
 describe("PortfolioView — generate → preview flow", () => {
-  it("streams generate, then shows the preview iframe and Export ZIP", async () => {
+  it("streams generate, then shows the preview iframe and export controls", async () => {
     const { fetchMock, calls } = stubFetch({
       selected: "claude",
       generate: [{ kind: "done", html: "<x>HELLO</x>", data: { name: "A" } }],
@@ -83,7 +83,7 @@ describe("PortfolioView — generate → preview flow", () => {
     fireEvent.click(cta);
 
     // The preview action bar appears once the stream's done line is parsed.
-    expect(await screen.findByText("Export ZIP")).toBeTruthy();
+    expect(await screen.findByText("Export project")).toBeTruthy();
 
     // The generate endpoint was POSTed with the resolved cliId.
     const gen = calls.find((c) => c.url === "/api/portfolio/generate");
@@ -99,9 +99,9 @@ describe("PortfolioView — generate → preview flow", () => {
       expect(iframe!.getAttribute("sandbox")).toBe("");
     });
 
-    // Export ZIP links to the export route.
-    const exportLink = screen.getByText("Export ZIP").closest("a");
-    expect(exportLink?.getAttribute("href")).toBe("/api/portfolio/export");
+    // Export project links to the full-project export route.
+    const exportLink = screen.getByText("Export project").closest("a");
+    expect(exportLink?.getAttribute("href")).toContain("/api/portfolio/export");
 
     expect(fetchMock).toHaveBeenCalledWith("/api/cli");
   });
@@ -120,7 +120,7 @@ describe("PortfolioView — generate → preview flow", () => {
     fireEvent.click(cta);
 
     // Lands on preview after the done line.
-    expect(await screen.findByText("Export ZIP")).toBeTruthy();
+    expect(await screen.findByText("Export project")).toBeTruthy();
   });
 
   it("shows the error state when generate responds not-ok", async () => {
@@ -142,7 +142,7 @@ describe("PortfolioView — existing draft", () => {
       <PortfolioView hasCv={true} initialHtml="<x>SAVED</x>" initialExists={true} />,
     );
 
-    expect(await screen.findByText("Export ZIP")).toBeTruthy();
+    expect(await screen.findByText("Export project")).toBeTruthy();
     const iframe = container.querySelector("iframe")!;
     expect(iframe.getAttribute("srcdoc")).toBe("<x>SAVED</x>");
   });

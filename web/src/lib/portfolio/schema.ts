@@ -17,6 +17,7 @@ export type CaseStudy = {
   tags?: string[];
 };
 export type SkillGroup = { group: string; items: string[] };
+export type Education = { school: string; degree: string; period: string };
 
 export type PortfolioData = {
   name: string;
@@ -27,11 +28,13 @@ export type PortfolioData = {
   github?: string;
   linkedin?: string;
   intro?: string;
+  summary?: string;
   metrics?: Metric[];
   competencies?: string[];
   experience?: Experience[];
   caseStudies?: CaseStudy[];
   skills?: SkillGroup[];
+  education?: Education;
   availability?: string;
 };
 
@@ -98,6 +101,12 @@ export function coercePortfolio(raw: unknown): PortfolioData | null {
     .filter((s) => s.group && s.items.length)
     .slice(0, 8);
 
+  const edu = r.education && typeof r.education === "object" ? (r.education as Record<string, unknown>) : null;
+  const education =
+    edu && (str(edu.school) || str(edu.degree))
+      ? { school: str(edu.school), degree: str(edu.degree), period: str(edu.period) }
+      : undefined;
+
   return {
     name,
     title: str(r.title),
@@ -107,6 +116,8 @@ export function coercePortfolio(raw: unknown): PortfolioData | null {
     github: str(r.github) || undefined,
     linkedin: str(r.linkedin) || undefined,
     intro: str(r.intro) || undefined,
+    summary: str(r.summary) || undefined,
+    education,
     availability: str(r.availability) || undefined,
     competencies: strList(r.competencies).slice(0, 12),
     metrics,

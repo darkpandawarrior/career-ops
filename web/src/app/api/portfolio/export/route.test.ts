@@ -30,10 +30,24 @@ afterAll(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 describe("GET /api/portfolio/export — no draft", () => {
   it("returns 400 with an explanatory error when nothing has been generated", async () => {
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/portfolio/export"));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toMatch(/no portfolio to export/i);
+  });
+});
+
+describe("GET /api/portfolio/export?format=project — full Vite project", () => {
+  it("returns a zip with the bundled project files + the candidate's data (no node_modules)", async () => {
+    writePortfolio(sampleData(), ROOT);
+    const res = await GET(new Request("http://x/api/portfolio/export?format=project"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Disposition")).toContain("portfolio-site.zip");
+    const txt = new TextDecoder().decode(new Uint8Array(await res.arrayBuffer()));
+    expect(txt).toContain("package.json");
+    expect(txt).toContain("src/App.tsx");
+    expect(txt).toContain("api/chat.ts");
+    expect(txt).toContain("Ada Lovelace");
   });
 });
 
@@ -43,7 +57,7 @@ describe("GET /api/portfolio/export — with a draft", () => {
   });
 
   it("returns a ZIP with the correct content-type and attachment disposition", async () => {
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/portfolio/export"));
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/zip");
     expect(res.headers.get("Content-Disposition")).toBe('attachment; filename="portfolio.zip"');
@@ -51,7 +65,7 @@ describe("GET /api/portfolio/export — with a draft", () => {
   });
 
   it("emits real ZIP bytes (local-file-header magic PK\\x03\\x04 + EOCD signature)", async () => {
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/portfolio/export"));
     const bytes = new Uint8Array(await res.arrayBuffer());
     // Local file header signature at the very start of the archive.
     expect(bytes.length).toBeGreaterThan(22);
@@ -62,7 +76,7 @@ describe("GET /api/portfolio/export — with a draft", () => {
   });
 
   it("packs both entries: index.html (the rendered draft) and README-deploy.md", async () => {
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/portfolio/export"));
     const text = Buffer.from(await res.arrayBuffer()).toString("latin1");
     // STORE method stores filenames + raw content verbatim; assert both are present.
     expect(text).toContain("index.html");
@@ -72,7 +86,7 @@ describe("GET /api/portfolio/export — with a draft", () => {
   });
 
   it("records both entries in the EOCD total-entries field", async () => {
-    const res = await GET();
+    const res = await GET(new Request("http://x/api/portfolio/export"));
     const bytes = new Uint8Array(await res.arrayBuffer());
     const view = new DataView(bytes.buffer, bytes.byteLength - 22, 22);
     // Offset 10 in the EOCD record = total number of central-directory entries.
