@@ -1,0 +1,42 @@
+language: en-US
+early_access: false
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!data/**"
+    - "!output/**"
+    - "!reports/**"
+    - "!batch/logs/**"
+    - "!jds/**"
+    - "!interview-prep/**"
+    - "!writing-samples/**"
+    - "!**/*.pdf"
+    - "!**/node_modules/**"
+    - "!web/.next/**"
+  path_instructions:
+    - path: "*.mjs"
+      instructions: >
+        This is a local-first Node.js career-automation script. Flag any code that
+        would write real candidate PII into a file not covered by .gitignore's
+        User Layer, per DATA_CONTRACT.md.
+    - path: "web/**"
+      instructions: >
+        Next.js dashboard for career-ops. Review for React/Next best practices
+        and check that personal data fetched from the data/ layer is not leaked
+        to client bundles.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: auto
