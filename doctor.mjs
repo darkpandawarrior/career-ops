@@ -6,7 +6,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
@@ -14,8 +14,14 @@ import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mj
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const targetIdx = argv.indexOf('--target');
+// Falls back to CAREER_OPS_ROOT (same pattern as scan.mjs's _SCAN_DATA_ROOT) so
+// a spawned `doctor.mjs --json` scoped to a non-default profile (web's
+// /api/doctor sets this, never --target) checks THAT profile's prerequisites
+// instead of silently falling through to the engine root's own files.
 const projectRoot =
-  targetIdx !== -1 && argv[targetIdx + 1] ? argv[targetIdx + 1] : __dirname;
+  targetIdx !== -1 && argv[targetIdx + 1]
+    ? argv[targetIdx + 1]
+    : process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : __dirname;
 const JSON_OUT = argv.includes('--json');
 // --strict adds a live ATS-slug probe of portals.yml (network). Opt-in so the
 // default `npm run doctor` stays fast and fully offline.
