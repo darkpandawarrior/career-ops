@@ -12,16 +12,18 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname, relative, sep } from 'path';
+import { join, dirname, relative, sep, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
+import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
-const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
+const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
+  ? join(DATA_ROOT, 'data/applications.md')
+  : join(DATA_ROOT, 'applications.md');
+const FOLLOWUPS_FILE = join(DATA_ROOT, 'data/follow-ups.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 
 // --- CLI args ---
@@ -139,18 +141,12 @@ export function addDays(date, days) {
 function parseTracker() {
   if (!existsSync(APPS_FILE)) return [];
   const content = readFileSync(APPS_FILE, 'utf-8');
+  const lines = content.split('\n');
+  const colmap = resolveColumns(lines);
   const entries = [];
-  for (const line of content.split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map(s => s.trim());
-    if (parts.length < 9) continue;
-    const num = parseInt(parts[1]);
-    if (isNaN(num)) continue;
-    entries.push({
-      num, date: parts[2], company: parts[3], role: parts[4],
-      score: parts[5], status: parts[6], pdf: parts[7], report: parts[8],
-      notes: parts[9] || '',
-    });
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (row) entries.push(row);
   }
   return entries;
 }

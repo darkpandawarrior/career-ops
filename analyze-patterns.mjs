@@ -13,15 +13,17 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
+import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
-const REPORTS_DIR = join(CAREER_OPS, 'reports');
+const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
+  ? join(DATA_ROOT, 'data/applications.md')
+  : join(DATA_ROOT, 'applications.md');
+const REPORTS_DIR = join(DATA_ROOT, 'reports');
 
 const MACHINE_SUMMARY_FIELDS = new Set([
   'company',
@@ -153,18 +155,12 @@ next_action: "Follow up on ticket #42 with tailored CV"
 function parseTracker() {
   if (!existsSync(APPS_FILE)) return [];
   const content = readFileSync(APPS_FILE, 'utf-8');
+  const lines = content.split('\n');
+  const colmap = resolveColumns(lines);
   const entries = [];
-  for (const line of content.split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map(s => s.trim());
-    if (parts.length < 9) continue;
-    const num = parseInt(parts[1]);
-    if (isNaN(num)) continue;
-    entries.push({
-      num, date: parts[2], company: parts[3], role: parts[4],
-      score: parts[5], status: parts[6], pdf: parts[7], report: parts[8],
-      notes: parts[9] || '',
-    });
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (row) entries.push(row);
   }
   return entries;
 }
@@ -356,7 +352,7 @@ function analyze() {
   // Enrich entries with report data and classification
   const enriched = entries.map(e => {
     const reportMatch = e.report.match(/\]\(([^)]+)\)/);
-    const reportPath = reportMatch ? join(CAREER_OPS, reportMatch[1]) : null;
+    const reportPath = reportMatch ? join(DATA_ROOT, reportMatch[1]) : null;
     const reportData = reportPath ? parseReport(reportPath) : null;
     const outcome = classifyOutcome(e.status);
     const trackerScore = parseFloat(e.score);

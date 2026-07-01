@@ -237,10 +237,18 @@ export function validateReviewDraft(input = {}) {
   if (experienceYears === null) errors.push('Years of experience is required; enter 0 for no employment experience');
   const seniority = clean(input.seniority);
   if (!seniority) errors.push('Experience level is required');
-  const targetRoles = cleanList(input.target_roles);
-  if (targetRoles.length === 0) errors.push('Choose at least one target role');
+  const primaryRoles = cleanList(input.target_roles);
+  const interestedRoles = uniqueStrings([...cleanList(input.interested_roles), ...primaryRoles, ...cleanList(input.adjacent_roles)]);
+  if (interestedRoles.length === 0) errors.push('Choose at least one interested role');
+  const currentRole = clean(input.current_role) || primaryRoles[0] || interestedRoles[0] || '';
+  if (!currentRole) errors.push('Current role is required');
+  const unifiedSkills = uniqueStrings([
+    ...cleanList(input.skills?.all), ...cleanList(input.skills?.demonstrated),
+    ...cleanList(input.skills?.confirmed_unlisted), ...cleanList(input.skills?.supporting),
+    ...cleanList(input.skills?.learning),
+  ]);
+  if (unifiedSkills.length === 0) errors.push('Confirm at least one skill');
   const demonstrated = cleanList(input.skills?.demonstrated);
-  if (demonstrated.length < 5) errors.push('Confirm at least five demonstrated skills');
   const homeCountry = clean(input.location?.home_country);
   if (!homeCountry) errors.push('Home country is required');
   const relocation = clean(input.location?.relocation);
@@ -276,13 +284,19 @@ export function validateReviewDraft(input = {}) {
       summary: clean(input.summary),
       experience_years: experienceYears,
       seniority,
-      target_roles: targetRoles,
-      adjacent_roles: cleanList(input.adjacent_roles),
+      current_role: currentRole,
+      interested_roles: interestedRoles,
+      target_roles: primaryRoles.length ? primaryRoles : interestedRoles,
+      adjacent_roles: [],
       excluded_titles: cleanList(input.excluded_titles),
+      education: cleanList(input.education),
+      certifications: cleanList(input.certifications),
+      employment_type: clean(input.employment_type) || 'any',
       preferences: {
         domains: cleanList(input.preferences?.domains),
       },
       skills: {
+        all: unifiedSkills,
         demonstrated,
         confirmed_unlisted: cleanList(input.skills?.confirmed_unlisted),
         supporting: cleanList(input.skills?.supporting),
@@ -297,7 +311,7 @@ export function validateReviewDraft(input = {}) {
         relocation,
         search_scopes: [...new Set(searchScopes)],
         international_locations: internationalLocations,
-        work_mode: legacyWorkMode(searchScopes),
+        work_mode: clean(input.location?.work_mode) || legacyWorkMode(searchScopes),
         visa_sponsorship_required: input.location?.visa_sponsorship_required === true,
       },
       availability: {
@@ -639,6 +653,16 @@ function clean(value) {
 function cleanList(value) {
   const list = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
   return [...new Set(list.map(clean).filter(Boolean))];
+}
+
+function uniqueStrings(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = String(value).toLowerCase();
+    if (!value || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function finiteOrNull(value) {

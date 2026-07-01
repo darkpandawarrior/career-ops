@@ -30,7 +30,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { pathToFileURL } from 'url';
 import path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
 import greenhouse from './providers/greenhouse.mjs';
@@ -48,9 +48,11 @@ import {
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
-const PIPELINE_PATH = 'data/pipeline.md';
-const CACHE_DIR = 'data/cache/ats-companies';
+const _SCAN_ATS_ENGINE = path.dirname(new URL(import.meta.url).pathname);
+const _DATA_ROOT = process.env.CAREER_OPS_ROOT ? path.resolve(process.env.CAREER_OPS_ROOT) : _SCAN_ATS_ENGINE;
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(_DATA_ROOT, 'portals.yml');
+const PIPELINE_PATH = path.join(_DATA_ROOT, 'data/pipeline.md');
+const CACHE_DIR = path.join(_DATA_ROOT, 'data/cache/ats-companies');
 const CACHE_TTL_HOURS = 24;
 // Tracks `main` deliberately: the dataset's value is freshness (new boards
 // appear weekly), so pinning a commit would defeat the purpose. Integrity rests

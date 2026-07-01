@@ -13,6 +13,10 @@
 
 ---
 
+![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
+![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript_6-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind_4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=node.js&logoColor=white)
 ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square&logo=playwright&logoColor=white)
 ![Local-first](https://img.shields.io/badge/local--first-111827?style=flat-square)
@@ -39,6 +43,19 @@ HireSignal extends that foundation with a **local web dashboard** that helps a c
 - keep career-ops compatibility for scans, reports, trackers, modes, and templates
 
 > **The intent is simple: fewer random applications, more informed decisions.**
+
+### Two dashboards
+
+HireSignal ships **two** dashboards over the same local data and the same engine:
+
+| | `web/` — **the 2.0 dashboard** (recommended) | `dashboard-web/` — legacy |
+|---|---|---|
+| Stack | Next.js 16 · React 19 · TypeScript 6 · Tailwind 4 (SSR/App Router) | vanilla Node `http` + vanilla JS |
+| Multi-profile | ✅ `?profile=slug` registry + switcher | ✅ `?profile=slug` |
+| Scoring | in-process (pure functions, deterministic) | in-process |
+| Surface | Today command center · Board · Pipeline · Ops · Intel · Portals · Analytics · CV · Onboarding · ⌘K palette | Jobs · Tracker · Ops · Intel tabs |
+
+The `web/` app is the **fusion**: it takes the modern career-ops 2.0 web experience and ports HireSignal's superior features (multi-profile routing, the scoring engine as a library, resume onboarding, branding) onto it — then builds past the legacy dashboard. The legacy `dashboard-web/` remains for reference. **The rest of this README's "modern dashboard" notes describe `web/`.**
 
 ---
 
@@ -71,45 +88,127 @@ It treats your resume and preferences as the source of truth, then searches and 
 | Profile-driven search | Builds discovery queries from candidate facts, combining ATS providers, remote feeds, configured portals, scan history, and pipeline entries |
 | Fit scoring | Scores roles using skills, experience, eligibility, compensation, availability, and preferences — not title-only matching |
 | Tailored resumes | Generates tailored HTML/PDF resumes while preserving factual claims from the canonical CV |
+| Portfolio site generator | Builds a personal portfolio **website** from a candidate's own career-ops data (identity, CV, storybank, proof points, pipeline) — role-agnostic, themeable, exportable as a standalone Vite project. See [`docs/PORTFOLIO.md`](docs/PORTFOLIO.md). |
 | Privacy audit | Verifies local dashboard code does not leak private resume/profile data into system-layer files |
 | career-ops compatibility | Keeps core tracker files, reports, scanner scripts, modes, templates, and data contract available |
+| Bot-block-aware liveness | Distinguishes a bot-blocked-but-live posting from a genuinely dead one (per-domain block signatures for LinkedIn, naukri, foundit, instahyre, cutshort) so blocked postings are never misrecorded as expired — see [`docs/liveness-bot-block-policy.md`](docs/liveness-bot-block-policy.md) |
+| Board maintenance | `board-sweep.mjs` re-checks liveness for every open pipeline entry (zero-token ATS API by default, `--browser` for full checks) and `board-clean.mjs` purges non-Android false positives from `data/pipeline.md` |
+
+---
+
+## The 2.0 Dashboard (`web/`)
+
+A single, profile-aware command center over your local career-ops data. Every
+view reads (and edits) the **active profile's** files; switching profiles
+re-scopes the whole app.
+
+### Multi-profile
+
+One checkout can host several candidates. A `profiles.yml` registry maps a slug
+to a data root; the app resolves it per request (`?profile=slug`, made sticky by
+a cookie). A sidebar/mobile **switcher** lists profiles and can **create** a new
+one. With no registry, the app behaves exactly as a single-profile install.
+
+```yaml
+# profiles.yml (gitignored — private)
+profiles:
+  - name: alice
+    display_name: Alice A
+    root: profiles/alice      # relative to the data root
+    color: "#dd7627"
+```
+
+`node migrate-profile.mjs <slug> --display-name "Name"` migrates an existing
+single-profile install into a named profile (copy-by-default, idempotent,
+`--dry-run`). See [`docs/MULTI_PROFILE.md`](docs/MULTI_PROFILE.md).
+
+### Surfaces
+
+| View | What it does |
+|------|-------------|
+| **Today** | A command center: KPI hero (interviews / actions due / decisions awaiting), a "needs action today" follow-up queue, an interview snapshot (active loops + drills + recent outcomes), a job-board snapshot, and a coaching callout — all from your real data, self-hiding when empty. |
+| **Board** | The scored job board over the cached feed: score-distribution donut, score tabs (All / Good+ / Strong+ / Excellent), section tabs (Recommended / Review / Sources), a "previously-rejected" filter, per-card **Evaluate** + an expandable detail (eligibility, comp, years, reasons, matched / supporting / learning / gap skills), optional group-by-company, and **Run search** (a real ATS/feed crawl streamed with a 4-stage progress animation). CSV export. |
+| **Pipeline** | The application tracker + inbox: inline status dropdown, click-to-edit notes, an inbox done-checkbox, a status funnel mini-viz, sorting/filtering, and per-row links to the evaluation report. |
+| **Ops** | Operations + discovery: run scan / scan+verify / liveness / pipeline-health (the real `.mjs`), an ad-hoc liveness URL check, the agent inbox (queue / remove / quick-tasks), the career-ops + interview-coach command grids, tracked companies + queries, and the full scan-history table. |
+| **Intel** | Interview coaching: a profile banner (target comp / archetypes / superpowers + a live health check), storybank (STAR expansion), outcome log, question bank, company patterns, drills, follow-up cadence, rejection-pattern analysis, and a collapsible CV viewer. |
+| **Onboarding** | Resume → profile: **upload a PDF** (or paste text) → the real inference engine drafts your targets/skills/seniority → a multi-step review wizard → activate (writes the canonical user files, archiving any existing ones first). |
+| **⌘K palette** | One control surface: navigate anywhere, run real ops (search / scan / health / liveness), and copy career-ops / interview-coach CLI commands. |
+| Portals · Analytics · CV | Tracked-company health, the outcome funnel + score distribution, and the canonical CV. |
+
+### Under the hood
+
+- **Scoring as a library** — the pure A–G scoring functions run **in-process**
+  (no subprocess), so a web evaluation is byte-identical to a CLI one. Exposed at
+  `/api/jobs/{score,search-plan,cache,refresh,export}`.
+- **Engine, not reimplementation** — long-running work (job search, onboarding,
+  scans, follow-up cadence, pattern analysis) spawns the **real** career-ops
+  `.mjs`, scoped to the active profile via `CAREER_OPS_ROOT`, streaming progress.
+- **Data contract intact** — the web app is read-only over your data except the
+  sanctioned writes (profile edits, the managed memory block in
+  `modes/_profile.md`, and onboarding activation, which archives before writing).
 
 ---
 
 ## Quick Start
 
+### The 2.0 dashboard (`web/`, recommended)
+
 ```bash
-# 1. Install dependencies
-npm install
+# from the repo root
+npm install                 # engine deps (scanner, providers, pdf, …)
 
-# 2. Start the dashboard
-npm run dashboard:web
-
-# 3. Open in browser
-open http://127.0.0.1:4173
+cd web
+npm install                 # dashboard deps
+npm run dev                 # Next.js dev server → http://localhost:3000
+# or: npm run build && npm start   (production)
 ```
 
-The dashboard guides you through:
+In development, point the app at your real data with `CAREER_OPS_ROOT`
+(otherwise it reads the parent checkout):
 
-1. Uploading a resume PDF
-2. Extracting and reviewing resume evidence
-3. Activating a local profile
-4. Running a first job search
-5. Reviewing ranked opportunities
+```bash
+cd web
+CAREER_OPS_ROOT=/path/to/your/career-ops npm run dev
+```
+
+`npm run typecheck` and `npm run build` validate the app. A throwaway build dir is
+available via `BUILD_DIST=.next-prod npm run build` (won't clobber a live dev `.next`).
+
+### The legacy dashboard (`dashboard-web/`)
+
+```bash
+npm install
+npm run dashboard:web       # → http://127.0.0.1:4173
+```
+
+Either dashboard guides you through: upload a resume PDF → review the extracted
+evidence → activate a local profile → run a first job search → review ranked
+opportunities.
 
 ---
 
 ## Commands
 
 ```bash
+# 2.0 dashboard (from web/)
+cd web && npm run dev       # Next.js dev server (http://localhost:3000)
+cd web && npm run build     # production build  ·  npm start to serve
+cd web && npm run typecheck # tsc --noEmit
+
+# engine / legacy (from the repo root)
 npm run doctor              # Check required career-ops setup files
-npm run dashboard:web       # Start the HireSignal web dashboard
+npm run dashboard:web       # Start the legacy web dashboard (port 4173)
 npm run dashboard:check     # Run dashboard tests
 npm run dashboard:audit     # Check private-data boundaries
 npm run scan                # Run the zero-token career-ops scanner
 npm run scan:full           # Reverse-discover jobs from public ATS APIs
 npm run tracker             # Open the career-ops tracker
 npm run pdf                 # Generate a career-ops PDF resume
+npm run board:sweep         # Liveness-sweep every open pipeline.md entry (--browser, --mark)
+npm run board:clean         # Purge non-Android false positives from pipeline.md (--apply)
+
+# multi-profile
+node migrate-profile.mjs <slug> --display-name "Name" [--dry-run]
 ```
 
 ---
@@ -150,23 +249,30 @@ Private candidate data stays in the local user layer throughout. System-layer co
 ## Project Structure
 
 ```text
-dashboard-web/
-  public/                 Web dashboard UI
-  onboarding/             Resume extraction, profile inference, activation
-  scoring/                Candidate-fit scoring
-  search/                 Query generation and job discovery
-  test/                   Dashboard-focused tests
+web/                      The 2.0 dashboard (Next.js 16 / React 19 / TS 6 / Tailwind 4)
+  src/app/                App Router pages + API routes (/api/jobs, /api/onboarding, …)
+  src/components/         board · home · ops · intel · onboarding · ui · command palette
+  src/lib/                profile-registry · career-ops readers · jobs/scoring · coach …
+  middleware? → src/proxy.ts   ?profile=slug → x-co-profile (Next 16 proxy convention)
+  docs/hiresignal-fusion.md    the migration log
 
+dashboard-web/            Legacy dashboard (vanilla Node http + JS)
+  public/  onboarding/  scoring/  search/  test/
+
+onboarding-cli.mjs        Bridge: resume infer / extract (pdf) / activate
+job-search-cli.mjs        Bridge: real ATS/feed crawl → scored job-dashboard.json
+migrate-profile.mjs       Single-profile → named profile migration
+
+profiles.yml              Multi-profile registry (gitignored — private)
 config/
   job-search.example.yml  Example search profile structure
-
 data/
   applications.md         career-ops tracker
   pipeline.md             pending job URLs
   job-dashboard.json      generated dashboard cache
-
 docs/
-  PUBLIC_DASHBOARD_*.md   Design, privacy, setup, scoring, and search notes
+  MULTI_PROFILE.md        Multi-profile registry, migration, deploy
+  PUBLIC_DASHBOARD_*.md    Design, privacy, setup, scoring, and search notes
 ```
 
 ---

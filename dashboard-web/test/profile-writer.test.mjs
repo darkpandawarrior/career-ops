@@ -4,10 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import {
-  activateProfile,
+  confirmProfile,
   finalizeProfileReplacement,
   generateUserFiles,
   previewProfileActivation,
@@ -25,8 +25,17 @@ test('generates valid career-ops user files from a reviewed draft', async () => 
   assert.equal(yaml.load(files['config/profile.yml']).candidate.full_name, 'Alex Morgan');
   assert.equal(yaml.load(files['config/profile.yml']).availability.notice_period, '30 days');
   assert.ok(yaml.load(files['portals.yml']).tracked_companies.length >= 15);
-  assert.deepEqual(yaml.load(files['config/job-search.yml']).titles.strong, ['Senior Backend Engineer']);
+  const searchConfig = yaml.load(files['config/job-search.yml']);
+  assert.deepEqual(searchConfig.titles.interested, ['Senior Backend Engineer', 'Platform Engineer']);
+  assert.equal(searchConfig.current_role, 'Senior Backend Engineer');
+  assert.ok(searchConfig.skills.all.includes('Java'));
+  assert.equal(searchConfig.skills.demonstrated, undefined);
+  assert.deepEqual(searchConfig.skills.evidence.supporting, ['Kafka']);
   assert.deepEqual(yaml.load(files['config/job-search.yml']).location.search_scopes, ['local', 'remote']);
+  assert.deepEqual(yaml.load(files['config/job-search.yml']).education, {
+    levels: ["Bachelor's degree"],
+    certifications: ['AWS Certified Developer'],
+  });
   assert.deepEqual(yaml.load(files['portals.yml']).title_filter.positive, []);
   assert.deepEqual(yaml.load(files['portals.yml']).content_filter.positive.slice(0, 2), [
     'Java',
@@ -45,7 +54,7 @@ test('activation replaces the old profile and retains rollback data only until s
   assert.equal(preview.valid, true);
   assert.equal(preview.files.find((file) => file.path === 'data/applications.md').action, 'replace');
 
-  const result = await activateProfile(root, DRAFT_ID);
+  const result = await confirmProfile(root, DRAFT_ID);
   assert.equal(result.ok, true);
   assert.match(await readFile(path.join(root, 'cv.md'), 'utf8'), /Alex Morgan/);
   assert.match(await readFile(path.join(root, 'data', 'applications.md'), 'utf8'), /Applications Tracker/);
@@ -66,7 +75,7 @@ test('activation replaces the old profile and retains rollback data only until s
 test('failed post-activation search can restore the previous profile', async () => {
   const root = await setupRoot();
   await seedActiveProfile(root);
-  await activateProfile(root, DRAFT_ID);
+  await confirmProfile(root, DRAFT_ID);
   await rollbackProfileReplacement(root, DRAFT_ID);
   assert.equal(await readFile(path.join(root, 'cv.md'), 'utf8'), 'OLD CV');
   assert.equal(await readFile(path.join(root, 'data', 'applications.md'), 'utf8'), 'EXISTING TRACKER');
@@ -79,7 +88,7 @@ test('activation refuses an unreviewed draft without touching active files', asy
   await writeFile(path.join(root, 'cv.md'), 'UNCHANGED');
   await writeFile(path.join(draftPath, 'extraction.json'), JSON.stringify(extraction()));
   await assert.rejects(
-    activateProfile(root, DRAFT_ID),
+    confirmProfile(root, DRAFT_ID),
     (error) => error.code === 'review_required' && error.status === 409,
   );
   assert.equal(await readFile(path.join(root, 'cv.md'), 'utf8'), 'UNCHANGED');
@@ -168,6 +177,8 @@ function extraction() {
       { key: 'summary', title: 'Summary', text: 'Backend engineer building reliable platforms.' },
       { key: 'experience', title: 'Experience', text: 'Senior Backend Engineer\n2020 - Current' },
       { key: 'skills', title: 'Skills', text: 'Java, PostgreSQL, Docker' },
+      { key: 'education', title: 'Education', text: 'Bachelor of Technology in Computer Science' },
+      { key: 'certifications', title: 'Certifications', text: 'AWS Certified Developer' },
     ],
   };
 }

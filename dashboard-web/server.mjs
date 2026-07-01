@@ -8,14 +8,14 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { getSetupStatus, loadActiveProfile, loadJobSearchConfig } from './config.mjs';
 import { acceptResumeUpload, discardDraft, readDraft } from './onboarding/upload-intake.mjs';
 import { extractResumeDraft, readExtraction } from './onboarding/resume-extractor.mjs';
 import { inferProfileDraft, readInference, saveReviewDraft } from './onboarding/profile-inference.mjs';
 import {
-  activateProfile,
+  confirmProfile,
   finalizeProfileReplacement,
   previewProfileActivation,
   rollbackProfileReplacement,
@@ -23,7 +23,7 @@ import {
 import { normalizeJob } from './scoring/scorer.mjs';
 import { validateJobSearchConfig } from './search/config-schema.mjs';
 import { buildSearchPlan } from './search/query-builder.mjs';
-import { findCachedJob, refreshJobSearch } from './search/job-search-runner.mjs';
+import { enrichDiscoveryLead, findCachedJob, refreshJobSearch } from './search/job-search-runner.mjs';
 import { createTailoredResume } from './resume-tailor.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,9 +37,8 @@ const HOST = process.env.CAREER_DASHBOARD_HOST || '127.0.0.1';
 const PORT = Number(process.env.CAREER_DASHBOARD_PORT || 4173);
 const DEMO = process.env.CAREER_DASHBOARD_DEMO === '1';
 const PROFILES_REGISTRY = path.join(ENGINE_ROOT, 'profiles.yml');
-let refreshPromise = null;
-const refreshState = { running: false, phase: 0, phaseName: '', startedAt: null };
-const COACH_STATE = path.resolve(ENGINE_ROOT, '../interview-coach-skill/coaching_state.md');
+const profileRefreshes = new Map();
+const GLOBAL_COACH_STATE = path.resolve(ENGINE_ROOT, '../interview-coach-skill/coaching_state.md');
 
 // ── Per-profile path resolver ─────────────────────────────────────────────────
 function resolveProfileRoot(urlObj) {
@@ -67,6 +66,31 @@ function paths(root) {
     reportsDir:path.join(root, 'reports'),
     cachePath: path.join(root, 'data/job-dashboard.json'),
   };
+}
+
+function refreshContext(root) {
+  const key = path.resolve(root);
+  if (!profileRefreshes.has(key)) {
+    profileRefreshes.set(key, {
+      promise: null,
+      generation: 0,
+      state: {
+        running: false,
+        phase: 0,
+        phaseName: '',
+        startedAt: null,
+        completedAt: null,
+        outcome: 'idle',
+        lastError: null,
+      },
+    });
+  }
+  return profileRefreshes.get(key);
+}
+
+export function profileRefreshStatus(root = DEFAULT_ROOT) {
+  const state = refreshContext(root).state;
+  return { ...state, elapsedMs: state.startedAt ? Date.now() - state.startedAt : 0 };
 }
 const CANONICAL_STATES = ['Evaluated','Applied','Responded','Interview','Offer','Rejected','Discarded','SKIP'];
 const COMMANDS = {
@@ -98,10 +122,18 @@ const COMMANDS = {
 // ── Tracker helpers ──────────────────────────────────────────────────────────
 const readT = (f) => existsSync(f) ? readFileSync(f, 'utf-8') : '';
 
+function profileEnv(root) {
+  return {
+    ...process.env,
+    CAREER_OPS_ROOT: root,
+    CAREER_OPS_PORTALS: path.join(root, 'portals.yml'),
+    CAREER_OPS_PROFILE: path.join(root, 'config/profile.yml'),
+  };
+}
+
 function execJson(script, args = [], root = DEFAULT_ROOT) {
   return new Promise((resolve) => {
-    const env = { ...process.env, CAREER_OPS_ROOT: root };
-    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env, timeout: 180_000 }, (err, stdout, stderr) => {
+    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env: profileEnv(root), timeout: 180_000 }, (err, stdout, stderr) => {
       try { resolve({ ok: true, data: JSON.parse(stdout) }); }
       catch { resolve({ ok: !err, output: (stdout || '') + (stderr || '') }); }
     });
@@ -110,8 +142,7 @@ function execJson(script, args = [], root = DEFAULT_ROOT) {
 
 function execText(script, args = [], root = DEFAULT_ROOT) {
   return new Promise((resolve) => {
-    const env = { ...process.env, CAREER_OPS_ROOT: root };
-    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env, timeout: 180_000 }, (err, stdout, stderr) => {
+    execFile(process.execPath, [script, ...args], { cwd: ENGINE_ROOT, env: profileEnv(root), timeout: 180_000 }, (err, stdout, stderr) => {
       resolve({ ok: !err, output: (stdout || '') + (stderr || '') });
     });
   });
@@ -179,8 +210,19 @@ function sectionOf(text, name) {
   return m ? m[1].trim() : '';
 }
 
-function parseCoachState() {
-  const text = readT(COACH_STATE);
+function resolveCoachStatePath(root) {
+  // Profile-local coaching state takes priority (any profile can have one at <root>/coaching_state.md)
+  const local = path.join(root, 'coaching_state.md');
+  if (existsSync(local)) return local;
+  // Global coaching state is only for the engine root (Alex's profile)
+  if (path.resolve(root) === ENGINE_ROOT) return GLOBAL_COACH_STATE;
+  return null;
+}
+
+function parseCoachState(root = ENGINE_ROOT) {
+  const statePath = resolveCoachStatePath(root);
+  if (!statePath) return null;
+  const text = readT(statePath);
   if (!text) return null;
   const stories = [];
   for (const m of sectionOf(text, 'Storybank').matchAll(/^\| (S\d+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \| [^|]+ \| ([^|]+) \|/gm)) {
@@ -239,7 +281,7 @@ function buildTrackerData(root) {
   const scan = parseScanHistory(root);
   const portals = parsePortals(root);
   const inbox = parseAgentInbox(root);
-  const coach = parseCoachState();
+  const coach = parseCoachState(root);
   const reports = listReports(root);
   return {
     apps, pipeline, scan, portals, inbox, coach, reports, commands: COMMANDS, states: CANONICAL_STATES,
@@ -325,6 +367,7 @@ export async function buildDashboardPayload(root = DEFAULT_ROOT) {
     },
     searchPlan: searchPlan?.summary || null,
     generatedAt: cached?.generatedAt || null,
+    telemetry: cached?.telemetry || null,
     jobs,
     stats: {
       total: jobs.filter((job) => job.type !== 'searchLead').length,
@@ -351,12 +394,7 @@ export async function route(req, res) {
       return sendJson(res, { ok: true, service: 'career-ops-dashboard' });
     }
     if (url.pathname === '/api/refresh/status') {
-      return sendJson(res, {
-        running: refreshState.running,
-        phase: refreshState.phase,
-        phaseName: refreshState.phaseName,
-        elapsedMs: refreshState.startedAt ? Date.now() - refreshState.startedAt : 0,
-      });
+      return sendJson(res, profileRefreshStatus(root));
     }
     if (url.pathname === '/api/profiles') {
       try {
@@ -434,7 +472,7 @@ export async function route(req, res) {
     if (url.pathname === '/api/setup/confirm' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);
       const body = await readJsonBody(req);
-      const activation = await activateProfile(root, body.draftId);
+      const confirmation = await confirmProfile(root, body.draftId);
       let dashboard;
       try {
         dashboard = await refreshDashboard(root);
@@ -448,7 +486,7 @@ export async function route(req, res) {
       } catch (error) {
         cleanup = { ok: false, previousProfilesRemoved: false, error: error.message };
       }
-      return sendJson(res, { ok: true, activation, cleanup, dashboard });
+      return sendJson(res, { ok: true, confirmation, cleanup, dashboard });
     }
     if (url.pathname === '/api/setup/reset' && req.method === 'POST') {
       const body = await readJsonBody(req);
@@ -474,8 +512,16 @@ export async function route(req, res) {
     }
     if (url.pathname === '/api/refresh' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { started: true, demo: true });
-      if (!refreshState.running) refreshDashboard(root).catch(() => {});
-      return sendJson(res, { started: true, running: refreshState.running });
+      const context = refreshContext(root);
+      if (!context.state.running) refreshDashboard(root).catch(() => {});
+      return sendJson(res, { started: true, running: context.state.running });
+    }
+    if (url.pathname === '/api/leads/enrich' && req.method === 'POST') {
+      if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);
+      const body = await readJsonBody(req);
+      if (!body.id) return sendJson(res, { error: 'lead id is required' }, 400);
+      const enrichment = await enrichDiscoveryLead(root, body.id);
+      return sendJson(res, { enrichment, dashboard: await buildDashboardPayload(root) });
     }
     if (url.pathname === '/api/resume' && req.method === 'POST') {
       if (DEMO) return sendJson(res, { error: 'demo_read_only' }, 409);
@@ -548,10 +594,21 @@ export async function route(req, res) {
   }
 }
 
-function spawnNode(args, dataRoot) {
+export function spawnNode(args, dataRoot, spawnImpl = spawn) {
   return new Promise((resolve) => {
-    const env = { ...process.env, ...(dataRoot && dataRoot !== ENGINE_ROOT ? { CAREER_OPS_ROOT: dataRoot } : {}) };
-    const child = spawn(process.execPath, args, { cwd: ENGINE_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const env = dataRoot && dataRoot !== ENGINE_ROOT ? profileEnv(dataRoot) : { ...process.env };
+    let child;
+    try {
+      child = spawnImpl(process.execPath, args, {
+        cwd: ENGINE_ROOT,
+        env,
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      resolve({ code: 1, stdout: '', stderr: `Unable to start ${args[0]}: ${error.message}` });
+      return;
+    }
     let stdout = '', stderr = '';
     child.stdout.on('data', (c) => { stdout += c; });
     child.stderr.on('data', (c) => { stderr += c; });
@@ -560,13 +617,20 @@ function spawnNode(args, dataRoot) {
   });
 }
 
-async function refreshDashboard(root = DEFAULT_ROOT) {
-  if (!refreshPromise) {
-    const setPhase = (n, name) => { refreshState.phase = n; refreshState.phaseName = name; };
-    refreshState.running = true;
-    refreshState.startedAt = Date.now();
+export async function refreshDashboard(root = DEFAULT_ROOT, options = {}) {
+  const context = refreshContext(root);
+  if (!context.promise) {
+    const generation = ++context.generation;
+    const setPhase = (n, name) => { context.state.phase = n; context.state.phaseName = name; };
+    context.state.running = true;
+    context.state.startedAt = Date.now();
+    context.state.completedAt = null;
+    context.state.outcome = 'running';
+    context.state.lastError = null;
     setPhase(1, 'Scanning tracked companies');
-    refreshPromise = refreshJobSearch(root, {
+    const executeSearch = options.refreshJobSearchImpl || refreshJobSearch;
+    const buildPayload = options.buildDashboardPayloadImpl || buildDashboardPayload;
+    context.promise = executeSearch(root, {
       engineRoot: ENGINE_ROOT,
       runScan: async () => {
         setPhase(1, 'Scanning tracked companies');
@@ -580,19 +644,28 @@ async function refreshDashboard(root = DEFAULT_ROOT) {
         setPhase(3, 'Fetching job board feeds');
         return r;
       },
-    }).then(() => setPhase(4, 'Scoring & saving results'))
+    }).then(() => {
+      setPhase(4, 'Scoring & saving results');
+      context.state.outcome = 'success';
+      return buildPayload(root);
+    }).catch((error) => {
+      context.state.outcome = 'failed';
+      context.state.lastError = error?.message || String(error);
+      throw error;
+    })
       .finally(() => {
         setTimeout(() => {
-          refreshState.running = false;
-          refreshState.phase = 0;
-          refreshState.phaseName = '';
-          refreshState.startedAt = null;
-        }, 3000);
-        refreshPromise = null;
+          if (context.generation !== generation) return;
+          context.state.running = false;
+          context.state.phase = 0;
+          context.state.phaseName = '';
+          context.state.startedAt = null;
+          context.state.completedAt = new Date().toISOString();
+        }, options.settleDelayMs ?? 3000);
+        context.promise = null;
       });
   }
-  await refreshPromise;
-  return buildDashboardPayload(root);
+  return context.promise;
 }
 
 async function readJsonBody(req, limit = 64 * 1024) {
