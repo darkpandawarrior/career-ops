@@ -109,7 +109,7 @@ export function OnboardingFlow() {
       });
       const d = await r.json();
       if (!d.ok) {
-        setError(d.errors?.length ? d.errors.join(" Â· ") : d.error || "Activation failed.");
+        setError(d.errors?.length ? d.errors.join(" · ") : d.error || "Activation failed.");
         return;
       }
       setResult({ written: d.written ?? [], archived: d.archived ?? [] });
@@ -130,7 +130,7 @@ export function OnboardingFlow() {
           <h1 className="font-display text-2xl tracking-tight text-landing">Set up your profile</h1>
           <p className="mt-1 text-sm text-muted">
             Upload your resume PDF (or paste the text). HireSignal&rsquo;s inference engine drafts your
-            targets, skills and seniority â€” you review before anything is written.
+            targets, skills and seniority — you review before anything is written.
           </p>
 
           <ResumeDropZone busy={busy} onFile={extractFromFile} />
@@ -143,7 +143,7 @@ export function OnboardingFlow() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={14}
-            placeholder="Paste your full resume hereâ€¦"
+            placeholder="Paste your full resume here…"
             className="mt-4 w-full resize-y rounded-xl border border-border bg-surface p-4 text-sm outline-none focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
           />
           {error && <ErrorNote msg={error} />}
@@ -281,9 +281,9 @@ function ResumeDropZone({ busy, onFile }: { busy: boolean; onFile: (f: File) => 
       />
       {busy ? <Loader2 className="size-6 animate-spin text-brand" /> : <UploadCloud className="size-6 text-brand" />}
       <span className="text-sm font-medium text-foreground">
-        {busy ? "Reading your resumeâ€¦" : "Drop your resume PDF here, or click to browse"}
+        {busy ? "Reading your resume…" : "Drop your resume PDF here, or click to browse"}
       </span>
-      <span className="text-xs text-faint">PDF, up to 10MB Â· parsed locally, nothing is uploaded anywhere</span>
+      <span className="text-xs text-faint">PDF, up to 10MB · parsed locally, nothing is uploaded anywhere</span>
     </label>
   );
 }
@@ -296,7 +296,7 @@ function ErrorNote({ msg }: { msg: string }) {
   );
 }
 
-/* â”€â”€ Review form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Review form ─────────────────────────────────────────────────────────── */
 
 const WIZ_STEPS = ["Candidate", "Targeting", "Skills", "Location", "Compensation", "Confirm"] as const;
 
@@ -345,7 +345,7 @@ function ReviewForm({
           </button>
         ))}
       </div>
-      <p className="mt-2 text-xs text-faint">Step {wiz + 1} of {WIZ_STEPS.length} Â· {WIZ_STEPS[wiz]}</p>
+      <p className="mt-2 text-xs text-faint">Step {wiz + 1} of {WIZ_STEPS.length} · {WIZ_STEPS[wiz]}</p>
 
       <div className="mt-4 space-y-6">
       {wiz === 0 && (
@@ -389,7 +389,7 @@ function ReviewForm({
 
       {wiz === 2 && (
       <Group title="Skills">
-        <Field label="Demonstrated" req hint="at least five â€” these drive scoring">
+        <Field label="Demonstrated" req hint="at least five — these drive scoring">
           <CatalogMultiSelect value={review.skills.demonstrated} onChange={(v) => setSkills({ demonstrated: v })} options={skillOptions} placeholder="Search skills" />
         </Field>
         <div className="grid grid-cols-2 gap-3">
@@ -455,10 +455,10 @@ function ReviewForm({
         <Group title="Confirm & activate">
           <dl className="space-y-2 text-sm">
             <SummaryRow label="Name" value={review.candidate.full_name} />
-            <SummaryRow label="Seniority" value={`${review.seniority || "â€”"} Â· ${review.experience_years ?? "?"} yrs`} />
-            <SummaryRow label="Target roles" value={review.target_roles.join(", ") || "â€”"} />
-            <SummaryRow label="Demonstrated skills" value={`${review.skills.demonstrated.length} (${review.skills.demonstrated.slice(0, 5).join(", ")}${review.skills.demonstrated.length > 5 ? "â€¦" : ""})`} />
-            <SummaryRow label="Location" value={`${review.location.home_country || "â€”"} Â· ${review.location.search_scopes.join("/") || "â€”"} Â· notice ${review.availability.notice_period || "â€”"}`} />
+            <SummaryRow label="Seniority" value={`${review.seniority || "—"} · ${review.experience_years ?? "?"} yrs`} />
+            <SummaryRow label="Target roles" value={review.target_roles.join(", ") || "—"} />
+            <SummaryRow label="Demonstrated skills" value={`${review.skills.demonstrated.length} (${review.skills.demonstrated.slice(0, 5).join(", ")}${review.skills.demonstrated.length > 5 ? "…" : ""})`} />
+            <SummaryRow label="Location" value={`${review.location.home_country || "—"} · ${review.location.search_scopes.join("/") || "—"} · notice ${review.availability.notice_period || "—"}`} />
           </dl>
           <p className="mt-3 text-xs text-faint">
             Activating writes cv.md, config/profile.yml, config/job-search.yml, modes/_profile.md and
@@ -524,7 +524,7 @@ function Field({ label, req, hint, children }: { label: string; req?: boolean; h
       <span className="text-xs text-muted">
         {label}
         {req && <span className="text-brand"> *</span>}
-        {hint && <span className="text-faint"> â€” {hint}</span>}
+        {hint && <span className="text-faint"> — {hint}</span>}
       </span>
       <div className="mt-1">{children}</div>
     </label>

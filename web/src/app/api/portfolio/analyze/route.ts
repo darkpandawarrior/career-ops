@@ -45,7 +45,7 @@ export async function POST(req: Request) {
   });
 
   const analysis = coerceAnalysis(extractPortfolioJson(out));
-  if (!analysis) return NextResponse.json({ error: "couldn't analyze â€” try again" }, { status: 502 });
+  if (!analysis) return NextResponse.json({ error: "couldn't analyze — try again" }, { status: 502 });
   return NextResponse.json({ analysis });
 }
 

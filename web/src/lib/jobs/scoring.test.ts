@@ -114,7 +114,7 @@ describe("loadRawJobSearchConfig", () => {
     expect(loadRawJobSearchConfig(root)).toEqual({});
   });
 
-  it("defaults root to careerOpsRoot() (mocked) â€” empty default tree yields {}", () => {
+  it("defaults root to careerOpsRoot() (mocked) — empty default tree yields {}", () => {
     expect(loadRawJobSearchConfig()).toEqual({});
   });
 });
@@ -190,7 +190,7 @@ describe("scoreOne", () => {
     expect(Array.isArray(job.reasons)).toBe(true);
   });
 
-  it("still scores (low) when config is empty â€” scoreOne does not gate on validity", () => {
+  it("still scores (low) when config is empty — scoreOne does not gate on validity", () => {
     const root = makeRoot(); // no config => loadRawJobSearchConfig returns {}
     const job = scoreOne(STRONG_JOB, root);
     expect(typeof job.score).toBe("number");
