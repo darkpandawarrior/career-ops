@@ -88,6 +88,7 @@ It treats your resume and preferences as the source of truth, then searches and 
 | Profile-driven search | Builds discovery queries from candidate facts, combining ATS providers, remote feeds, configured portals, scan history, and pipeline entries |
 | Fit scoring | Scores roles using skills, experience, eligibility, compensation, availability, and preferences — not title-only matching |
 | Tailored resumes | Generates tailored HTML/PDF resumes while preserving factual claims from the canonical CV |
+| Portfolio site generator | Builds a personal portfolio **website** from a candidate's own career-ops data (identity, CV, storybank, proof points, pipeline) — role-agnostic, themeable, exportable as a standalone Vite project. See [`docs/PORTFOLIO.md`](docs/PORTFOLIO.md). |
 | Privacy audit | Verifies local dashboard code does not leak private resume/profile data into system-layer files |
 | career-ops compatibility | Keeps core tracker files, reports, scanner scripts, modes, templates, and data contract available |
 | Bot-block-aware liveness | Distinguishes a bot-blocked-but-live posting from a genuinely dead one (per-domain block signatures for LinkedIn, naukri, foundit, instahyre, cutshort) so blocked postings are never misrecorded as expired — see [`docs/liveness-bot-block-policy.md`](docs/liveness-bot-block-policy.md) |
