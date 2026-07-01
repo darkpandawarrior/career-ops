@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot } from "@/lib/career-ops";
 
 /**
  * Locate the tailored CV PDF the real `pdf` mode wrote to output/ for a given
@@ -8,11 +7,16 @@ import { careerOpsRoot } from "@/lib/career-ops";
  * for a different company (we'd rather attach nothing than the wrong CV). Mirrors
  * the matching in /api/cv-pdf so the "View tailored CV" link and the apply
  * file-upload always resolve to the SAME file. Returns an absolute path or null.
+ *
+ * `root` must be the caller's own resolved profile root (`await requestRoot()`),
+ * never `careerOpsRoot()` directly — this file is per-profile user data, and a
+ * fixed engine-root lookup would leak one profile's tailored CV into another
+ * profile's application (see cv-pdf/route.ts for the same pattern).
  */
-export function resolveTailoredCv(company?: string): string | null {
+export function resolveTailoredCv(root: string, company?: string): string | null {
   const c = (company ?? "").trim();
   if (!c) return null;
-  const dir = path.join(careerOpsRoot(), "output");
+  const dir = path.join(root, "output");
   let files: string[];
   try {
     files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".pdf"));
