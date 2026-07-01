@@ -60,6 +60,10 @@ modes/_profile.md
 /resumes/
 /data/agent-inbox.md
 /.claude/
+# Plugin layer — opt-in toggles + user-installed plugins + integrity lock (never auto-updated)
+config/plugins.yml
+plugins.local/
+plugins.lock
 
 # Secrets (never commit — use .env.example as template)
 .env
@@ -93,13 +97,14 @@ data/model-blacklist.json
 .opencode/settings.local.json
 .opencode/memory/
 career-dashboard
+career-dashboard.exe
 data/job-dashboard.json
 data/dashboard-web.*.log
 data/profile-archives/
 data/onboarding-drafts/
 package-lock.json
 
-# Playwright MCP server run artifacts (ephemeral, machine-local — never commit)
+# Playwright MCP server run artifacts (ephemeral, machine-local)
 .playwright-mcp/
 
 # Planning (local scratchpad)
