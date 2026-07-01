@@ -32,7 +32,7 @@
 
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import path from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
 const EXAMPLE_PATH = 'config/profile.example.yml';

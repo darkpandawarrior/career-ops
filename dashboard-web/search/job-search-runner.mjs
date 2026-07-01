@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import ashbyProvider from '../../providers/ashby.mjs';
 import greenhouseProvider from '../../providers/greenhouse.mjs';
