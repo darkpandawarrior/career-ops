@@ -7,17 +7,17 @@ import type { DriveStep } from "./issue";
 
 export type { DriveStep };
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// AGENTIC DRIVE LOOP â€” the backend gets "as intelligent as Claude Code + Playwright":
-// observe (ref-tagged snapshot) â†’ the LLM picks ONE action â†’ WE execute it on OUR
-// headed session â†’ observe again â†’ adapt. We orchestrate the loop (CLI-agnostic in
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENTIC DRIVE LOOP — the backend gets "as intelligent as Claude Code + Playwright":
+// observe (ref-tagged snapshot) → the LLM picks ONE action → WE execute it on OUR
+// headed session → observe again → adapt. We orchestrate the loop (CLI-agnostic in
 // principle; Claude-first via --resume) and execute every action ourselves, so:
-//   â€¢ NEVER-SUBMIT is by CONSTRUCTION â€” the action vocabulary has no "submit", and
+//   • NEVER-SUBMIT is by CONSTRUCTION — the action vocabulary has no "submit", and
 //     we refuse to click any submit/apply-final control. The human submits.
-//   â€¢ everything stays in OUR session (screenshots, handoff, the streamed UI).
+//   • everything stays in OUR session (screenshots, handoff, the streamed UI).
 // HYBRID = drive only until a fillable application form is reached, then hand back
 // to deterministic fill+verify. FULL = keep driving (fill the fields too).
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────────────────
 
 export type DriveResult = { reached: boolean; turns: number; reason: string; steps: DriveStep[] };
 
@@ -77,7 +77,7 @@ function plannerTurn(binPath: string, args: string[]): Promise<{ out: string; se
         out = j.result ?? buf;
         sessionId = j.session_id ?? null;
       } catch {
-        /* non-json (other CLI) â†’ use raw */
+        /* non-json (other CLI) → use raw */
       }
       resolve({ out, sessionId });
     });
@@ -129,25 +129,25 @@ export async function driveSession(
   const goalText =
     goal === "reach"
       ? `Your goal: navigate to the actual fillable JOB APPLICATION form (click 'Apply', pass any interstitial/pre-screen, reach the page with the Name/Email/Resume fields). Do NOT fill anything yet. Reply {"action":"reached_form"} once the form with those fields is visible.`
-      : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit â€” when everything is filled and you're on the final page, reply {"action":"done"}.
+      : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit — when everything is filled and you're on the final page, reply {"action":"done"}.
 ANSWERS (match by the field's label):
-${answersBlock || "(no answers provided â€” just reach/observe)"}`;
+${answersBlock || "(no answers provided — just reach/observe)"}`;
   // Claude keeps context cheaply via --resume; other CLIs have no resume equivalent
   // so we rebuild the full prompt (including goalText + answersBlock) on every turn.
   let resumeId: string | null = null;
   let lastUrl = page.url();
 
-  const stopVerb = goal === "reach" ? '{"action":"reached_form"}            STOP â€” the fillable application form is now visible' : '{"action":"done"}                    STOP â€” every answer is filled (you NEVER submit; the human does)';
+  const stopVerb = goal === "reach" ? '{"action":"reached_form"}            STOP — the fillable application form is now visible' : '{"action":"done"}                    STOP — every answer is filled (you NEVER submit; the human does)';
   const fullPrompt = async (snap: { text: string }) =>
     `You are an agent driving a real web browser for a job seeker (we execute your actions; the human submits at the end). ${goalText}
-You NEVER submit a form â€” there is no submit action; the human does that.
+You NEVER submit a form — there is no submit action; the human does that.
 Reply with EXACTLY ONE action as a JSON object, nothing else:
   {"action":"click","ref":"e3"}            click an element
-  {"action":"type","ref":"e4","text":"â€¦"}  type into a field
-  {"action":"select","ref":"e9","value":"â€¦"} pick an option
+  {"action":"type","ref":"e4","text":"…"}  type into a field
+  {"action":"select","ref":"e9","value":"…"} pick an option
   {"action":"scroll"}                        scroll down to reveal more
   ${stopVerb}
-  {"action":"stuck","reason":"â€¦"}            you can't proceed (login/captcha/dead-end)
+  {"action":"stuck","reason":"…"}            you can't proceed (login/captcha/dead-end)
 
 Page: "${await page.title().catch(() => "")}" (${page.url()})
 Elements:
@@ -196,7 +196,7 @@ Reply ONE action JSON.`
       return { reached: false, turns: turn, reason: act.reason || "stuck", steps };
     }
 
-    // execute the action on OUR session â€” NEVER submit.
+    // execute the action on OUR session — NEVER submit.
     let detail = "";
     let note = "";
     try {

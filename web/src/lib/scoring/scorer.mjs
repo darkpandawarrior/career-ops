@@ -219,7 +219,7 @@ function inferEmploymentType(text) {
 
 function inferRemoteRestrictions(text) {
   const value = String(text);
-  const match = value.match(/\bremote\s*(?:-|Ã¢â‚¬â€œ|Ã¢â‚¬â€|:)?\s*(?:only\s+)?(?:within|in|from|for)?\s*([A-Z][A-Za-z ]{2,30})(?:\.|,|$)/i);
+  const match = value.match(/\bremote\s*(?:-|–|—|:)?\s*(?:only\s+)?(?:within|in|from|for)?\s*([A-Z][A-Za-z ]{2,30})(?:\.|,|$)/i);
   return match ? match[1].trim() : 'unknown';
 }
 
@@ -254,8 +254,8 @@ function buildExplanation({
   const positive = [];
   const concerns = [];
 
-  if (skillSignal.ratio >= 0.8) positive.push('Strong match across the roleâ€™s required skills');
-  else if (skillSignal.ratio >= 0.55) positive.push('Good overlap with the roleâ€™s core skills');
+  if (skillSignal.ratio >= 0.8) positive.push('Strong match across the role’s required skills');
+  else if (skillSignal.ratio >= 0.55) positive.push('Good overlap with the role’s core skills');
   else concerns.push('Verified skill overlap is limited');
 
   if (experienceSignal.status === 'aligned') positive.push(`Experience aligns with ${experienceSignal.reason.replace(/^Experience aligns at\s*/i, '')}`);

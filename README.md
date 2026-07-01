@@ -88,8 +88,11 @@ It treats your resume and preferences as the source of truth, then searches and 
 | Profile-driven search | Builds discovery queries from candidate facts, combining ATS providers, remote feeds, configured portals, scan history, and pipeline entries |
 | Fit scoring | Scores roles using skills, experience, eligibility, compensation, availability, and preferences — not title-only matching |
 | Tailored resumes | Generates tailored HTML/PDF resumes while preserving factual claims from the canonical CV |
+| Portfolio site generator | Builds a personal portfolio **website** from a candidate's own career-ops data (identity, CV, storybank, proof points, pipeline) — role-agnostic, themeable, exportable as a standalone Vite project. See [`docs/PORTFOLIO.md`](docs/PORTFOLIO.md). |
 | Privacy audit | Verifies local dashboard code does not leak private resume/profile data into system-layer files |
 | career-ops compatibility | Keeps core tracker files, reports, scanner scripts, modes, templates, and data contract available |
+| Bot-block-aware liveness | Distinguishes a bot-blocked-but-live posting from a genuinely dead one (per-domain block signatures for LinkedIn, naukri, foundit, instahyre, cutshort) so blocked postings are never misrecorded as expired — see [`docs/liveness-bot-block-policy.md`](docs/liveness-bot-block-policy.md) |
+| Board maintenance | `board-sweep.mjs` re-checks liveness for every open pipeline entry (zero-token ATS API by default, `--browser` for full checks) and `board-clean.mjs` purges non-Android false positives from `data/pipeline.md` |
 
 ---
 
@@ -201,6 +204,8 @@ npm run scan                # Run the zero-token career-ops scanner
 npm run scan:full           # Reverse-discover jobs from public ATS APIs
 npm run tracker             # Open the career-ops tracker
 npm run pdf                 # Generate a career-ops PDF resume
+npm run board:sweep         # Liveness-sweep every open pipeline.md entry (--browser, --mark)
+npm run board:clean         # Purge non-Android false positives from pipeline.md (--apply)
 
 # multi-profile
 node migrate-profile.mjs <slug> --display-name "Name" [--dry-run]

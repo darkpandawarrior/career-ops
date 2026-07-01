@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { getSetupStatus, loadActiveProfile, loadJobSearchConfig } from './config.mjs';
 import { acceptResumeUpload, discardDraft, readDraft } from './onboarding/upload-intake.mjs';

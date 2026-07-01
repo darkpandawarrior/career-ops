@@ -1,5 +1,6 @@
 import { fillSession, handoffSession, getSession } from "@/lib/apply/session";
 import { resolveTailoredCv, companyFromTitle } from "@/lib/apply/cv";
+import { requestRoot } from "@/lib/profile-registry";
 import type { ApplyField } from "@/lib/apply/extract";
 
 export const runtime = "nodejs";
@@ -20,9 +21,12 @@ export async function POST(req: Request) {
   if (!sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
 
   // Resolve the tailored CV server-side (never trust a client path): by the
-  // offer's company if known, else best-effort from the form title.
+  // offer's company if known, else best-effort from the form title. Scoped to
+  // the requesting profile's own root — never the fixed engine root, or one
+  // profile's tailored CV could get attached to another profile's application.
   const session = getSession(sessionId);
-  const cvPath = resolveTailoredCv(company) ?? resolveTailoredCv(companyFromTitle(session?.title)) ?? undefined;
+  const root = await requestRoot();
+  const cvPath = resolveTailoredCv(root, company) ?? resolveTailoredCv(root, companyFromTitle(session?.title)) ?? undefined;
 
   try {
     const result = await fillSession(sessionId, answers, fields, cvPath);

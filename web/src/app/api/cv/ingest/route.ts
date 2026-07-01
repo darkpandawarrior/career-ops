@@ -8,7 +8,7 @@ import { requestRoot } from "@/lib/profile-registry";
 import { runOnboarding } from "@/lib/onboarding/run";
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
-// the USER'S OWN CLI headless â€” the web never ships a heavyweight parser, and the
+// the USER'S OWN CLI headless — the web never ships a heavyweight parser, and the
 // real CV NEVER leaves the machine (local-first, PII-safe). This route is a
 // PROPOSER: it produces candidate markdown only; the actual write to cv.md happens
 // via the existing POST /api/cv after the user confirms (propose-then-confirm).
@@ -16,7 +16,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Prefer the CANONICAL core mode (single source of truth â€” CLI + web parse CVs
+// Prefer the CANONICAL core mode (single source of truth — CLI + web parse CVs
 // identically); fall back to the inline prompt until modes/cv-ingest.md lands
 // (exactly how the explore route handles a missing discover.md).
 function readCanonicalMode(): string | null {
@@ -39,25 +39,25 @@ function ingestPrompt(source: string): string {
 FORMAT (match exactly; omit a section if the source lacks it; INVENT NOTHING):
 \`# CV -- {Full Name}\`
 then bold contact lines directly under the title (no "Contact" section):
-\`**Location:** â€¦\` / \`**Email:** â€¦\` / \`**LinkedIn:** â€¦\` / \`**Portfolio:** â€¦\` / \`**GitHub:** â€¦\`
-\`## Professional Summary\` â€” a 2-4 line summary, only from facts present.
-\`## Work Experience\` â€” each role as: \`### {Company} -- {Location}\`, then \`**{Job Title}**\` on its own line, then \`{Start}-{End or Present}\` on its own line, then bullet points (preserve EVERY quantified achievement verbatim).
-\`## Projects\` â€” flat bullets: \`- **{Name}** ({type}) -- {what + hero metric}\`.
-\`## Education\` â€” flat bullets: \`- {Degree}, {Institution} ({year})\`.
-\`## Skills\` â€” grouped bullets: \`- **{Category}:** {comma list}\`.
-Use \`--\` (double hyphen), NEVER an em dash (ATS rule). Preserve every company/title/date/metric. Clean, don't rewrite â€” it's THEIR CV.
+\`**Location:** …\` / \`**Email:** …\` / \`**LinkedIn:** …\` / \`**Portfolio:** …\` / \`**GitHub:** …\`
+\`## Professional Summary\` — a 2-4 line summary, only from facts present.
+\`## Work Experience\` — each role as: \`### {Company} -- {Location}\`, then \`**{Job Title}**\` on its own line, then \`{Start}-{End or Present}\` on its own line, then bullet points (preserve EVERY quantified achievement verbatim).
+\`## Projects\` — flat bullets: \`- **{Name}** ({type}) -- {what + hero metric}\`.
+\`## Education\` — flat bullets: \`- {Degree}, {Institution} ({year})\`.
+\`## Skills\` — grouped bullets: \`- **{Category}:** {comma list}\`.
+Use \`--\` (double hyphen), NEVER an em dash (ATS rule). Preserve every company/title/date/metric. Clean, don't rewrite — it's THEIR CV.
 
 OUTPUT PROTOCOL:
 - You are a PROPOSER: do NOT write any file. Emit ONLY the markdown wrapped EXACTLY between a line \`<<cv:start>>\` and a line \`<<cv:end>>\` (each on its own line, never inside a code fence).
 - After \`<<cv:end>>\`, emit ONE more line: \`<<cv:seed>>{"title":"<their current/target role>","roles":["<3-5 role keywords>"],"location":"<their location or 'Remote'>"}\`
 - If the source is unreadable or empty, emit ONLY: \`<<cv:error>>{"reason":"unreadable"}\` and stop.
-- Narrate one short line BEFORE \`<<cv:start>>\` (e.g. "Reading your CVâ€¦").
+- Narrate one short line BEFORE \`<<cv:start>>\` (e.g. "Reading your CV…").
 
 ${source}`;
 }
 
-const TEXT_SRC = (t: string) => `SOURCE (the user's CV, pasted as text â€” convert it):\n"""\n${t.slice(0, 24000)}\n"""`;
-const FILE_SRC = (p: string) => `SOURCE: the user's CV is the file at this local path â€” READ it with your file/Read tool, then convert it:\n${p}`;
+const TEXT_SRC = (t: string) => `SOURCE (the user's CV, pasted as text — convert it):\n"""\n${t.slice(0, 24000)}\n"""`;
+const FILE_SRC = (p: string) => `SOURCE: the user's CV is the file at this local path — READ it with your file/Read tool, then convert it:\n${p}`;
 
 export async function POST(req: Request) {
   const ctype = req.headers.get("content-type") || "";
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
       const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
       tempFile = path.join(dir, `cv${ext}`); // outside the repo, basename-only
-      fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII â†’ owner-only
+      fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII → owner-only
       if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
         // Non-Claude CLIs can't read arbitrary files via tool calls. Extract the PDF
         // text locally via pdfjs (zero tokens, same bridge the onboarding flow uses),
@@ -90,7 +90,7 @@ export async function POST(req: Request) {
         tempFile = null;
         if (!extraction.ok || !extraction.text) {
           return Response.json(
-            { error: (extraction.error as string) || "Could not read PDF â€” paste your CV text instead." },
+            { error: (extraction.error as string) || "Could not read PDF — paste your CV text instead." },
             { status: 422 },
           );
         }

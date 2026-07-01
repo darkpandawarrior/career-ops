@@ -51,14 +51,15 @@ describe("companyFromTitle", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// resolveTailoredCv — fs-backed. It reads <careerOpsRoot()>/output for *.pdf and
-// matches by company slug. careerOpsRoot() honours CAREER_OPS_ROOT, so we point
-// it at a throwaway tree — no mocking, no touching the user's real output/.
+// resolveTailoredCv — fs-backed. It reads <root>/output for *.pdf and matches
+// by company slug. `root` is passed explicitly by the caller (the requesting
+// profile's own root) so we point it at a throwaway tree — no mocking, no
+// touching the user's real output/, and no risk of one profile's CV leaking
+// into another's (see cv.ts's doc comment).
 // ─────────────────────────────────────────────────────────────────────────────
 describe("resolveTailoredCv", () => {
   let ROOT: string;
   let OUTPUT: string;
-  let prevEnv: string | undefined;
 
   const writePdf = (name: string, when?: number) => {
     const p = path.join(OUTPUT, name);
@@ -71,54 +72,50 @@ describe("resolveTailoredCv", () => {
     ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "co-cv-"));
     OUTPUT = path.join(ROOT, "output");
     fs.mkdirSync(OUTPUT, { recursive: true });
-    prevEnv = process.env.CAREER_OPS_ROOT;
-    process.env.CAREER_OPS_ROOT = ROOT;
   });
 
   afterEach(() => {
-    if (prevEnv === undefined) delete process.env.CAREER_OPS_ROOT;
-    else process.env.CAREER_OPS_ROOT = prevEnv;
     fs.rmSync(ROOT, { recursive: true, force: true });
   });
 
   it("returns null for an empty / missing company (no guessing)", () => {
     writePdf("acme-cv.pdf");
-    expect(resolveTailoredCv("")).toBeNull();
-    expect(resolveTailoredCv("   ")).toBeNull();
-    expect(resolveTailoredCv(undefined)).toBeNull();
+    expect(resolveTailoredCv(ROOT, "")).toBeNull();
+    expect(resolveTailoredCv(ROOT, "   ")).toBeNull();
+    expect(resolveTailoredCv(ROOT, undefined)).toBeNull();
   });
 
   it("returns null when the output/ dir does not exist (readdir throws)", () => {
     fs.rmSync(OUTPUT, { recursive: true, force: true });
-    expect(resolveTailoredCv("Acme")).toBeNull();
+    expect(resolveTailoredCv(ROOT, "Acme")).toBeNull();
   });
 
   it("resolves a PDF whose name contains the full company slug", () => {
     const p = writePdf("alex-acme-corp-cv.pdf");
-    expect(resolveTailoredCv("Acme Corp")).toBe(p);
+    expect(resolveTailoredCv(ROOT, "Acme Corp")).toBe(p);
   });
 
   it("matches on the first slug token when it is >2 chars and the full slug is absent", () => {
     // company "Acme Corp" -> slug "acme-corp", first token "acme". File only has "acme".
     const p = writePdf("acme-resume.pdf");
-    expect(resolveTailoredCv("Acme Corp")).toBe(p);
+    expect(resolveTailoredCv(ROOT, "Acme Corp")).toBe(p);
   });
 
   it("does NOT fall back to a short (<=2 char) first token", () => {
     // company "Hi There" -> first token "hi" (len 2) — too short to fuzzy-match.
     writePdf("hi-everyone.pdf");
-    expect(resolveTailoredCv("Hi There")).toBeNull();
+    expect(resolveTailoredCv(ROOT, "Hi There")).toBeNull();
   });
 
   it("only considers .pdf files (ignores other extensions)", () => {
     writePdf("acme.txt" as string); // not a pdf
     fs.writeFileSync(path.join(OUTPUT, "acme.txt"), "x");
-    expect(resolveTailoredCv("Acme")).toBeNull();
+    expect(resolveTailoredCv(ROOT, "Acme")).toBeNull();
   });
 
   it("returns null when no file matches the company at all (never the wrong CV)", () => {
     writePdf("globex-cv.pdf");
-    expect(resolveTailoredCv("Acme")).toBeNull();
+    expect(resolveTailoredCv(ROOT, "Acme")).toBeNull();
   });
 
   it("returns the NEWEST match when several files match (mtime desc)", () => {
@@ -126,11 +123,22 @@ describe("resolveTailoredCv", () => {
     writePdf("acme-old.pdf", base - 100_000);
     const newest = writePdf("acme-new.pdf", base);
     writePdf("acme-mid.pdf", base - 50_000);
-    expect(resolveTailoredCv("Acme")).toBe(newest);
+    expect(resolveTailoredCv(ROOT, "Acme")).toBe(newest);
   });
 
   it("is case-insensitive on the company name", () => {
     const p = writePdf("acme-cv.pdf");
-    expect(resolveTailoredCv("ACME")).toBe(p);
+    expect(resolveTailoredCv(ROOT, "ACME")).toBe(p);
+  });
+
+  it("never resolves a different profile's output/ directory (cross-profile isolation)", () => {
+    writePdf("acme-cv.pdf");
+    const otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), "co-cv-other-"));
+    fs.mkdirSync(path.join(otherRoot, "output"), { recursive: true });
+    try {
+      expect(resolveTailoredCv(otherRoot, "Acme")).toBeNull();
+    } finally {
+      fs.rmSync(otherRoot, { recursive: true, force: true });
+    }
   });
 });

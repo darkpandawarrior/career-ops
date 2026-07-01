@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { validateJobSearchConfig } from '../search/config-schema.mjs';
 import { buildSearchPlan } from '../search/query-builder.mjs';

@@ -4,14 +4,14 @@ import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "./extract";
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// AGENTIC FALLBACK â€” the AI interprets the LIVE form, like a human does with
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENTIC FALLBACK — the AI interprets the LIVE form, like a human does with
 // Playwright. When deterministic extraction is low-confidence (unknown ATS, 0
 // clean fields), we hand the LLM a text snapshot of EVERY interactive control +
 // its surrounding context/options (no hardcoded selectors), and it returns the
-// form's structure. WE then actuate deterministically (fill/verify/handoff) â€”
+// form's structure. WE then actuate deterministically (fill/verify/handoff) —
 // the LLM interprets, never blind-clicks. Robust to any markup change.
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─────────────────────────────────────────────────────────────────────────────
 
 type Cand = { n: number; tag: string; type: string; name: string; placeholder: string; aria: string; req: boolean; ctx: string; opts: string[] };
 
@@ -69,7 +69,7 @@ function buildPrompt(title: string, cands: Cand[]): string {
     .join("\n");
   return `You are interpreting a LIVE job-application form (${title}) so it can be re-rendered cleanly. Below is EVERY interactive control with its surrounding text. For EACH control decide:
 - "skip": true if it is NOT a real application field to fill (a search/filter box, navigation, cookie/consent control, social-login button, or decorative widget).
-- otherwise give: "label" (the human question in plain words, cleaned of asterisks/option text), "type" (one of: text, email, tel, url, number, date, textarea, select, radio, checkbox, file), "options" (ONLY for select/radio â€” the exact visible option texts), "required" (boolean).
+- otherwise give: "label" (the human question in plain words, cleaned of asterisks/option text), "type" (one of: text, email, tel, url, number, date, textarea, select, radio, checkbox, file), "options" (ONLY for select/radio — the exact visible option texts), "required" (boolean).
 Infer the TYPE from meaning (e.g. a "Resume/CV" upload = file; a custom dropdown = select; "Why us?" = textarea). Use the EXACT option texts shown.
 
 CONTROLS:
