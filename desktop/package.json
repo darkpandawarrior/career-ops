@@ -43,14 +43,12 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ]
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ]
     }
   }
