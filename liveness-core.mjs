@@ -62,6 +62,102 @@ const APPLY_PATTERNS = [
 
 const MIN_CONTENT_CHARS = 300;
 
+// ── Bot-block classification policy (docs/liveness-bot-block-policy.md) ──────
+//
+// Four-bucket taxonomy layered over the legacy result/code wire format:
+//   live         — positive proof of an open posting
+//   dead         — positive proof of closure (404/410, expiry banner, listing bounce)
+//   blocked      — positive proof we were prevented from reading the page (a wall);
+//                  says NOTHING about liveness. Never downgrade to dead on a block alone.
+//   unverifiable — loaded but no definitive signal (no apply control, thin body, nav error)
+//
+// `bucket` is additive: classifyLiveness still returns the same result/code, so
+// every existing caller/test keeps working. The bucket is the policy-level view.
+
+// Codes that mean "a wall stopped us", not "the posting is gone".
+const BLOCKED_CODES = new Set(['bot_challenge', 'access_blocked']);
+const DEAD_CODES = new Set([
+  'http_gone', 'expired_url', 'expired_body', 'listing_page', 'insufficient_content',
+]);
+
+// Map a (result, code) pair to the four-bucket taxonomy.
+export function bucketFor(result, code = '') {
+  if (result === 'active') return 'live';
+  if (result === 'expired') return 'dead';
+  // result === 'uncertain' from here
+  if (BLOCKED_CODES.has(code) || code.startsWith('domain_block:')) return 'blocked';
+  return 'unverifiable'; // no_apply_control, insufficient_content (block-prone), navigation_error, guards
+}
+
+// Per-domain handling map. `blockedSignature` fires BEFORE the generic content
+// heuristics so a login-walled HTTP-200 thin shell (instahyre/cutshort/linkedin)
+// is caught as `blocked`, never leaked to insufficient_content → dead.
+// `treatBlockedAs` is always 'blocked' — the map recognises the wall; liveness
+// behind it is resolved by escalation or decay, not guessed here.
+export const DOMAIN_LIVENESS = {
+  'linkedin.com': {
+    checkMethod: 'authed-session',
+    blockedSignature: { status: [999], finalUrl: [/\/(login|authwall)/i], body: [/sign in to view/i, /join linkedin to/i] },
+    treatBlockedAs: 'blocked',
+  },
+  'naukri.com': {
+    checkMethod: 'apify',
+    blockedSignature: { status: [403], finalUrl: [], body: [/verify you are a human/i, /access denied/i] },
+    treatBlockedAs: 'blocked',
+  },
+  'foundit.in': {
+    checkMethod: 'headed',
+    blockedSignature: { status: [403], finalUrl: [], body: [/access denied/i] },
+    treatBlockedAs: 'blocked',
+  },
+  'instahyre.com': {
+    checkMethod: 'headless',
+    blockedSignature: { status: [], finalUrl: [/\/login/i], body: [/log ?in to apply/i, /sign in to continue/i] },
+    treatBlockedAs: 'blocked',
+  },
+  'cutshort.io': {
+    checkMethod: 'authed-session',
+    blockedSignature: { status: [], finalUrl: [/\/login/i, /\/signin/i], body: [/log ?in to/i] },
+    treatBlockedAs: 'blocked',
+  },
+};
+
+function domainEntryFor(rawUrl) {
+  let host;
+  try {
+    host = new URL(rawUrl).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return null;
+  }
+  for (const [domain, entry] of Object.entries(DOMAIN_LIVENESS)) {
+    if (host === domain || host.endsWith(`.${domain}`)) return { domain, entry };
+  }
+  return null;
+}
+
+// True if the signals match the domain's block signature (any axis matches).
+function matchesBlockSignature(sig, { status, finalUrl, bodyText }) {
+  if (sig.status?.includes(status)) return true;
+  if (sig.finalUrl?.some((re) => re.test(finalUrl))) return true;
+  if (sig.body?.some((re) => re.test(bodyText))) return true;
+  return false;
+}
+
+// Soft-expiry decay (docs §3.4). PURE — no I/O, no deletion. Returns the new
+// scan-history status for a provisional row that has aged past N=21 days with no
+// corroboration, or null to leave it unchanged. A genuine expiry banner is
+// authoritative and bypasses decay entirely (that row is already `dead`).
+export const DECAY_AFTER_DAYS = 21;
+export function decayBucketFor(firstSeen, today, { bucket, corroborated = false, decayAfterDays = DECAY_AFTER_DAYS } = {}) {
+  if (bucket !== 'blocked' && bucket !== 'unverifiable') return null;
+  if (corroborated) return null;
+  const start = Date.parse(`${firstSeen}T00:00:00Z`);
+  const end = Date.parse(`${today}T00:00:00Z`);
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+  const ageDays = Math.floor((end - start) / 86_400_000);
+  return ageDays >= decayAfterDays ? 'skipped_probable_expired' : null;
+}
+
 function firstMatch(patterns, text = '') {
   return patterns.find((pattern) => pattern.test(text));
 }
@@ -70,7 +166,38 @@ function hasApplyControl(controls = []) {
   return controls.some((control) => APPLY_PATTERNS.some((pattern) => pattern.test(control)));
 }
 
+// Attach the additive policy `bucket` to a legacy {result, code, reason}.
+function withBucket(r) {
+  return { ...r, bucket: bucketFor(r.result, r.code) };
+}
+
+// URL-aware classifier (decision-tree step 2): runs the per-domain block
+// signature BEFORE the generic content heuristics, so a login-walled HTTP-200
+// thin shell is `blocked`, not a false `dead`. An authoritative expiry banner
+// still wins (a closed posting on a block-prone domain is genuinely dead).
+// Callers that don't have/pass a URL get the unchanged generic path.
+export function classifyLivenessForUrl({ url = '', status = 0, finalUrl = '', bodyText = '', applyControls = [] } = {}) {
+  if (status !== 404 && status !== 410) {
+    const expiredBody = firstMatch(HARD_EXPIRED_PATTERNS, bodyText);
+    if (!expiredBody) {
+      const hit = domainEntryFor(url);
+      if (hit && matchesBlockSignature(hit.entry.blockedSignature, { status, finalUrl, bodyText })) {
+        return withBucket({
+          result: 'uncertain',
+          code: `domain_block:${hit.domain}`,
+          reason: `${hit.domain} block signature matched (treated as blocked, not expired)`,
+        });
+      }
+    }
+  }
+  return classifyLiveness({ status, finalUrl, bodyText, applyControls });
+}
+
 export function classifyLiveness({ status = 0, finalUrl = '', bodyText = '', applyControls = [] } = {}) {
+  return withBucket(classifyLivenessInner({ status, finalUrl, bodyText, applyControls }));
+}
+
+function classifyLivenessInner({ status = 0, finalUrl = '', bodyText = '', applyControls = [] } = {}) {
   if (status === 404 || status === 410) {
     return { result: 'expired', code: 'http_gone', reason: `HTTP ${status}` };
   }
