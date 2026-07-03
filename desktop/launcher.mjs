@@ -42,7 +42,11 @@ export function startNextServer({ sourceRoot, packagedRoot, port = DEFAULT_PORT,
     const serverJs = path.join(packagedRoot, "server.js");
     return spawn(process.execPath, [serverJs], {
       cwd: packagedRoot,
-      env: { ...env, PORT: String(port), HOSTNAME: "127.0.0.1" },
+      // Without this, process.execPath (the packaged Electron binary) treats
+      // serverJs as an app to launch rather than a script to run, and just
+      // relaunches the whole Electron app recursively instead of starting the
+      // Next.js server.
+      env: { ...env, ELECTRON_RUN_AS_NODE: "1", PORT: String(port), HOSTNAME: "127.0.0.1" },
       stdio: "inherit",
       shell: false,
     });

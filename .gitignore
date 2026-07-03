@@ -105,6 +105,8 @@ data/model-blacklist.json
 .opencode/memory/
 career-dashboard
 career-dashboard.exe
+# electron-builder output (packaged .app/.dmg/.exe, hundreds of MB)
+desktop/dist/
 data/job-dashboard.json
 data/dashboard-web.*.log
 data/profile-archives/

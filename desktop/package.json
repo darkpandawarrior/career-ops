@@ -31,11 +31,11 @@
       },
       {
         "from": "../web/.next/static",
-        "to": "web/.next/static"
+        "to": "web/web/.next/static"
       },
       {
         "from": "../web/public",
-        "to": "web/public"
+        "to": "web/web/public"
       }
     ],
     "directories": {
