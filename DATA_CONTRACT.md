@@ -55,8 +55,11 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/training.md` | Training evaluation instructions |
 | `modes/patterns.md` | Pattern analysis instructions |
 | `modes/followup.md` | Follow-up cadence instructions |
+| `modes/interview/*` | Interview prep planning, practice, and debrief skills |
 | `modes/de/*` | German language modes |
+| `modes/es/*` | Spanish language modes |
 | `modes/fr/*` | French language modes |
+| `modes/it/*` | Italian language modes |
 | `modes/ja/*` | Japanese language modes |
 | `modes/pl/*` | Polish language modes |
 | `modes/pt/*` | Portuguese language modes |
@@ -69,7 +72,8 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `*.mjs` | Utility scripts |
 | `plugins/` | Bundled plugins + the plugin engine (opt-in external integrations) |
 | `plugins.mjs` | Plugin CLI (list/run/available/add/new/enable/skill/trust/remove) |
-| `plugin-install.mjs` / `plugin-audit.mjs` | Plugin install/audit utilities |
+| `plugins-registry.json` | Curated list of approved community plugins (the trust root) |
+| `plugin-install.mjs` / `plugin-audit.mjs` / `validate-plugin-registry.mjs` | Plugin install/audit/registry-validation utilities |
 | `config/plugins.example.yml` | Plugin activation template (seed for `config/plugins.yml`) |
 | `batch/batch-prompt.md` | Batch worker prompt |
 | `batch/batch-runner.sh` | Batch orchestrator |
