@@ -1,0 +1,55 @@
+{
+  "name": "@career-ops/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop shell for the career-ops Next.js dashboard",
+  "author": "Gagandeep Singh",
+  "main": "main.mjs",
+  "type": "module",
+  "scripts": {
+    "dev": "electron .",
+    "package": "electron-builder",
+    "build:web": "npm --prefix ../web run build",
+    "start:web": "npm --prefix ../web run start"
+  },
+  "devDependencies": {
+    "electron": "^37.3.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "io.careerops.desktop",
+    "productName": "Career Ops",
+    "files": [
+      "main.mjs",
+      "preload.mjs",
+      "launcher.mjs"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/.next/standalone",
+        "to": "web"
+      },
+      {
+        "from": "../web/.next/static",
+        "to": "web/.next/static"
+      },
+      {
+        "from": "../web/public",
+        "to": "web/public"
+      }
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  }
+}
