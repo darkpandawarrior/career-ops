@@ -9,12 +9,24 @@ const port = Number(process.env.CAREER_OPS_DESKTOP_PORT || 3000);
 let serverChild;
 let window;
 
+// Without this, every extra launch (a second Dock click while the first
+// instance is still starting its internal server) spawns a brand-new
+// Electron process that immediately fails to bind the same port and shows
+// a crash dialog -- looking like the app is bouncing/relaunching forever.
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+
 function sourceRoot() {
   return path.resolve(__dirname, "..", "web");
 }
 
 function packagedRoot() {
-  return path.join(process.resourcesPath, "web");
+  // The standalone build traces from the monorepo root (web/'s own fonts.ts
+  // reaches outside web/ for shared self-hosted fonts), so server.js lands
+  // nested at .next/standalone/web/, not at the standalone root itself.
+  return path.join(process.resourcesPath, "web", "web");
 }
 
 function createWindow() {
@@ -39,7 +51,16 @@ function showLaunchFailure(message) {
   }
 }
 
+app.on("second-instance", () => {
+  if (window) {
+    if (window.isMinimized()) window.restore();
+    window.focus();
+  }
+});
+
 app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return;
+
   const dataRoot = ensureDesktopDataRoot(app);
   const env = {
     ...process.env,
