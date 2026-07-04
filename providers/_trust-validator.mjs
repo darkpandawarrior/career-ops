@@ -50,6 +50,13 @@ const DEFAULT_ATS_ALLOWLIST = [
   '3ds.com',
   'successfactors.com',
   'successfactors.eu',
+  'getro.com',
+  'getconsider.com',
+  'joinup.ch',
+  'cutshort.io',
+  'startup.ch',
+  'keka.com',
+  'join.com',
 ];
 
 /** @type {Record<string, number>} */

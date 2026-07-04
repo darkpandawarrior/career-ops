@@ -499,6 +499,7 @@ search_queries:
 #   avature         <slug>.avature.net                  (or provider: avature + api: for a branded custom domain)
 #   amazon          amazon.jobs                         (or api: field)
 #   dassault        3ds.com / *.3ds.com                  (or api: field)
+#   keka            <tenant>.keka.com                    (or api: field pointing at the careers page)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -537,6 +538,16 @@ search_queries:
 #   careers_url: https://ats.rippling.com/exampleco/jobs  # any ats.rippling.com/<slug>
 #   enabled: true
 #
+# - name: Example Keka Co
+#   careers_url: https://exampleco.keka.com/careers       # any *.keka.com host — common
+#                                                          # among mid-size Indian tech companies
+#   enabled: false
+#
+# - name: Example JazzHR Co
+#   careers_url: https://exampleco.applytojob.com/apply/jobs/  # any *.applytojob.com host
+#   enabled: false
+#
+
 # - name: Example JibeApply Co
 #   careers_url: https://exampleco.jibeapply.com/jobs     # any *.jibeapply.com/jobs host
 #   max_pages: 50          # optional page cap (10 jobs/page, default 50, max 500) —
@@ -1624,3 +1635,89 @@ job_boards:
   #   provider: higheredjobs
   #   cat_id: 68
   #   enabled: true
+
+  # ── Getro — VC portfolio "talent network" boards ───────────────────
+  # One board aggregates jobs across a fund's portfolio companies (each job
+  # belongs to the portfolio company, not the fund). Set `getro_collection` to
+  # the board's numeric network id (the `network.id` in the board page's
+  # __NEXT_DATA__). `careers_url` is reference-only. Optional knobs:
+  # `getro_max_pages` (default 40), `getro_max_age_days` (default 90, a
+  # pagination bound — newest-first, stops once postings cross the age).
+
+  - name: b2venture (portfolio)
+    careers_url: https://jobs.b2venture.vc
+    provider: getro
+    getro_collection: 4283
+    enabled: false
+    notes: "Swiss VC portfolio board (Getro)"
+
+  - name: Cherry Ventures (portfolio)
+    careers_url: https://jobs.cherry.vc
+    provider: getro
+    getro_collection: 44081
+    enabled: false
+    notes: "VC portfolio board (Getro)"
+
+  # ── Consider (getconsider.com) — VC portfolio boards ───────────────
+  # JS board backed by a same-origin JSON API. Set `consider_board` to the
+  # board id — NOT the host (Founderful's board id is "wingman"). `careers_url`
+  # supplies the board origin. Optional: `consider_size` (default 500).
+
+  - name: Founderful (portfolio)
+    careers_url: https://jobs.founderful.com/jobs
+    provider: consider
+    consider_board: wingman
+    enabled: false
+    notes: "Swiss VC portfolio board (Consider)"
+
+  # ── Swiss startup job boards ───────────────────────────────────────
+  # Aggregators of Swiss startup roles. No extra config — auto-detected from
+  # the careers_url host.
+
+  - name: startup.ch
+    careers_url: https://www.startup.ch/jobs
+    provider: startupch
+    enabled: false
+    notes: "Swiss Startup Association job board"
+
+  - name: joinup.ch
+    careers_url: https://joinup.ch/browse/jobs
+    provider: joinup
+    enabled: false
+    notes: "Swiss startup job platform (newest SSR page)"
+
+  # ── CutShort — India product/startup job board ──────────────────────
+  # Reads the embedded __NEXT_DATA__ JSON off CutShort's public SEO listing
+  # pages (https://cutshort.io/jobs/<slug>). Not auto-detected — cutshort.io
+  # is a shared multi-tenant domain with no per-company signal, so set
+  # `provider: cutshort` explicitly. Each slug is a fixed ~50-job snapshot
+  # with no real pagination (?page=N is ignored); add one entry per
+  # role/city slug you want covered. Browse https://cutshort.io/jobs for
+  # the full slug catalog. The interactive cutshort.io/jobs?q=... search
+  # app is session-gated and out of scope — this only reads the public
+  # SEO pages, which robots.txt permits.
+
+  - name: CutShort — Android (Pune)
+    careers_url: https://cutshort.io/jobs/android-developer-jobs-in-pune
+    provider: cutshort
+    enabled: false
+    notes: "India product/startup board. One fixed ~50-job snapshot per slug."
+
+  - name: CutShort — Android (Bangalore)
+    careers_url: https://cutshort.io/jobs/android-developer-jobs-in-bangalore-bengaluru
+    provider: cutshort
+    enabled: false
+    notes: "India product/startup board. One fixed ~50-job snapshot per slug."
+
+  # ── join.com — European ATS/job-board platform ───────────────────────
+  # Reads the embedded Next.js __NEXT_DATA__ SSR blob off a public company
+  # career page (https://join.com/companies/<slug>). Not auto-detected —
+  # join.com is a shared multi-tenant domain (like cutshort.io), so set
+  # `provider: join` explicitly. One fetch returns that company's full
+  # server-rendered job list (no separate JSON/REST endpoint is exposed).
+
+  - name: Example join.com Co
+    careers_url: https://join.com/companies/exampleco
+    provider: join
+    enabled: false
+    notes: "European ATS/job-board platform (SSR __NEXT_DATA__ blob)."

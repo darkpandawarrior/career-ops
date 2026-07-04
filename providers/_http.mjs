@@ -44,10 +44,34 @@ export async function fetchText(url, opts = {}) {
   return await res.text();
 }
 
+// Returns the raw Response (after the timeout + non-2xx guard) so providers that
+// need response headers — e.g. startup.ch reads Set-Cookie to prime a session —
+// can route through ctx instead of re-implementing fetch. Pass redirect:'error'
+// like every other provider call so a 3xx can't be followed to a private IP.
+export async function fetchResponse(url, opts = {}) {
+  return await fetchWithTimeout(url, opts);
+}
+
 export function makeHttpCtx() {
   return {
     transport: 'http',
     fetchJson,
     fetchText,
+    fetchResponse,
   };
+}
+
+/**
+ * Convert a date value to epoch milliseconds for freshness comparisons.
+ * Handles ISO 8601 strings, RFC 2822 (RSS pubDate), Unix seconds, and epoch ms.
+ * Returns null for missing or unparseable values.
+ */
+export function toEpochMs(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    // Heuristic: values < 1e12 are Unix seconds, >= 1e12 are already ms
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+  }
+  const ms = Date.parse(value);
+  return isNaN(ms) ? null : ms;
 }
