@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { requestRoot } from "@/lib/profile-registry";
 import { canonicalizeStatus } from "@/lib/core/states";
-import { atomicWrite } from "@/lib/core/safe-write";
+import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 
 // Writeback: UPDATE the status cell of an EXISTING tracker row only. Never adds
 // rows — per the core data contract, new rows go through the TSV + merge flow.
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
   if (!changed) return NextResponse.json({ error: "row not found" }, { status: 404 });
 
   try {
-    atomicWrite(file, lines.join("\n"));
+    atomicWriteWithBackup(file, lines.join("\n"));
   } catch {
     return NextResponse.json({ error: "write failed" }, { status: 500 });
   }

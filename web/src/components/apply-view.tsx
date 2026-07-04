@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, User, Mail, Phone, Globe, MapPin, Building2, Clock, CalendarDays, DollarSign, GraduationCap, FileText, Link2, Code2, MessageSquareText, ListChecks, Bookmark, X } from "lucide-react";
+import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, User, Mail, Phone, Globe, MapPin, Building2, Clock, CalendarDays, DollarSign, GraduationCap, FileText, Link2, Code2, MessageSquareText, ListChecks, Bookmark, X, Send } from "lucide-react";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
 import type { ApplyField } from "@/lib/apply/extract";
@@ -43,6 +43,8 @@ export function ApplyView() {
   const prevStatus = useRef(a.status);
   const [justDrafted, setJustDrafted] = useState(false);
   const [shot, setShot] = useState<number | null>(null); // lightbox: review a fill screenshot full-size
+  const [markingApplied, setMarkingApplied] = useState(false);
+  const [markedApplied, setMarkedApplied] = useState(false);
 
   useEffect(() => {
     if (shot === null) return;
@@ -122,6 +124,25 @@ export function ApplyView() {
   // after a deterministic fill: did some fields not land? → offer the agentic finisher
   const failed = a.steps.filter((s) => !s.ok).length;
   const partial = done && (failed > 0 || a.issues.some((i) => i.code === "fill-mismatch" || i.code === "required-empty"));
+
+  // "done" hands off to the user to click Submit themselves — this is the one-click
+  // shortcut so they don't also have to go mark the tracker row by hand afterward.
+  // Reuses the same write path as StatusSelect (POST /api/status), never a new one.
+  async function markApplied() {
+    if (!a.n || markingApplied) return;
+    setMarkingApplied(true);
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: a.n, status: "Applied" }),
+      });
+      if (!res.ok) throw new Error("write failed");
+      setMarkedApplied(true);
+    } catch {
+      setMarkingApplied(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -333,9 +354,32 @@ export function ApplyView() {
               <div>
                 <span className="font-medium text-emerald-700 dark:text-emerald-400">The pre-filled application is open in a separate Chrome window.</span>{" "}
                 <span className="text-muted">Switch to it, review every answer, and click Submit there yourself — career-ops never submits for you. (You can also enlarge the shots above to double-check.)</span>
-                <button onClick={a.bringForward} className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400">
-                  <ExternalLink className="size-3.5" /> Can&apos;t find it? Bring the application window forward
-                </button>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <button onClick={a.bringForward} className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400">
+                    <ExternalLink className="size-3.5" /> Can&apos;t find it? Bring the application window forward
+                  </button>
+                  {a.n && (
+                    <button
+                      onClick={markApplied}
+                      disabled={markingApplied}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-60 dark:text-emerald-400"
+                    >
+                      {markedApplied ? (
+                        <>
+                          <Check className="size-3.5" /> Marked as Applied
+                        </>
+                      ) : markingApplied ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" /> Marking…
+                        </>
+                      ) : (
+                        <>
+                          <Send className="size-3.5" /> Mark as Applied
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

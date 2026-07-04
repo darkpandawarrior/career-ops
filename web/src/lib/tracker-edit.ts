@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { atomicWrite } from "@/lib/core/safe-write";
+import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 
 /**
  * Profile-aware tracker write helpers — port dashboard-web/server.mjs's
@@ -55,7 +55,7 @@ export function setAppCell(
   }
   if (!changed) return "not-found";
   try {
-    atomicWrite(file, lines.join("\n"));
+    atomicWriteWithBackup(file, lines.join("\n"));
     return "ok";
   } catch {
     return "error";
@@ -75,7 +75,7 @@ export function togglePipeline(url: string, done: boolean, root: string = career
   const updated = md.replace(new RegExp(`- \\[[ xX]\\] ${esc}`), `- [${done ? "x" : " "}] ${url}`);
   if (updated === md) return "not-found";
   try {
-    atomicWrite(file, updated);
+    atomicWriteWithBackup(file, updated);
     return "ok";
   } catch {
     return "error";
@@ -96,7 +96,7 @@ export function queueAgentTask(text: string, root: string = careerOpsRoot()): Ed
   if (md.includes(clean.slice(0, 80))) return "ok"; // dedupe
   const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
   try {
-    atomicWrite(file, md.replace(/\n*$/, "\n") + `- [ ] ${stamp} — ${clean}\n`);
+    atomicWriteWithBackup(file, md.replace(/\n*$/, "\n") + `- [ ] ${stamp} — ${clean}\n`);
     return "ok";
   } catch {
     return "error";
@@ -117,7 +117,7 @@ export function removeAgentTask(text: string, root: string = careerOpsRoot()): E
   const out = lines.filter((l) => !(l.startsWith("- [ ]") && l.includes(t)));
   if (out.length === lines.length) return "not-found";
   try {
-    atomicWrite(file, out.join("\n"));
+    atomicWriteWithBackup(file, out.join("\n"));
     return "ok";
   } catch {
     return "error";

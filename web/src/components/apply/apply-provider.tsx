@@ -14,6 +14,7 @@ type ApplyCtx = {
   url: string;
   title: string;
   company: string;
+  n: string;
   fields: ApplyField[];
   answers: Record<string, string>;
   meta: Record<string, Meta>;
@@ -23,7 +24,7 @@ type ApplyCtx = {
   issues: ApplyIssue[];
   driveSteps: DriveStep[];
   error: string;
-  open: (url: string, opts?: { prefill?: boolean; company?: string }) => Promise<void>;
+  open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string }) => Promise<void>;
   prefill: () => Promise<void>;
   setAnswer: (idOrLabel: string, value: string, fromAI?: boolean) => void;
   fill: () => Promise<void>;
@@ -47,6 +48,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
+  const [n, setN] = useState("");
   const [fields, setFields] = useState<ApplyField[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [meta, setMeta] = useState<Record<string, Meta>>({});
@@ -151,7 +153,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string }) => {
+  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string; n?: string }) => {
     setStatus("opening");
     setError("");
     setFields([]);
@@ -165,6 +167,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setDriveSteps([]);
     setUrl(u);
     setCompany(opts?.company ?? "");
+    setN(opts?.n ?? "");
     companyRef.current = opts?.company ?? "";
     pendingPrefill.current = false;
     try {
@@ -414,6 +417,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setUrl("");
     setTitle("");
     setCompany("");
+    setN("");
     setFields([]);
     setAnswers({});
     setMeta({});
@@ -428,8 +432,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ status, url, title, company, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast }),
-    [status, url, title, company, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast],
+    () => ({ status, url, title, company, n, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast }),
+    [status, url, title, company, n, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
