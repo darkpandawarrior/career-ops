@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search } from "lucide-react";
+import { Search, Bell } from "lucide-react";
+import { useNotify } from "@/lib/use-notify";
 import { cn } from "@/lib/cn";
 import { BrandLockup } from "@/components/brand";
 import { ProfileSwitcher } from "@/components/profile-switcher";
@@ -23,6 +24,7 @@ import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { count, permission, requestPermission } = useNotify();
   return (
     <JobsProvider>
       <PipelineProvider>
@@ -31,9 +33,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <MobileNav />
       <div className="flex min-h-screen">
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
-          <Link href="/" className="mb-5 flex items-center px-1">
-            <BrandLockup size={32} />
-          </Link>
+          <div className="mb-5 flex items-center justify-between px-1">
+            <Link href="/" className="flex items-center">
+              <BrandLockup size={32} />
+            </Link>
+            {permission === "granted" || permission === "denied" ? (
+              <Link href="/" className="relative rounded-md p-1.5 text-muted transition-colors hover:bg-surface-hover hover:text-foreground" aria-label={`${count} updates`} title={`${count} new matches + follow-ups due`}>
+                <Bell className="size-4" />
+                {count > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex size-3.5 items-center justify-center rounded-full bg-brand text-[9px] font-bold text-brand-foreground">
+                    {count > 9 ? "9+" : count}
+                  </span>
+                )}
+              </Link>
+            ) : permission !== "unsupported" ? (
+              <button
+                type="button"
+                onClick={requestPermission}
+                className="rounded-md p-1.5 text-faint transition-colors hover:bg-surface-hover hover:text-foreground"
+                aria-label="Enable desktop notifications"
+                title="Get notified about new matches & follow-ups when this tab is in the background"
+              >
+                <Bell className="size-4" />
+              </button>
+            ) : null}
+          </div>
           <ProfileSwitcher />
           <button
             type="button"
