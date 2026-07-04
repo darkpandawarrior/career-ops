@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (!b.n || typeof b.notes !== "string") {
     return NextResponse.json({ error: "n and notes required" }, { status: 400 });
   }
-  const r = setAppCell(b.n, "Notes", b.notes, await requestRoot());
+  const r = await setAppCell(b.n, "Notes", b.notes, await requestRoot());
   if (r === "ok") return NextResponse.json({ ok: true });
   const code = r === "invalid" ? 400 : r === "not-found" ? 404 : 500;
   return NextResponse.json({ error: r }, { status: code });

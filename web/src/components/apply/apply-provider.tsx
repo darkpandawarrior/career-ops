@@ -9,11 +9,18 @@ export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: st
 type Meta = { needsConfirmation?: boolean; ai?: boolean };
 type Status = "idle" | "opening" | "driving" | "prefilling" | "ready" | "filling" | "done" | "error";
 
+// A batch of applications to prepare SEQUENTIALLY, one real headed session at a
+// time — never multiple Chrome windows at once (see AGENTS.md/drive.ts). Each
+// item still goes through the exact same open→prefill→review→fill→handoff path;
+// the queue only removes the "go find the next URL" friction between them.
+export type QueueItem = { n?: string; url: string; title: string; company: string };
+
 type ApplyCtx = {
   status: Status;
   url: string;
   title: string;
   company: string;
+  n: string;
   fields: ApplyField[];
   answers: Record<string, string>;
   meta: Record<string, Meta>;
@@ -23,7 +30,7 @@ type ApplyCtx = {
   issues: ApplyIssue[];
   driveSteps: DriveStep[];
   error: string;
-  open: (url: string, opts?: { prefill?: boolean; company?: string }) => Promise<void>;
+  open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string }) => Promise<void>;
   prefill: () => Promise<void>;
   setAnswer: (idOrLabel: string, value: string, fromAI?: boolean) => void;
   fill: () => Promise<void>;
@@ -33,6 +40,15 @@ type ApplyCtx = {
   remember: Record<string, boolean>;
   setRemember: (id: string, on: boolean) => void;
   memoryToast: string;
+  // ── batch queue (additive; a single-job apply never touches these) ──
+  queue: QueueItem[];
+  queueIndex: number;
+  startQueue: (items: QueueItem[]) => Promise<void>;
+  queueNext: () => Promise<void>; // advance to the next item (used by "Skip" and after Mark Applied)
+  stopQueue: () => void; // leave queue mode, keep the current session open
+  // ── passive submit-detection (Part 2) — human-confirmed only, never auto-logs ──
+  submitDetected: boolean;
+  dismissSubmitDetected: () => void;
 };
 
 const Ctx = createContext<ApplyCtx | null>(null);
@@ -47,6 +63,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
+  const [n, setN] = useState("");
   const [fields, setFields] = useState<ApplyField[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [meta, setMeta] = useState<Record<string, Meta>>({});
@@ -58,7 +75,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [issues, setIssues] = useState<ApplyIssue[]>([]);
   const [driveSteps, setDriveSteps] = useState<DriveStep[]>([]);
   const [error, setError] = useState("");
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [queueIndex, setQueueIndex] = useState(0);
+  const [submitDetected, setSubmitDetected] = useState(false);
   const sessionId = useRef<string | null>(null);
+  // Path captured right at handoff — the polling effect below diffs future
+  // /api/apply/page-url reads against this to notice a post-handoff navigation.
+  const handoffPath = useRef<string | null>(null);
   const companyRef = useRef<string>("");
   const fieldsRef = useRef<ApplyField[]>([]);
   fieldsRef.current = fields;
@@ -151,7 +174,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string }) => {
+  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string; n?: string }) => {
     setStatus("opening");
     setError("");
     setFields([]);
@@ -165,6 +188,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setDriveSteps([]);
     setUrl(u);
     setCompany(opts?.company ?? "");
+    setN(opts?.n ?? "");
     companyRef.current = opts?.company ?? "";
     pendingPrefill.current = false;
     try {
@@ -193,6 +217,36 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setStatus("error");
     }
   }, []);
+
+  // ── batch queue: process ONE job at a time through the SAME open()/fill()
+  // pipeline above — no parallel sessions. "advance" just calls open() again for
+  // the next item, so every never-submit guard in session.ts/drive.ts applies
+  // identically to every queued item (nothing about the pipeline itself changes).
+  const queueRef = useRef<QueueItem[]>([]);
+  queueRef.current = queue;
+  const openItem = useCallback(
+    (item: QueueItem) => open(item.url, { prefill: true, company: item.company, n: item.n }),
+    [open],
+  );
+  const startQueue = useCallback(
+    async (items: QueueItem[]) => {
+      if (!items.length) return;
+      setQueue(items);
+      setQueueIndex(0);
+      await openItem(items[0]);
+    },
+    [openItem],
+  );
+  const queueNext = useCallback(async () => {
+    const next = queueIndex + 1;
+    setQueueIndex(next);
+    if (next < queueRef.current.length) await openItem(queueRef.current[next]);
+  }, [openItem, queueIndex]);
+  const stopQueue = useCallback(() => {
+    setQueue([]);
+    setQueueIndex(0);
+  }, []);
+  const dismissSubmitDetected = useCallback(() => setSubmitDetected(false), []);
 
   const prefill = useCallback(async () => {
     if (!sessionId.current) return;
@@ -279,6 +333,33 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     }
   }, [status, prefill]);
 
+  // PASSIVE submit-detection (human-confirmed only — never auto-logs). After
+  // handoff, the human is looking at the real ATS page about to click Submit
+  // themselves. We poll page.url() (read-only; see sessionUrlPath) every few
+  // seconds and, if the path changes — a common "redirected to a confirmation/
+  // thank-you page" signal — flip submitDetected so the UI can offer a
+  // confirm-only prompt. Stops the moment we leave "done" (new form opened, or
+  // the queue advanced) so it never watches a session that's no longer current.
+  useEffect(() => {
+    if (status !== "done" || !sessionId.current) return;
+    const id = sessionId.current;
+    const t = setInterval(() => {
+      if (sessionId.current !== id || submitDetected) return;
+      fetch("/api/apply/page-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id }) })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { path?: string } | null) => {
+          if (!d?.path || sessionId.current !== id) return;
+          if (handoffPath.current == null) {
+            handoffPath.current = d.path; // baseline arrived late — adopt it, don't fire immediately
+            return;
+          }
+          if (d.path !== handoffPath.current) setSubmitDetected(true);
+        })
+        .catch(() => {});
+    }, 4000);
+    return () => clearInterval(t);
+  }, [status, submitDetected]);
+
   const setAnswer = useCallback((idOrLabel: string, value: string, fromAI = false) => {
     const fs = fieldsRef.current;
     const key = idOrLabel.toLowerCase();
@@ -334,6 +415,14 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       }
       if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
       setStatus("done");
+      // Baseline for passive submit-detection: the page the human is looking at
+      // right after handoff. The polling effect below watches for it to change.
+      setSubmitDetected(false);
+      handoffPath.current = null;
+      fetch("/api/apply/page-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current }) })
+        .then((r) => r.json())
+        .then((d2: { path?: string }) => { if (d2?.path) handoffPath.current = d2.path; })
+        .catch(() => {});
       // ESCALATION ("si no va, full agente"): if deterministic fill clearly
       // didn't land (most fields failed / mismatched), let the agent fill it.
       const okCount = (d.steps ?? []).filter((s: FillStep) => s.ok).length;
@@ -410,10 +499,12 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     sessionId.current = null;
     companyRef.current = "";
     pendingPrefill.current = false;
+    handoffPath.current = null;
     setStatus("idle");
     setUrl("");
     setTitle("");
     setCompany("");
+    setN("");
     setFields([]);
     setAnswers({});
     setMeta({});
@@ -425,11 +516,22 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setIssues([]);
     setDriveSteps([]);
     setError("");
+    setQueue([]);
+    setQueueIndex(0);
+    setSubmitDetected(false);
   }, []);
 
   const value = useMemo(
-    () => ({ status, url, title, company, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast }),
-    [status, url, title, company, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast],
+    () => ({
+      status, url, title, company, n, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error,
+      open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast,
+      queue, queueIndex, startQueue, queueNext, stopQueue, submitDetected, dismissSubmitDetected,
+    }),
+    [
+      status, url, title, company, n, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error,
+      open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast,
+      queue, queueIndex, startQueue, queueNext, stopQueue, submitDetected, dismissSubmitDetected,
+    ],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

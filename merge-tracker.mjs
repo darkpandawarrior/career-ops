@@ -14,30 +14,30 @@
  * Run: node career-ops/merge-tracker.mjs [--dry-run] [--verify]
  */
 
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, renameSync, existsSync, rmSync, statSync, realpathSync } from 'fs';
-import { join, basename, dirname, resolve, relative, isAbsolute, sep } from 'path';
-import { fileURLToPath } from 'url';
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, renameSync, existsSync, rmSync, copyFileSync } from 'fs';
+import { join, basename, dirname } from 'path';
 import { execFileSync } from 'child_process';
-import { createHash, randomUUID } from 'crypto';
-import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { LEGACY_COLMAP, detectColumns } from './tracker-parse.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
 // CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
 const APPS_FILE_RAW = process.env.CAREER_OPS_TRACKER
   ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(CAREER_OPS, 'data/applications.md'))
-    ? join(CAREER_OPS, 'data/applications.md')
-    : join(CAREER_OPS, 'applications.md');
+  : existsSync(join(DATA_ROOT, 'data/applications.md'))
+    ? join(DATA_ROOT, 'data/applications.md')
+    : join(DATA_ROOT, 'applications.md');
 const APPS_FILE = canonicalizeTrackerPath(APPS_FILE_RAW);
 const TRACKER_DIR = dirname(APPS_FILE);
 // CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
 const ADDITIONS_DIR = process.env.CAREER_OPS_ADDITIONS
   ? process.env.CAREER_OPS_ADDITIONS
-  : join(CAREER_OPS, 'batch/tracker-additions');
+  : join(DATA_ROOT, 'batch/tracker-additions');
 const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY = process.argv.includes('--verify');
@@ -45,8 +45,7 @@ const MIGRATE = process.argv.includes('--migrate');
 const MERGE_HOLD_MS = Number(process.env.CAREER_OPS_MERGE_HOLD_MS) || 0;
 const MERGE_READY_IPC = process.env.CAREER_OPS_MERGE_READY_IPC === '1';
 
-const trackerLockKey = createHash('sha256').update(APPS_FILE).digest('hex').slice(0, 16);
-const TRACKER_LOCK_DIR = resolveTrackerLockDir(process.env.CAREER_OPS_TRACKER_LOCK, trackerLockKey);
+const TRACKER_LOCK_DIR = lockDirFor(APPS_FILE, process.env.CAREER_OPS_TRACKER_LOCK);
 
 // The reports/ dir sits at the repo root, which is the tracker's parent in the
 // data/ layout (data/applications.md) and the tracker's own dir at root layout.
@@ -66,231 +65,22 @@ const REPORTS_ROOT = basename(TRACKER_DIR) === 'data' ? dirname(TRACKER_DIR) : T
 const normalizeReportLink = (reportField) => normalizeLink(reportField, TRACKER_DIR, REPORTS_ROOT);
 
 // Ensure required directories exist (fresh setup)
-mkdirSync(join(CAREER_OPS, 'data'), { recursive: true });
+mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
 mkdirSync(ADDITIONS_DIR, { recursive: true });
-
-/**
- * Convert the tracker path into one stable absolute spelling before hashing it.
- *
- * Equivalent tracker paths can be written in multiple ways, such as a relative
- * path from the current shell, an absolute path, or a path that travels through
- * a symlink. The lock key must be based on one canonical spelling so all merge
- * processes that target the same tracker also target the same lock directory.
- *
- * @param {string} path - Raw tracker path from config, env, or the default.
- * @returns {string} Absolute canonical path when the file exists, else resolved path.
- */
-function canonicalizeTrackerPath(path) {
-  const absolutePath = resolve(path);
-  try {
-    return realpathSync(absolutePath);
-  } catch {
-    return absolutePath;
-  }
-}
-
-/**
- * Check whether one absolute path stays inside another directory.
- *
- * This protects recursive lock cleanup from accepting paths that escape the
- * system temp directory through `..` segments or unrelated absolute roots.
- *
- * @param {string} childPath - Candidate path to validate.
- * @param {string} parentDir - Required parent directory boundary.
- * @returns {boolean} True when childPath is inside parentDir or equal to it.
- */
-function pathIsInside(childPath, parentDir) {
-  const relativePath = relative(parentDir, childPath);
-  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath));
-}
-
-/**
- * Validate and resolve the tracker lock directory.
- *
- * `CAREER_OPS_TRACKER_LOCK` exists for tests and unusual local layouts, but the
- * merge script later removes the lock directory recursively. To keep that safe,
- * env-provided lock paths must be absolute, live under the OS temp directory,
- * and use the career-ops lock-name prefix. Invalid values are ignored and the
- * deterministic temp-dir default is used instead.
- *
- * @param {string|undefined} envValue - Optional lock path override.
- * @param {string} lockKey - Stable tracker hash suffix.
- * @returns {string} Safe lock directory path.
- */
-function resolveTrackerLockDir(envValue, lockKey) {
-  const tmpRoot = realpathSync(tmpdir());
-  const fallback = join(tmpRoot, `career-ops-merge-tracker-${lockKey}.lock`);
-  if (!envValue || !isAbsolute(envValue)) return fallback;
-
-  const candidate = resolve(envValue);
-  const parentDir = dirname(candidate);
-  const canonicalParent = existsSync(parentDir) ? realpathSync(parentDir) : resolve(parentDir);
-  if (!pathIsInside(canonicalParent, tmpRoot)) return fallback;
-  if (!basename(candidate).startsWith('career-ops-merge-tracker-')) return fallback;
-  return candidate;
-}
 
 /**
  * Pause the async merge flow for a fixed number of milliseconds.
  *
- * This is used in two places:
- * - the lock retry loop, where waiting briefly avoids a tight CPU spin while
- *   another `merge-tracker.mjs` process owns the tracker lock;
- * - the regression test hook (`CAREER_OPS_MERGE_HOLD_MS`), which deliberately
- *   holds the first merge after it reads `applications.md` so a second merge can
- *   try to enter the same critical section.
+ * Used by the regression test hook (`CAREER_OPS_MERGE_HOLD_MS`), which
+ * deliberately holds the first merge after it reads `applications.md` so a
+ * second merge can try to enter the same critical section. (The lock's own
+ * retry/backoff sleep now lives in tracker-lock.mjs.)
  *
  * @param {number} ms - Milliseconds to wait before resolving.
  * @returns {Promise<void>} Resolves after the requested delay.
  */
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Determine whether a process id still belongs to a live process.
- *
- * The tracker lock stores the owner PID in `owner.json`. When another process
- * finds an existing lock, this check lets it distinguish a valid live owner from
- * a crashed process that left a stale lock directory behind. `EPERM` counts as
- * alive because the process exists even if the current user cannot signal it.
- *
- * @param {number} pid - Process id recorded by the lock owner.
- * @returns {boolean} True when the process appears to still exist.
- */
-function processIsAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err?.code === 'EPERM';
-  }
-}
-
-/**
- * Read lock ownership metadata from a tracker lock directory.
- *
- * The metadata contains the owner PID, a unique release token, the acquisition
- * timestamp, and the tracker path. Invalid or missing metadata is treated as
- * unreadable so the stale-lock recovery path can fall back to directory age.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @returns {object|null} Parsed owner metadata, or null when unavailable.
- */
-function readLockOwner(lockDir) {
-  try {
-    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Decide whether an existing lock can be safely recovered.
- *
- * Recovery is conservative: if the lock has an owner PID and that process is
- * still alive, the lock is never considered stale merely because it is old. If
- * the owner process is gone, or if the metadata cannot be read and the lock
- * directory itself is older than the stale threshold, the waiting process may
- * remove the lock and retry acquisition.
- *
- * @param {string} lockDir - Directory that represents the active lock.
- * @param {number} staleMs - Age threshold for metadata-free lock recovery.
- * @returns {boolean} True when the caller may remove and recreate the lock.
- */
-function lockCanRecover(lockDir, staleMs) {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-
-  try {
-    return Date.now() - statSync(lockDir).mtimeMs > staleMs;
-  } catch {
-    return true;
-  }
-}
-
-/**
- * Acquire an exclusive filesystem lock for one tracker merge.
- *
- * The critical section must cover the full read/modify/write/move sequence, not
- * just the final write. Otherwise two processes can read the same old tracker
- * snapshot, compute independent updates, and let the later writer erase rows
- * written by the earlier one. The lock is implemented with atomic directory
- * creation, owner metadata, retry/backoff, stale-owner recovery, and a release
- * token so one process cannot delete another process's newer lock.
- *
- * @param {string} lockDir - Directory path used as the lock sentinel.
- * @param {object} [options] - Lock timing options.
- * @param {number} [options.timeoutMs=60000] - Maximum time to wait for the lock.
- * @param {number} [options.retryMs=75] - Delay between acquisition attempts.
- * @param {number} [options.staleMs=600000] - Metadata-free stale-lock threshold.
- * @returns {Promise<{attempts:number,waitMs:number,staleRecovered:boolean,release:Function}>}
- * Lock handle with metadata and an idempotent release method.
- */
-async function acquireTrackerLock(lockDir, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 60_000;
-  const retryMs = options.retryMs ?? 75;
-  const staleMs = options.staleMs ?? 10 * 60_000;
-  const recoverGuardDir = `${lockDir}.recover`;
-  const token = randomUUID();
-  const startedAt = Date.now();
-  let attempts = 0;
-  let staleRecovered = false;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    attempts++;
-    try {
-      mkdirSync(lockDir);
-      writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
-        pid: process.pid,
-        token,
-        started_at: new Date().toISOString(),
-        tracker: APPS_FILE,
-      }, null, 2));
-
-      let released = false;
-      return {
-        attempts,
-        waitMs: Date.now() - startedAt,
-        staleRecovered,
-        release() {
-          if (released) return;
-          released = true;
-          const owner = readLockOwner(lockDir);
-          if (owner?.token === token) {
-            rmSync(lockDir, { recursive: true, force: true });
-          }
-        },
-      };
-    } catch (err) {
-      if (err?.code !== 'EEXIST') throw err;
-
-      let hasRecoverGuard = false;
-      try {
-        mkdirSync(recoverGuardDir);
-        hasRecoverGuard = true;
-      } catch (guardErr) {
-        if (guardErr?.code !== 'EEXIST') throw guardErr;
-      }
-
-      if (hasRecoverGuard) {
-        try {
-          if (lockCanRecover(lockDir, staleMs)) {
-            rmSync(lockDir, { recursive: true, force: true });
-            staleRecovered = true;
-            continue;
-          }
-        } finally {
-          rmSync(recoverGuardDir, { recursive: true, force: true });
-        }
-      }
-
-      await sleep(retryMs);
-    }
-  }
-
-  throw new Error(`Timed out waiting for tracker merge lock at ${lockDir}`);
 }
 
 /**
@@ -322,6 +112,7 @@ try {
     timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
     retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
     staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: APPS_FILE,
   });
   process.once('exit', () => trackerLock?.release());
   if (trackerLock.waitMs > 0 || trackerLock.staleRecovered) {
@@ -383,13 +174,16 @@ function validateStatus(status) {
  * Company names can contain spaces, punctuation, or branding variants in the
  * tracker and incoming TSV rows. Removing non-alphanumeric characters gives the
  * merge step a stable same-company key before it compares report numbers or
- * fuzzy role titles.
+ * fuzzy role titles. Uses a Unicode-aware letter/number class (`\p{L}\p{N}`)
+ * rather than an ASCII-only filter, so accented and non-Latin-script company
+ * names (e.g. "Café", "株式会社") still normalize to a usable key instead of
+ * being stripped to empty/garbled strings (matches dedup-tracker.mjs).
  *
  * @param {string} name - Company name from the tracker or addition row.
- * @returns {string} Lowercase alphanumeric company key.
+ * @returns {string} Lowercase company key.
  */
 function normalizeCompany(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 /**
@@ -405,6 +199,25 @@ function normalizeCompany(name) {
 function extractReportNum(reportStr) {
   const m = reportStr.match(/\[(\d+)\]/);
   return m ? parseInt(m[1]) : null;
+}
+
+/**
+ * Extract a requisition/job-ID number from a free-text notes field.
+ *
+ * The tier-3 fuzzy company+role match has no way to tell apart two distinct
+ * postings with similar/generic titles (e.g. two different "Software
+ * Engineer" reqs at the same company). When the notes field carries a req or
+ * job ID, it's a stronger identity signal than title similarity — use it as an
+ * additional guard so same-title-different-req rows are never collapsed.
+ *
+ * @param {string} notes - Free-text notes cell from the tracker or TSV addition.
+ * @returns {string|null} The extracted requisition number, or null when absent.
+ */
+function extractReqNumber(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(/req\s*#?\s*(\d+)|job\s*id:?\s*(\d+)|#(\d{4,})/i);
+  if (!m) return null;
+  return m[1] || m[2] || m[3];
 }
 
 /**
@@ -532,26 +345,29 @@ function parseTsvContent(content, filename) {
     }
 
     // Detect column order: some TSVs have (status, score), others have (score, status)
-    // Heuristic: if col4 looks like a score and col5 looks like a status, they're swapped
+    // Content-based first: a column matching a score pattern (N/5, N.N/5, N/A, DUP) IS
+    // the score column, and the other of the two ambiguous columns is then the status
+    // column — regardless of position. Only when content is inconclusive (both or
+    // neither column looks like a score) do we fall back to the fixed-position
+    // assumption (col4=status, col5=score), and that fallback is logged since it's
+    // a guess rather than a detection.
     const col4 = parts[4].trim();
     const col5 = parts[5].trim();
-    const col4LooksLikeScore = /^\d+\.?\d*\/5$/.test(col4) || col4 === 'N/A' || col4 === 'DUP';
-    const col5LooksLikeScore = /^\d+\.?\d*\/5$/.test(col5) || col5 === 'N/A' || col5 === 'DUP';
-    const col4LooksLikeStatus = /^(evaluated|applied|responded|interview|offer|rejected|discarded|skip|evaluada|aplicado|respondido|entrevista|oferta|rechazado|descartado|no aplicar|cerrada|duplicado|repost|condicional|hold|monitor)/i.test(col4);
-    const col5LooksLikeStatus = /^(evaluated|applied|responded|interview|offer|rejected|discarded|skip|evaluada|aplicado|respondido|entrevista|oferta|rechazado|descartado|no aplicar|cerrada|duplicado|repost|condicional|hold|monitor)/i.test(col5);
+    const looksLikeScore = (v) => /^\d+(\.\d+)?\/5$/.test(v) || /^N\/A$/i.test(v) || /^DUP$/i.test(v);
+    const col4LooksLikeScore = looksLikeScore(col4);
+    const col5LooksLikeScore = looksLikeScore(col5);
 
     let statusCol, scoreCol;
-    if (col4LooksLikeStatus && !col4LooksLikeScore) {
-      // Standard format: col4=status, col5=score
-      statusCol = col4; scoreCol = col5;
-    } else if (col4LooksLikeScore && col5LooksLikeStatus) {
+    if (col4LooksLikeScore && !col5LooksLikeScore) {
       // Swapped format: col4=score, col5=status
       statusCol = col5; scoreCol = col4;
     } else if (col5LooksLikeScore && !col4LooksLikeScore) {
-      // col5 is definitely score → col4 must be status
+      // Standard format: col4=status, col5=score
       statusCol = col4; scoreCol = col5;
     } else {
-      // Default: standard format (status before score)
+      // Inconclusive (both or neither column looks like a score) — fall back to the
+      // fixed-position assumption and flag it rather than silently guessing.
+      console.warn(`⚠️  ${filename}: could not detect status/score column order by content, defaulting to position (col4=status, col5=score)`);
       statusCol = col4; scoreCol = col5;
     }
 
@@ -647,10 +463,13 @@ if (tsvFiles.length === 0) {
   process.exit(0);
 }
 
-// Sort files numerically for deterministic processing
+// Sort files numerically by their LEADING report number for deterministic
+// processing. parseInt stops at the first non-digit, so trailing digits in a
+// company slug (e.g. "42-acme2.tsv") no longer get concatenated into the sort
+// key the way `replace(/\D/g, '')` did.
 tsvFiles.sort((a, b) => {
-  const numA = parseInt(a.replace(/\D/g, '')) || 0;
-  const numB = parseInt(b.replace(/\D/g, '')) || 0;
+  const numA = parseInt(a, 10) || 0;
+  const numB = parseInt(b, 10) || 0;
   return numA - numB;
 });
 
@@ -706,8 +525,14 @@ for (const file of tsvFiles) {
   if (!duplicate) {
     // Company + role fuzzy match
     const normCompany = normalizeCompany(addition.company);
+    const additionReqNum = extractReqNumber(addition.notes);
     duplicate = existingApps.find(app => {
       if (normalizeCompany(app.company) !== normCompany) return false;
+      // A different req/job-ID in the notes means these are distinct postings
+      // (e.g. two separate "Software Engineer" reqs) even if the fuzzy title
+      // match would otherwise say they're the same opening — don't collapse them.
+      const appReqNum = extractReqNumber(app.notes);
+      if (additionReqNum && appReqNum && additionReqNum !== appReqNum) return false;
       return roleFuzzyMatch(addition.role, app.role);
     });
   }
@@ -768,6 +593,8 @@ if (newLines.length > 0) {
 
 // Write back
 if (!DRY_RUN) {
+  // Backup first (best-effort — a failed snapshot must never block the real write).
+  try { copyFileSync(APPS_FILE, APPS_FILE + '.bak'); } catch { /* non-fatal */ }
   writeFileAtomic(APPS_FILE, appLines.join('\n'));
 
   // Move processed files to merged/

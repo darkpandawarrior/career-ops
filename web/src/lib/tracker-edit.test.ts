@@ -53,9 +53,9 @@ const APPLICATIONS_MD = `# Applications
 `;
 
 describe("setAppCell", () => {
-  it("rewrites the Status column for the matched application number", () => {
+  it("rewrites the Status column for the matched application number", async () => {
     writeFixture("applications.md", APPLICATIONS_MD);
-    expect(setAppCell("1", "Status", "interview", ROOT)).toBe("ok");
+    expect(await setAppCell("1", "Status", "interview", ROOT)).toBe("ok");
     const out = read("applications.md");
     const row1 = out.split("\n").find((l) => l.startsWith("| 1 "))!;
     expect(row1.split("|")[6].trim()).toBe("interview");
@@ -64,42 +64,42 @@ describe("setAppCell", () => {
     expect(row1.split("|")[9].trim()).toBe("old note");
   });
 
-  it("rewrites the Notes column and leaves Status untouched", () => {
+  it("rewrites the Notes column and leaves Status untouched", async () => {
     writeFixture("applications.md", APPLICATIONS_MD);
-    expect(setAppCell("1", "Notes", "follow up tue", ROOT)).toBe("ok");
+    expect(await setAppCell("1", "Notes", "follow up tue", ROOT)).toBe("ok");
     const row1 = read("applications.md").split("\n").find((l) => l.startsWith("| 1 "))!;
     expect(row1.split("|")[9].trim()).toBe("follow up tue");
     expect(row1.split("|")[6].trim()).toBe("applied");
   });
 
-  it("only edits the matched row, not other rows", () => {
+  it("only edits the matched row, not other rows", async () => {
     writeFixture("applications.md", APPLICATIONS_MD);
-    setAppCell("2", "Status", "rejected", ROOT);
+    await setAppCell("2", "Status", "rejected", ROOT);
     const lines = read("applications.md").split("\n");
     expect(lines.find((l) => l.startsWith("| 1 "))!.split("|")[6].trim()).toBe("applied");
     expect(lines.find((l) => l.startsWith("| 2 "))!.split("|")[6].trim()).toBe("rejected");
   });
 
-  it("returns not-found when the application number does not exist", () => {
+  it("returns not-found when the application number does not exist", async () => {
     writeFixture("applications.md", APPLICATIONS_MD);
-    expect(setAppCell("99", "Status", "interview", ROOT)).toBe("not-found");
+    expect(await setAppCell("99", "Status", "interview", ROOT)).toBe("not-found");
   });
 
-  it("returns not-found when the file does not exist", () => {
+  it("returns not-found when the file does not exist", async () => {
     // No fixture written.
-    expect(setAppCell("1", "Status", "interview", ROOT)).toBe("not-found");
+    expect(await setAppCell("1", "Status", "interview", ROOT)).toBe("not-found");
   });
 
-  it("rejects values containing pipe or newline chars (would scramble the row)", () => {
+  it("rejects values containing pipe or newline chars (would scramble the row)", async () => {
     writeFixture("applications.md", APPLICATIONS_MD);
-    expect(setAppCell("1", "Status", "a|b", ROOT)).toBe("invalid");
-    expect(setAppCell("1", "Status", "a\nb", ROOT)).toBe("invalid");
-    expect(setAppCell("1", "Notes", "a\rb", ROOT)).toBe("invalid");
+    expect(await setAppCell("1", "Status", "a|b", ROOT)).toBe("invalid");
+    expect(await setAppCell("1", "Status", "a\nb", ROOT)).toBe("invalid");
+    expect(await setAppCell("1", "Notes", "a\rb", ROOT)).toBe("invalid");
     // File untouched.
     expect(read("applications.md")).toBe(APPLICATIONS_MD);
   });
 
-  it("does an exact (non-prefix) match on the application number", () => {
+  it("does an exact (non-prefix) match on the application number", async () => {
     // n="1" must NOT match the row whose # is "12" (exact cell equality, not prefix).
     // Row needs >=8 parts to clear the `parts.length < 8` guard.
     const md = `| # | Date | Company | Role | Source | Status | Link | Resume | Notes |
@@ -107,18 +107,18 @@ describe("setAppCell", () => {
 | 12 | 2026-06-01 | Acme | PM | greenhouse | applied | http://x | r1 | note |
 `;
     writeFixture("applications.md", md);
-    expect(setAppCell("1", "Status", "x", ROOT)).toBe("not-found");
-    expect(setAppCell("12", "Status", "interview", ROOT)).toBe("ok");
+    expect(await setAppCell("1", "Status", "x", ROOT)).toBe("not-found");
+    expect(await setAppCell("12", "Status", "interview", ROOT)).toBe("ok");
     const row = read("applications.md").split("\n").find((l) => l.startsWith("| 12 "))!;
     expect(row.split("|")[6].trim()).toBe("interview");
   });
 
-  it("falls back to default column index (6=Status) when no header row is present", () => {
+  it("falls back to default column index (6=Status) when no header row is present", async () => {
     // A bare row with no header. columnIndex returns null → Status defaults to 6.
     const md = `| 1 | 2026-06-01 | Acme | PM | greenhouse | applied | http://x | r1 | note |
 `;
     writeFixture("applications.md", md);
-    expect(setAppCell("1", "Status", "offer", ROOT)).toBe("ok");
+    expect(await setAppCell("1", "Status", "offer", ROOT)).toBe("ok");
     const row = read("applications.md").split("\n")[0];
     expect(row.split("|")[6].trim()).toBe("offer");
   });

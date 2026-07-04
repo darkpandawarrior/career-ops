@@ -156,16 +156,24 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
-  { name: 'updater-migration-tests.mjs', expectExit: 0 },
-  { name: 'tracker-columns-tests.mjs', expectExit: 0 },
+  // Self-updater scaffolding (update-system.mjs and its test scripts) was
+  // deliberately dropped from this fork — HireSignal doesn't self-update the
+  // way the OSS project does. skipIfMissing keeps these entries documenting
+  // intent without failing when the scaffolding is (correctly) absent.
+  { name: 'updater-migration-tests.mjs', expectExit: 0, skipIfMissing: true },
+  { name: 'tracker-columns-tests.mjs', expectExit: 0, skipIfMissing: true },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   // Bare run: no portals.yml in the repo, so it must exit 0 gracefully (and hit
   // no network). The probe logic itself is unit-tested below with a mock.
   { name: 'verify-portals.mjs', expectExit: 0 },
-  { name: 'update-system.mjs check', expectExit: 0 },
+  { name: 'update-system.mjs check', expectExit: 0, skipIfMissing: true },
 ];
 
-for (const { name, allowFail } of scripts) {
+for (const { name, allowFail, skipIfMissing } of scripts) {
+  if (skipIfMissing && !fileExists(name.split(' ')[0])) {
+    warn(`${name} skipped (self-updater not shipped in this fork)`);
+    continue;
+  }
   const result = run(NODE, name.split(' '), { stdio: ['pipe', 'pipe', 'pipe'] });
   if (result !== null) {
     pass(`${name} runs OK`);
@@ -411,6 +419,12 @@ try {
 
 if (!QUICK) {
   console.log('\n4. Dashboard build');
+  // HireSignal ships a compiled dashboard/career-dashboard binary but does not
+  // maintain the Go TUI source (no .go files, no go.mod) — skip rather than
+  // fail on scaffolding this fork deliberately doesn't carry.
+  if (!fileExists('dashboard/go.mod')) {
+    warn('Dashboard build skipped (Go source not shipped in this fork)');
+  } else {
   const isWindows = process.platform === 'win32';
   const outPath = isWindows ? 'career-dashboard-test.exe' : '/tmp/career-dashboard-test';
   const goBuild = run(`cd dashboard && go build -o ${outPath} . 2>&1`);
@@ -421,6 +435,7 @@ if (!QUICK) {
     }
   } else {
     fail('Dashboard build failed');
+  }
   }
 } else {
   console.log('\n4. Dashboard build (skipped --quick)');
@@ -583,17 +598,21 @@ if (!/waitUntil:\s*['"]networkidle['"]/.test(generatePdfScript)) {
 
 console.log('\n7c. Updater dashboard rebuild');
 
-const updateSystemScript = readFile('update-system.mjs');
-if (
-  /git\('diff',\s*'--name-only',\s*'HEAD',\s*'--',\s*'dashboard'\)/.test(updateSystemScript) &&
-  /path\.startsWith\(['"]dashboard\/['"]\)\s*&&\s*path\.endsWith\(['"]\.go['"]\)/.test(updateSystemScript) &&
-  /go build -o career-dashboard \./.test(updateSystemScript) &&
-  /cwd:\s*join\(ROOT,\s*['"]dashboard['"]\)/.test(updateSystemScript) &&
-  /dashboard binary rebuild skipped/.test(updateSystemScript)
-) {
-  pass('update-system rebuilds dashboard binary when dashboard Go sources change');
+if (!fileExists('update-system.mjs')) {
+  warn('7c skipped (self-updater not shipped in this fork)');
 } else {
-  fail('update-system does not rebuild dashboard binary after dashboard Go source updates');
+  const updateSystemScript = readFile('update-system.mjs');
+  if (
+    /git\('diff',\s*'--name-only',\s*'HEAD',\s*'--',\s*'dashboard'\)/.test(updateSystemScript) &&
+    /path\.startsWith\(['"]dashboard\/['"]\)\s*&&\s*path\.endsWith\(['"]\.go['"]\)/.test(updateSystemScript) &&
+    /go build -o career-dashboard \./.test(updateSystemScript) &&
+    /cwd:\s*join\(ROOT,\s*['"]dashboard['"]\)/.test(updateSystemScript) &&
+    /dashboard binary rebuild skipped/.test(updateSystemScript)
+  ) {
+    pass('update-system rebuilds dashboard binary when dashboard Go sources change');
+  } else {
+    fail('update-system does not rebuild dashboard binary after dashboard Go source updates');
+  }
 }
 
 // ── 8. MODE FILE INTEGRITY ──────────────────────────────────────
@@ -978,8 +997,10 @@ try {
 console.log('\n11. AGENTS.md integrity');
 
 const agents = readFile('AGENTS.md');
+// 'Update Check' intentionally excluded — it documents update-system.mjs's
+// self-update flow, which this fork deliberately doesn't ship.
 const requiredSections = [
-  'Data Contract', 'Update Check', 'Ethical Use',
+  'Data Contract', 'Ethical Use',
   'Offer Verification', 'Canonical States', 'TSV Format',
   'First Run', 'Onboarding',
 ];
@@ -1058,6 +1079,10 @@ for (const link of symlinks) {
 }
 
 console.log('\n12a. Skill entrypoint materialization');
+
+if (!fileExists('update-system.mjs')) {
+  warn('12a/12b skipped (self-updater not shipped in this fork)');
+} else {
 
 {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skills-'));
@@ -1226,6 +1251,8 @@ console.log('\n12b. Materialized skill index mode');
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
+}
+
 }
 
 // ── 14. VERSION FILE ─────────────────────────────────────────────
@@ -1404,8 +1431,9 @@ try {
   const pipelineFields = pipelineRow.split('|').map(part => part.trim());
   if (
     pendingLines.length === 1 &&
-    pipelineFields.length === 3 &&
+    pipelineFields.length === 4 &&
     pipelineFields[0] === '- [ ] https://jobs.example.com/123%7Cevil' &&
+    pipelineFields[3] === '@Remote EU' &&
     !pipelineRow.includes('\n') &&
     !pipelineRow.includes('\t') &&
     !pipelineRow.includes('\\|') &&
@@ -2042,20 +2070,23 @@ try {
     fail('recruitee.detect() must NOT misdetect path-spoofed URLs');
   }
 
-  // Off-domain offer URL is dropped (URL validation)
+  // URL validation: per #1116, offer URLs are display-only (never server-
+  // fetched) and Recruitee tenants commonly publish on their own custom
+  // domain, so only protocol (https-only) is validated — host is NOT
+  // restricted to *.recruitee.com.
   const offDomainOffers = parseRecruiteeResponse(
     {
       offers: [
         { title: 'Good', careers_url: 'https://channable.recruitee.com/o/good' },
-        { title: 'Evil', careers_url: 'https://evil.example/o/evil' },
+        { title: 'CustomDomain', careers_url: 'https://careers.hostaway.com/o/custom' },
         { title: 'Insecure', careers_url: 'http://channable.recruitee.com/o/insecure' },
         { title: 'No URL field' },
       ],
     },
     'Channable',
   );
-  if (offDomainOffers[0]?.url === 'https://channable.recruitee.com/o/good' && offDomainOffers[1]?.url === '' && offDomainOffers[2]?.url === '' && offDomainOffers[3]?.url === '') {
-    pass('parseRecruiteeResponse drops off-domain, non-https, and missing offer URLs');
+  if (offDomainOffers[0]?.url === 'https://channable.recruitee.com/o/good' && offDomainOffers[1]?.url === 'https://careers.hostaway.com/o/custom' && offDomainOffers[2]?.url === '' && offDomainOffers[3]?.url === '') {
+    pass('parseRecruiteeResponse keeps any https offer URL (incl. custom domains) and drops non-https/missing ones');
   } else {
     fail(`URL validation: row0=${JSON.stringify(offDomainOffers[0]?.url)}, row1=${JSON.stringify(offDomainOffers[1]?.url)}, row2=${JSON.stringify(offDomainOffers[2]?.url)}, row3=${JSON.stringify(offDomainOffers[3]?.url)}`);
   }
@@ -2226,6 +2257,116 @@ try {
   }
 } catch (e) {
   fail(`shared role matcher / dedup safety tests crashed: ${e.message}`);
+}
+
+// ── SET-STATUS.MJS CLI CONTRACT ─────────────────────────────────
+// set-status.mjs is the canonical write path for tracker status updates but had
+// zero test coverage despite being called from multiple modes. Covers: a clean
+// single-row update, ambiguous company-name rejection (never guesses), --dry-run
+// making no write, idempotent re-runs, and invalid-state rejection before any
+// write. Only CAREER_OPS_TRACKER is overridden (matching the dedup-tracker /
+// merge-tracker tests above) — states.yml and role-matcher.mjs still resolve
+// from the real repo, which is exactly what set-status.mjs does in production.
+console.log('\n🧪 Testing set-status.mjs CLI contract...');
+try {
+  /**
+   * Run set-status.mjs against a fixture tracker, tolerating non-zero exit
+   * codes (ambiguous match / invalid state are expected failures, not crashes).
+   * Mirrors run()'s execFileSync usage but keeps stdout+exit code on failure —
+   * run() itself discards both, which the ambiguous/invalid-state assertions need.
+   *
+   * @param {string[]} args
+   * @param {string} tracker
+   * @returns {{status: number, stdout: string}}
+   */
+  function runSetStatus(args, tracker) {
+    try {
+      const stdout = execFileSync(NODE, ['set-status.mjs', ...args], {
+        cwd: ROOT, encoding: 'utf-8', timeout: 30000,
+        env: { ...process.env, CAREER_OPS_TRACKER: tracker },
+      });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: e.status ?? 1, stdout: e.stdout ?? '' };
+    }
+  }
+
+  const statusTmp = mkdtempSync(join(tmpdir(), 'career-ops-set-status-'));
+  try {
+    mkdirSync(join(statusTmp, 'data'));
+    const tracker = join(statusTmp, 'data', 'applications.md');
+    const fixture =
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 41 | 2026-01-10 | Acme | Backend Engineer | 4.1/5 | Evaluated | ❌ | [41](../reports/041-acme.md) | first sibling |\n' +
+      '| 42 | 2026-01-11 | Acme | Frontend Engineer | 4.0/5 | Evaluated | ❌ | [42](../reports/042-acme.md) | second sibling, same company |\n' +
+      '| 43 | 2026-01-12 | Globex | Data Engineer | 3.7/5 | Evaluated | ❌ | [43](../reports/043-globex.md) | unambiguous row |\n';
+    writeFileSync(tracker, fixture);
+
+    // (a) single unambiguous report-number update succeeds and writes the status
+    const byNum = runSetStatus(['43', 'Interview', '--json'], tracker);
+    const afterByNum = readFileSync(tracker, 'utf-8');
+    if (byNum.status === 0 && /\|\s*Interview\s*\|/.test(afterByNum.split('\n').find(l => l.startsWith('| 43')))) {
+      pass('set-status: unambiguous report-number update writes the new status');
+    } else {
+      fail(`set-status: report-number update failed (exit ${byNum.status}): ${afterByNum}`);
+    }
+
+    // (b) ambiguous company match (2 rows, same company) is rejected, not guessed
+    const beforeAmbiguous = readFileSync(tracker, 'utf-8');
+    const ambiguous = runSetStatus(['Acme', 'Applied', '--json'], tracker);
+    const afterAmbiguous = readFileSync(tracker, 'utf-8');
+    let ambiguousJson = null;
+    try { ambiguousJson = JSON.parse(ambiguous.stdout); } catch { /* leave null, checked below */ }
+    if (ambiguous.status === 3 && ambiguousJson?.code === 'ambiguous' && afterAmbiguous === beforeAmbiguous) {
+      pass('set-status: ambiguous company match exits 3 with a clear error and writes nothing');
+    } else {
+      fail(`set-status: ambiguous company match not rejected cleanly (exit ${ambiguous.status}, code ${ambiguousJson?.code}, tracker changed: ${afterAmbiguous !== beforeAmbiguous})`);
+    }
+
+    // (c) --dry-run makes no actual write to the fixture file
+    const beforeDryRun = readFileSync(tracker, 'utf-8');
+    const dryRun = runSetStatus(['41', 'Applied', '--dry-run', '--json'], tracker);
+    const afterDryRun = readFileSync(tracker, 'utf-8');
+    let dryRunJson = null;
+    try { dryRunJson = JSON.parse(dryRun.stdout); } catch { /* leave null, checked below */ }
+    if (dryRun.status === 0 && dryRunJson?.dryRun === true && dryRunJson?.changed === true && afterDryRun === beforeDryRun) {
+      pass('set-status: --dry-run resolves+validates but writes nothing');
+    } else {
+      fail(`set-status: --dry-run mutated the tracker or misreported (exit ${dryRun.status}, changed ${dryRunJson?.changed}, tracker changed: ${afterDryRun !== beforeDryRun})`);
+    }
+
+    // (d) re-running the same update is idempotent — second run reports no change
+    const firstRun = runSetStatus(['41', 'Applied', '--json'], tracker);
+    const afterFirstRun = readFileSync(tracker, 'utf-8');
+    const secondRun = runSetStatus(['41', 'Applied', '--json'], tracker);
+    const afterSecondRun = readFileSync(tracker, 'utf-8');
+    let firstJson = null, secondJson = null;
+    try { firstJson = JSON.parse(firstRun.stdout); } catch { /* leave null, checked below */ }
+    try { secondJson = JSON.parse(secondRun.stdout); } catch { /* leave null, checked below */ }
+    if (firstJson?.changed === true && secondJson?.changed === false && afterFirstRun === afterSecondRun) {
+      pass('set-status: re-running the same update is idempotent (second run reports no change)');
+    } else {
+      fail(`set-status: idempotency broken (first changed ${firstJson?.changed}, second changed ${secondJson?.changed}, tracker stable: ${afterFirstRun === afterSecondRun})`);
+    }
+
+    // (e) an invalid/unrecognized state value is rejected before any write happens
+    const beforeInvalid = readFileSync(tracker, 'utf-8');
+    const invalid = runSetStatus(['41', 'NotARealState', '--json'], tracker);
+    const afterInvalid = readFileSync(tracker, 'utf-8');
+    let invalidJson = null;
+    try { invalidJson = JSON.parse(invalid.stdout); } catch { /* leave null, checked below */ }
+    if (invalid.status === 1 && invalidJson?.code === 'invalid-state' && afterInvalid === beforeInvalid) {
+      pass('set-status: unrecognized state is rejected before any write');
+    } else {
+      fail(`set-status: invalid state not rejected cleanly (exit ${invalid.status}, code ${invalidJson?.code}, tracker changed: ${afterInvalid !== beforeInvalid})`);
+    }
+  } finally {
+    rmSync(statusTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`set-status.mjs CLI contract tests crashed: ${e.message}`);
 }
 
 // dedup-tracker / normalize-statuses rebuilt promoted rows with
@@ -2563,7 +2704,11 @@ try {
   }
   rmSync(ready, { recursive: true, force: true });
 
-  const claudeDoc = readFile('CLAUDE.md');
+  // CLAUDE.md may itself carry the onboarding text, or (this fork's
+  // established convention, matching CODEX.md/OPENCODE.md) be a bare
+  // `@AGENTS.md` import — resolve the import before checking content.
+  let claudeDoc = readFile('CLAUDE.md');
+  if (claudeDoc.trim().startsWith('@AGENTS.md')) claudeDoc = readFile('AGENTS.md');
   if (
     /node\s+doctor\.mjs\s+--json/.test(claudeDoc) &&
     /"warnings"\s*:\s*\[\.\.\.\]/.test(claudeDoc) &&
@@ -3095,6 +3240,9 @@ try {
 
 console.log('\n16. update-system SEMVER_RE');
 
+if (!fileExists('update-system.mjs')) {
+  warn('16 skipped (self-updater not shipped in this fork)');
+} else {
 try {
   // Importing must not trigger the CLI (the import.meta.url guard); it
   // exposes SEMVER_RE, which the releases-API fallback uses on release.tag_name.
@@ -3124,6 +3272,7 @@ try {
   }
 } catch (e) {
   fail(`update-system SEMVER_RE test crashed: ${e.message}`);
+}
 }
 
 // ── 17. COVER LETTER GREETING BLOCK ─────────────────────────────
@@ -3381,14 +3530,14 @@ try {
     fail('jobstreet.detect() should return null for any URL');
   }
 
-  // parseJobstreetItem — valid item
+  // parseJobstreetItem — valid item (v5 shape: advertiser.description, locations[0].label, id-based URL)
   const sampleItem = {
-    id: 123456,
+    id: '123456',
     title: 'Senior Data Scientist',
-    branding: { companyName: 'TechCorp Indonesia' },
-    location: 'Jakarta Selatan',
+    advertiser: { id: '999', description: 'TechCorp Indonesia' },
+    companyName: 'TechCorp',
+    locations: [{ label: 'Jakarta Selatan', countryCode: 'ID' }],
     listingDate: '2026-06-15T00:00:00Z',
-    jobUrl: '/id/job/123456',
   };
   const parsed = parseJobstreetItem(sampleItem, 'https://id.jobstreet.com', 'FallbackCo');
   if (parsed && parsed.title === 'Senior Data Scientist'
@@ -3401,36 +3550,36 @@ try {
     fail(`parseJobstreetItem returned ${JSON.stringify(parsed)}`);
   }
 
-  // parseJobstreetItem — resolves absolute URL without modification
-  const absItem = { id: 1, title: 'Role', jobUrl: 'https://id.jobstreet.com/id/job/999' };
-  const absParsed = parseJobstreetItem(absItem, 'https://id.jobstreet.com', 'Co');
-  if (absParsed && absParsed.url === 'https://id.jobstreet.com/id/job/999') {
-    pass('parseJobstreetItem preserves absolute URLs');
+  // parseJobstreetItem — builds URL from id (URL is always derived, not read from the item)
+  const idOnlyItem = { id: '999', title: 'Role' };
+  const idOnlyParsed = parseJobstreetItem(idOnlyItem, 'https://id.jobstreet.com', 'Co');
+  if (idOnlyParsed && idOnlyParsed.url === 'https://id.jobstreet.com/id/job/999') {
+    pass('parseJobstreetItem builds job URL from id');
   } else {
-    fail(`parseJobstreetItem absolute URL: ${JSON.stringify(absParsed)}`);
+    fail(`parseJobstreetItem id-based URL: ${JSON.stringify(idOnlyParsed)}`);
   }
 
   // parseJobstreetItem — rejects items without title
-  if (parseJobstreetItem({ jobUrl: '/id/job/1' }, 'https://id.jobstreet.com', 'Co') === null) {
+  if (parseJobstreetItem({ id: '1' }, 'https://id.jobstreet.com', 'Co') === null) {
     pass('parseJobstreetItem returns null for items without title');
   } else {
     fail('parseJobstreetItem should return null for title-less items');
   }
 
-  // parseJobstreetItem — rejects items without url
+  // parseJobstreetItem — rejects items without id
   if (parseJobstreetItem({ title: 'Role' }, 'https://id.jobstreet.com', 'Co') === null) {
-    pass('parseJobstreetItem returns null for items without jobUrl');
+    pass('parseJobstreetItem returns null for items without id');
   } else {
-    fail('parseJobstreetItem should return null for URL-less items');
+    fail('parseJobstreetItem should return null for id-less items');
   }
 
-  // parseJobstreetItem — rejects off-domain URLs
+  // parseJobstreetItem — rejects when built URL resolves off-domain (origin not in allowlist)
   const offDomain = parseJobstreetItem(
-    { title: 'Role', jobUrl: 'https://evil.example.com/jobs/1' },
-    'https://id.jobstreet.com', 'Co'
+    { id: '1', title: 'Role' },
+    'https://evil.example.com', 'Co'
   );
-  if (offDomain === null) pass('parseJobstreetItem rejects off-domain job URLs');
-  else fail(`parseJobstreetItem should reject off-domain URLs, got ${JSON.stringify(offDomain)}`);
+  if (offDomain === null) pass('parseJobstreetItem rejects off-domain origins');
+  else fail(`parseJobstreetItem should reject off-domain origins, got ${JSON.stringify(offDomain)}`);
 
   // parseJobstreetItem — handles null/malformed input safely
   if (parseJobstreetItem(null, 'https://id.jobstreet.com', 'Co') === null) pass('parseJobstreetItem(null) → null');
@@ -3438,15 +3587,26 @@ try {
   if (parseJobstreetItem(7, 'https://id.jobstreet.com', 'Co') === null) pass('parseJobstreetItem(7) → null');
   else fail('parseJobstreetItem(number) should return null');
 
-  // parseJobstreetItem — fallback company when branding is missing
+  // parseJobstreetItem — fallback company when advertiser/companyName are missing
   const noBrand = parseJobstreetItem(
-    { id: 1, title: 'Engineer', jobUrl: '/id/job/42' },
+    { id: '1', title: 'Engineer' },
     'https://id.jobstreet.com', 'PortalFallback'
   );
   if (noBrand && noBrand.company === 'PortalFallback') {
-    pass('parseJobstreetItem uses fallback company when branding is absent');
+    pass('parseJobstreetItem uses fallback company when advertiser/companyName are absent');
   } else {
     fail(`parseJobstreetItem fallback company: ${JSON.stringify(noBrand)}`);
+  }
+
+  // parseJobstreetItem — companyName used when advertiser.description is missing
+  const companyNameOnly = parseJobstreetItem(
+    { id: '1', title: 'Engineer', companyName: 'ShortCo' },
+    'https://id.jobstreet.com', 'PortalFallback'
+  );
+  if (companyNameOnly && companyNameOnly.company === 'ShortCo') {
+    pass('parseJobstreetItem falls back to companyName when advertiser.description is absent');
+  } else {
+    fail(`parseJobstreetItem companyName fallback: ${JSON.stringify(companyNameOnly)}`);
   }
 
   // fetch() — happy path with mock context
@@ -3456,7 +3616,7 @@ try {
       if (!url.startsWith('https://id.jobstreet.com/')) throw new Error('Unexpected URL');
       return {
         data: [
-          { id: 1, title: 'AI Engineer', branding: { companyName: 'TestCo' }, location: 'Remote', listingDate: '2026-01-01T00:00:00Z', jobUrl: '/id/job/1' },
+          { id: '1', title: 'AI Engineer', advertiser: { description: 'TestCo' }, locations: [{ label: 'Remote' }], listingDate: '2026-01-01T00:00:00Z' },
         ],
       };
     },
@@ -3532,18 +3692,18 @@ try {
     fail('glints.detect() should return null for any URL');
   }
 
-  // parseGlintsItem — valid item
+  // parseGlintsItem — valid item (searchJobsV3 shape: company.name, city.name, createdAt, id-based URL)
   const sampleItem = {
     id: 'abc123',
     title: 'Backend Engineer',
-    company: { name: 'StartupCorp' },
-    location: 'Jakarta, Indonesia',
-    postedAt: '2026-06-10T00:00:00Z',
-    url: 'https://glints.com/id/jobs/backend-engineer/abc123',
+    company: { name: 'StartupCorp', brandName: 'Startup' },
+    city: { name: 'Jakarta, Indonesia' },
+    country: { code: 'ID', name: 'Indonesia' },
+    createdAt: '2026-06-10T00:00:00Z',
   };
   const parsed = parseGlintsItem(sampleItem, 'https://glints.com', 'FallbackCo');
   if (parsed && parsed.title === 'Backend Engineer'
-      && parsed.url === 'https://glints.com/id/jobs/backend-engineer/abc123'
+      && parsed.url === 'https://glints.com/id/opportunities/jobs/abc123'
       && parsed.company === 'StartupCorp'
       && parsed.location === 'Jakarta, Indonesia'
       && parsed.postedAt != null) {
@@ -3552,44 +3712,44 @@ try {
     fail(`parseGlintsItem returned ${JSON.stringify(parsed)}`);
   }
 
-  // parseGlintsItem — resolves relative URL
-  const relItem = { id: 'x', title: 'Dev', url: '/id/jobs/dev/x' };
-  const relParsed = parseGlintsItem(relItem, 'https://glints.com', 'Co');
-  if (relParsed && relParsed.url === 'https://glints.com/id/jobs/dev/x') {
-    pass('parseGlintsItem resolves relative URLs');
+  // parseGlintsItem — builds URL from id (URL is always derived, not read from the item)
+  const idOnlyItem = { id: 'x', title: 'Dev' };
+  const idOnlyParsed = parseGlintsItem(idOnlyItem, 'https://glints.com', 'Co');
+  if (idOnlyParsed && idOnlyParsed.url === 'https://glints.com/id/opportunities/jobs/x') {
+    pass('parseGlintsItem builds job URL from id');
   } else {
-    fail(`parseGlintsItem relative URL: ${JSON.stringify(relParsed)}`);
+    fail(`parseGlintsItem id-based URL: ${JSON.stringify(idOnlyParsed)}`);
   }
 
   // parseGlintsItem — rejects items without title
-  if (parseGlintsItem({ url: 'https://glints.com/job/1' }, 'https://glints.com', 'Co') === null) {
+  if (parseGlintsItem({ id: '1' }, 'https://glints.com', 'Co') === null) {
     pass('parseGlintsItem returns null for title-less items');
   } else {
     fail('parseGlintsItem should return null for items without title');
   }
 
-  // parseGlintsItem — rejects items without url
+  // parseGlintsItem — rejects items without id
   if (parseGlintsItem({ title: 'Role' }, 'https://glints.com', 'Co') === null) {
-    pass('parseGlintsItem returns null for URL-less items');
+    pass('parseGlintsItem returns null for id-less items');
   } else {
-    fail('parseGlintsItem should return null for items without URL');
+    fail('parseGlintsItem should return null for items without id');
   }
 
-  // parseGlintsItem — rejects off-domain URLs
+  // parseGlintsItem — rejects when built URL resolves off-domain (baseUrl not in allowlist)
   const offDomain = parseGlintsItem(
-    { title: 'Role', url: 'https://evil.example.com/jobs/1' },
-    'https://glints.com', 'Co'
+    { id: '1', title: 'Role' },
+    'https://evil.example.com', 'Co'
   );
-  if (offDomain === null) pass('parseGlintsItem rejects off-domain URLs');
-  else fail(`parseGlintsItem should reject off-domain URLs, got ${JSON.stringify(offDomain)}`);
+  if (offDomain === null) pass('parseGlintsItem rejects off-domain base URLs');
+  else fail(`parseGlintsItem should reject off-domain base URLs, got ${JSON.stringify(offDomain)}`);
 
   // parseGlintsItem — allows subdomains of glints.com
   const subdomainItem = parseGlintsItem(
-    { title: 'Role', url: 'https://www.glints.com/id/jobs/role/1' },
-    'https://glints.com', 'Co'
+    { id: 'role-1', title: 'Role' },
+    'https://www.glints.com', 'Co'
   );
-  if (subdomainItem && subdomainItem.url === 'https://www.glints.com/id/jobs/role/1') {
-    pass('parseGlintsItem accepts www.glints.com subdomain URLs');
+  if (subdomainItem && subdomainItem.url === 'https://www.glints.com/id/opportunities/jobs/role-1') {
+    pass('parseGlintsItem accepts www.glints.com subdomain base URLs');
   } else {
     fail(`parseGlintsItem subdomain URL rejected: ${JSON.stringify(subdomainItem)}`);
   }
@@ -3600,15 +3760,26 @@ try {
   if (parseGlintsItem(42, 'https://glints.com', 'Co') === null) pass('parseGlintsItem(number) → null');
   else fail('parseGlintsItem(number) should return null');
 
-  // parseGlintsItem — fallback company when company.name is missing
+  // parseGlintsItem — fallback company when company.name/brandName are missing
   const noCompany = parseGlintsItem(
-    { title: 'Engineer', url: 'https://glints.com/id/jobs/eng/1' },
+    { id: 'eng-1', title: 'Engineer' },
     'https://glints.com', 'PortalName'
   );
   if (noCompany && noCompany.company === 'PortalName') {
-    pass('parseGlintsItem uses fallback company when company.name is absent');
+    pass('parseGlintsItem uses fallback company when company.name/brandName are absent');
   } else {
     fail(`parseGlintsItem fallback company: ${JSON.stringify(noCompany)}`);
+  }
+
+  // parseGlintsItem — company.brandName used when company.name is missing
+  const brandNameOnly = parseGlintsItem(
+    { id: 'eng-2', title: 'Engineer', company: { brandName: 'BrandOnlyCo' } },
+    'https://glints.com', 'PortalName'
+  );
+  if (brandNameOnly && brandNameOnly.company === 'BrandOnlyCo') {
+    pass('parseGlintsItem falls back to company.brandName when company.name is absent');
+  } else {
+    fail(`parseGlintsItem brandName fallback: ${JSON.stringify(brandNameOnly)}`);
   }
 
   // fetch() — happy path with mock context
@@ -3617,14 +3788,15 @@ try {
     fetchJson: async (url, opts) => {
       if (opts?.method !== 'POST') throw new Error('Expected POST');
       const body = JSON.parse(opts.body || '{}');
+      if (body.operationName !== 'searchJobsV3') throw new Error('Expected searchJobsV3 operation');
       if (!body.query) throw new Error('Expected GraphQL query');
       return {
         data: {
-          opportunities: {
-            data: [
-              { title: 'AI PM', company: { name: 'TechCo' }, location: 'Remote', postedAt: '2026-01-01T00:00:00Z', url: 'https://glints.com/id/jobs/ai-pm/1' },
+          searchJobsV3: {
+            jobsInPage: [
+              { id: '1', title: 'AI PM', company: { name: 'TechCo' }, city: { name: 'Remote' }, createdAt: '2026-01-01T00:00:00Z' },
             ],
-            totalCount: 1,
+            hasMore: false,
           },
         },
       };
@@ -3641,7 +3813,7 @@ try {
   // fetch() — handles empty results
   const emptyCtx = {
     transport: 'http',
-    fetchJson: async () => ({ data: { opportunities: { data: [], totalCount: 0 } } }),
+    fetchJson: async () => ({ data: { searchJobsV3: { jobsInPage: [], hasMore: false } } }),
     fetchText: async () => { throw new Error('should not be called'); },
   };
   const emptyJobs = await glints.fetch(
@@ -3651,24 +3823,27 @@ try {
   if (emptyJobs.length === 0) pass('glints.fetch() handles empty results');
   else fail(`glints.fetch() should return empty array for no results, got ${emptyJobs.length}`);
 
-  // fetch() — handles flat opportunities array (alternative response shape)
-  const flatCtx = {
+  // fetch() — stops pagination when hasMore is false even if a full page is returned
+  const hasMoreFalseCtx = {
     transport: 'http',
     fetchJson: async () => ({
       data: {
-        opportunities: [
-          { title: 'Dev', company: { name: 'Co' }, location: 'Remote', url: 'https://glints.com/id/jobs/dev/1' },
-        ],
+        searchJobsV3: {
+          jobsInPage: [
+            { id: '1', title: 'Dev', company: { name: 'Co' }, city: { name: 'Remote' } },
+          ],
+          hasMore: false,
+        },
       },
     }),
     fetchText: async () => { throw new Error('should not be called'); },
   };
-  const flatJobs = await glints.fetch(
-    { name: 'Glints ID', provider: 'glints', searchKeywords: 'dev' },
-    flatCtx,
+  const hasMoreFalseJobs = await glints.fetch(
+    { name: 'Glints ID', provider: 'glints', searchKeywords: 'dev', pageSize: 1, maxPages: 5 },
+    hasMoreFalseCtx,
   );
-  if (flatJobs.length === 1) pass('glints.fetch() handles flat opportunities array response');
-  else fail(`glints.fetch() flat array: ${JSON.stringify(flatJobs)}`);
+  if (hasMoreFalseJobs.length === 1) pass('glints.fetch() respects hasMore: false to stop pagination');
+  else fail(`glints.fetch() hasMore stop: ${JSON.stringify(hasMoreFalseJobs)}`);
 
   // fetch() — rejects invalid hostname
   let hostRejected = false;
@@ -3684,23 +3859,23 @@ try {
   if (hostRejected) pass('glints.fetch() rejects untrusted hostnames');
   else fail('glints.fetch() should reject non-glints hostnames');
 
-  // fetch() — throws on missing opportunities in response
+  // fetch() — throws on missing jobsInPage in response
   let missingThrew = false;
   try {
     await glints.fetch(
       { name: 'Glints ID', provider: 'glints', searchKeywords: 'test' },
       {
         transport: 'http',
-        fetchJson: async () => ({ data: { somethingElse: [] } }),
+        fetchJson: async () => ({ data: { searchJobsV3: { somethingElse: [] } } }),
         fetchText: async () => { throw new Error('should not be called'); },
       },
     );
   } catch (e) {
     if (e.message.includes('unexpected API response')) missingThrew = true;
-    else fail(`glints.fetch() missing opportunities wrong error: ${e.message}`);
+    else fail(`glints.fetch() missing jobsInPage wrong error: ${e.message}`);
   }
   if (missingThrew) pass('glints.fetch() throws on unexpected API response shape');
-  else fail('glints.fetch() should throw when opportunities is missing');
+  else fail('glints.fetch() should throw when jobsInPage is missing');
 
 } catch (e) {
   fail(`glints provider tests crashed: ${e.message}`);

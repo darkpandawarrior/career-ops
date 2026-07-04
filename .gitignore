@@ -1,5 +1,6 @@
 # Personal data (user fills these)
 cv.md
+article-digest.md
 data/applications.md
 data/applications.db
 data/pipeline.md
@@ -49,6 +50,7 @@ writing-samples/*
 # User config and customization (never auto-updated)
 config/profile.yml
 config/job-search.yml
+config/cv-facts.json
 portals.yml
 modes/_profile.md
 modes/_custom.md
@@ -66,7 +68,12 @@ modes/_custom.md
 /.career-ops-web/
 /resumes/
 /data/agent-inbox.md
-/.claude/
+# .claude/ holds private session state, but skills/ is the git-tracked,
+# multi-CLI materialized skill entrypoint (mirrors .agents/skills/) — a
+# directory-level ignore can't be selectively re-included, so exclude its
+# contents rather than the directory itself, then re-include skills/.
+/.claude/*
+!/.claude/skills/
 # Plugin layer — opt-in toggles + user-installed plugins + integrity lock (never auto-updated)
 config/plugins.yml
 plugins.local/

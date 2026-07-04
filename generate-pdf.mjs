@@ -21,8 +21,12 @@ import { readFile } from 'fs/promises';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+// engineRoot: script location, also where the shared fonts/ assets live.
+// __dirname: the user-data root (output/, data/, cv.md) — CAREER_OPS_ROOT in a
+// multi-profile setup, else the same as engineRoot.
+const { engineRoot, dataRoot: __dirname } = resolveCareerOpsRoot(import.meta.url);
 
 // Ensure output directory exists (fresh setup)
 mkdirSync(resolve(__dirname, 'output'), { recursive: true });
@@ -307,7 +311,7 @@ async function generatePDF() {
 export async function inlineLocalFonts(html) {
   const FONT_REF = /url\(\s*(['"]?)\.\/fonts\/([^'")\s]+)\1\s*\)/g;
   const MIME = { woff2: 'font/woff2', woff: 'font/woff', otf: 'font/otf', ttf: 'font/ttf' };
-  const fontsDir = resolve(__dirname, 'fonts');
+  const fontsDir = resolve(engineRoot, 'fonts');
   const names = [...new Set([...html.matchAll(FONT_REF)].map((m) => m[2]))];
   const dataUrls = new Map();
   for (const name of names) {

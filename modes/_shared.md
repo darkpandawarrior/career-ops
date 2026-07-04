@@ -30,6 +30,18 @@ The files below are the **ONLY** sources for user-facing content (CV, cover lett
 
 ---
 
+## Output Language
+
+Before writing any user-visible prose, read `config/profile.yml` if it exists and resolve `language.output` (an ISO language code). Default to `en` when the key is absent.
+
+`language.output` is separate from `language.modes_dir`: `modes_dir` selects which locale's mode files and market vocabulary get used (e.g. `modes/de` for DACH terms); `output` selects the language the prose itself is written in. `modes_dir` supplies market context only — it must never force the prose language.
+
+**Write all human-facing output in `language.output`, regardless of the language of these instructions or of the job description.** This includes reports, tracker notes, PDFs, cover letters, outreach, interview prep, and form answers. Machine-readable field names and YAML keys stay as specified, unaffected by this rule. When `modes_dir` supplies a market-specific term, keep the term but explain it in `language.output` if needed.
+
+This overrides the "language of the JD" default in the ALWAYS rule below when `language.output` is explicitly set.
+
+---
+
 ## Scoring System
 
 The evaluation uses 6 blocks (A-F) with a global score of 1-5:
@@ -115,7 +127,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 3. Cite exact lines from CV when matching
 4. Use WebSearch for comp and company data
 5. Register in tracker after evaluating
-6. Generate content in the language of the JD (EN default)
+6. Generate content in `language.output` if set (see Output Language above), else the language of the JD (EN default)
 7. Be direct and actionable -- no fluff
 8. Native tech English for generated text. Short sentences, action verbs, no passive voice.
 8b. Case study URLs in PDF Professional Summary (recruiter may only read this).

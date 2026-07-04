@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { statusBlock } from "./diagnose";
+import { statusBlock, knockoutWarnings } from "./diagnose";
 
 // statusBlock is the ONLY pure export in diagnose.ts — it maps an HTTP nav status
 // (+ response headers) to a hard ApplyIssue block before any DOM work. The other
@@ -95,5 +95,32 @@ describe("statusBlock — precedence", () => {
   it("checks the >=500 branch before the 404/410 branch (e.g. 500 is server-error)", () => {
     // sanity: 500 is not mistakenly classified as not-found
     expect(statusBlock(500, NO_HEADERS)!.code).toBe("server-error");
+  });
+});
+
+describe("knockoutWarnings", () => {
+  it("returns [] when no field label mentions visa/sponsorship/clearance/work-auth", () => {
+    expect(knockoutWarnings([{ label: "First name" }, { label: "Email" }])).toEqual([]);
+  });
+
+  it("flags a visa-sponsorship field as a warn (never a block)", () => {
+    const out = knockoutWarnings([{ label: "Will you now or in the future require visa sponsorship?" }]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ level: "warn", code: "knockout-question" });
+    expect(out[0].message).toContain("Will you now or in the future require visa sponsorship?");
+  });
+
+  it("flags work-authorization and security-clearance phrasing too", () => {
+    expect(knockoutWarnings([{ label: "Are you authorized to work in the US without sponsorship?" }])).toHaveLength(1);
+    expect(knockoutWarnings([{ label: "Do you hold an active security clearance?" }])).toHaveLength(1);
+  });
+
+  it("only emits ONE issue even if several fields match (not one per field)", () => {
+    const out = knockoutWarnings([{ label: "Visa status" }, { label: "Do you require sponsorship?" }, { label: "Right to work" }]);
+    expect(out).toHaveLength(1);
+  });
+
+  it("ignores fields with no label", () => {
+    expect(knockoutWarnings([{}, { label: "" }])).toEqual([]);
   });
 });

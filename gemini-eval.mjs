@@ -29,9 +29,10 @@
  */
 
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { execFileSync } from 'child_process';
+import * as yaml from 'js-yaml';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // ---------------------------------------------------------------------------
 // Bootstrap: load .env before anything else
@@ -48,20 +49,25 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
-const ROOT = dirname(fileURLToPath(import.meta.url));
+// ROOT: script location — also where system-layer files (modes/_shared.md,
+// modes/oferta.md, the skill doc, and sibling scripts like merge-tracker.mjs)
+// live. DATA_ROOT: user-layer files (cv.md, modes/_profile.md, config/,
+// reports/, data/, batch/tracker-additions/) — CAREER_OPS_ROOT in a
+// multi-profile setup, else the same as ROOT. See AGENTS.md's Data Contract.
+const { engineRoot: ROOT, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 
 const PATHS = {
-  // Primary evaluation logic lives in these two mode files
+  // Primary evaluation logic lives in these two mode files (system-layer)
   shared:      join(ROOT, 'modes', '_shared.md'),
   oferta:      join(ROOT, 'modes', 'oferta.md'),
-  // Canonical skill path referenced in Issue #344
+  // Canonical skill path referenced in Issue #344 (system-layer)
   evaluate:    join(ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
-  cv:          join(ROOT, 'cv.md'),
-  profile:     join(ROOT, 'modes', '_profile.md'),
-  profileYml:  join(ROOT, 'config', 'profile.yml'),
-  reports:     join(ROOT, 'reports'),
-  tracker:     join(ROOT, 'data', 'applications.md'),
-  trackerAdditions: join(ROOT, 'batch', 'tracker-additions'),
+  cv:          join(DATA_ROOT, 'cv.md'),
+  profile:     join(DATA_ROOT, 'modes', '_profile.md'),
+  profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
+  reports:     join(DATA_ROOT, 'reports'),
+  tracker:     join(DATA_ROOT, 'data', 'applications.md'),
+  trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -100,9 +106,25 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   process.exit(0);
 }
 
+// Determine spend_tier from profile.yml to pick the default model.
+// economy/standard → gemini-2.5-flash (cheapest, generous free tier);
+// premium → gemini-2.5-pro. --model or GEMINI_MODEL always win over this.
+let spendTier = 'standard';
+if (existsSync(PATHS.profileYml)) {
+  try {
+    const profile = yaml.load(readFileSync(PATHS.profileYml, 'utf-8'));
+    if (profile && typeof profile.spend_tier === 'string' && profile.spend_tier.trim()) {
+      spendTier = profile.spend_tier.trim().toLowerCase();
+    }
+  } catch (err) {
+    console.warn(`⚠️   Could not parse config/profile.yml: ${err.message}`);
+  }
+}
+const defaultModel = spendTier === 'premium' ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
+
 // Parse flags
 let jdText = '';
-let modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+let modelName = process.env.GEMINI_MODEL || defaultModel;
 let saveReport = true;
 
 for (let i = 0; i < args.length; i++) {
@@ -432,6 +454,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     try {
       const mergeOutput = execFileSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], {
         cwd: ROOT,
+        // Forward the resolved data root so merge-tracker.mjs merges into the
+        // SAME tracker this script just wrote a TSV into, not the engine root's.
+        env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT },
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
       });

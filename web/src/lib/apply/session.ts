@@ -15,7 +15,7 @@ async function humanType(page: Page, loc: Locator, value: string): Promise<void>
 }
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
-import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
+import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, knockoutWarnings, type ApplyIssue } from "./diagnose";
 import { agentInterpretForm } from "./agent-interpret";
 
 /** The frame with the most interactive controls — where the agentic interpreter
@@ -319,7 +319,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // 6) Soft issues the user should know about — surfaced, never silent.
   const [cap, multi] = await Promise.all([captchaWarning(page), multiStepInfo(page)]);
   const unlabeled = form.fields.filter((f) => !(f.label || "").trim()).length;
-  const issues: ApplyIssue[] = [...consentIssues];
+  const issues: ApplyIssue[] = [...consentIssues, ...knockoutWarnings(form.fields)];
   if (cap) issues.push(cap);
   if (multi) issues.push(multi);
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "This form had an uncommon layout, so AI read its fields live — give them an extra check before submitting." });
@@ -381,7 +381,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   s.frame = frame;
   s.fields = form.fields;
   if (form.title) s.title = form.title;
-  const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }];
+  const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }, ...knockoutWarnings(s.fields)];
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "AI also read the fields live (uncommon layout) — give them an extra check." });
   const cap = await captchaWarning(s.page);
   if (cap) issues.push(cap);
@@ -583,4 +583,21 @@ export async function handoffSession(id: string): Promise<void> {
     /* CDP unavailable → bringToFront still raises it */
   }
   await s.page.bringToFront().catch(() => {});
+}
+
+/** Read-only: the session's current page URL (post-handoff, the human is looking
+ *  at the real ATS page). PURELY OBSERVATIONAL — calls only page.url(), never
+ *  clicks/types/navigates anything, so it cannot interact with a submit control.
+ *  Used to poll for a path change (a common "form was submitted, redirected to a
+ *  confirmation page" signal) and surface a human-confirm prompt — never to act
+ *  on the page itself. Returns null if the session has closed. */
+export function sessionUrlPath(id: string): { url: string; path: string } | null {
+  const s = SESSIONS.get(id);
+  if (!s) return null;
+  const url = s.page.url();
+  try {
+    return { url, path: new URL(url).pathname };
+  } catch {
+    return { url, path: url };
+  }
 }

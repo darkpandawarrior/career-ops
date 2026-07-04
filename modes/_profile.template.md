@@ -100,3 +100,13 @@ If you have a live demo/dashboard (check profile.yml), offer access in applicati
 **In evaluations (scoring):**
 - Remote dimension for hybrid outside your country: score **3.0** (not 1.0)
 - Only score 1.0 if JD says "must be on-site 4-5 days/week, no exceptions"
+
+## Your Spend Tier / Model Routing
+
+Configure your preferred spend tier in `config/profile.yml`.
+
+| `spend_tier` | Claude model (batch-runner.sh) | Gemini model (gemini-eval.mjs) | Batch pre-screen gate |
+|---|---|---|---|
+| `economy` | `claude-haiku-4-5` | `gemini-2.5-flash` | — (already cheapest) |
+| `standard` | `claude-sonnet-4-6` | `gemini-2.5-flash` | opt-in pre-screen → full model |
+| `premium` | `claude-opus-4-6` | `gemini-2.5-pro` | opt-in pre-screen → full model |

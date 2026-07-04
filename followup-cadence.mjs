@@ -12,13 +12,13 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname, relative, sep, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { join, dirname, relative, sep } from 'path';
+import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
   ? join(DATA_ROOT, 'data/applications.md')
   : join(DATA_ROOT, 'applications.md');

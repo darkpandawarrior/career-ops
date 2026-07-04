@@ -1,4 +1,4 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 
 // The WEB build's own version + channel (NOT the user's data checkout) — read

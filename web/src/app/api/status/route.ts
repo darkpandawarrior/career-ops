@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { requestRoot } from "@/lib/profile-registry";
 import { canonicalizeStatus } from "@/lib/core/states";
-import { atomicWrite } from "@/lib/core/safe-write";
+import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { withTrackerLock } from "@/lib/core/tracker-lock";
 
 // Writeback: UPDATE the status cell of an EXISTING tracker row only. Never adds
 // rows — per the core data contract, new rows go through the TSV + merge flow.
@@ -30,45 +31,56 @@ export async function POST(req: Request) {
   }
 
   const file = path.join(await requestRoot(), "data", "applications.md");
-  let md: string;
+
+  // Hold the SAME cross-process lock merge-tracker.mjs/set-status.mjs use across
+  // the whole read-modify-write, so a batch merge and this click can never race
+  // each other into a silently lost update. Bounded wait — a web request must
+  // fail fast with a clear error rather than hang behind a batch run's lock.
   try {
-    md = fs.readFileSync(file, "utf8");
-  } catch {
-    return NextResponse.json({ error: "tracker not found" }, { status: 404 });
-  }
+    return await withTrackerLock(file, () => {
+      let md: string;
+      try {
+        md = fs.readFileSync(file, "utf8");
+      } catch {
+        return NextResponse.json({ error: "tracker not found" }, { status: 404 });
+      }
 
-  const lines = md.split("\n");
-  // Find the Status column index from the header row (robust to 8- vs 9-col).
-  let statusIdx = 6;
-  for (const l of lines) {
-    if (!l.trim().startsWith("|")) continue;
-    const cells = l.split("|").map((c) => c.trim().toLowerCase());
-    const idx = cells.findIndex((c) => c === "status");
-    if (idx > 0) {
-      statusIdx = idx;
-      break;
-    }
-    if (/^:?-{2,}:?$/.test(cells[1] ?? "")) break; // hit the separator → no header match, keep default
-  }
+      const lines = md.split("\n");
+      // Find the Status column index from the header row (robust to 8- vs 9-col).
+      let statusIdx = 6;
+      for (const l of lines) {
+        if (!l.trim().startsWith("|")) continue;
+        const cells = l.split("|").map((c) => c.trim().toLowerCase());
+        const idx = cells.findIndex((c) => c === "status");
+        if (idx > 0) {
+          statusIdx = idx;
+          break;
+        }
+        if (/^:?-{2,}:?$/.test(cells[1] ?? "")) break; // hit the separator → no header match, keep default
+      }
 
-  let changed = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].trim().startsWith("|")) continue;
-    const parts = lines[i].split("|");
-    if (parts.length < 8) continue;
-    if (parts[1].trim() !== String(n)) continue;
-    if (statusIdx >= parts.length - 1) continue; // guard malformed row
-    parts[statusIdx] = ` ${canon} `;
-    lines[i] = parts.join("|");
-    changed = true;
-    break;
-  }
-  if (!changed) return NextResponse.json({ error: "row not found" }, { status: 404 });
+      let changed = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].trim().startsWith("|")) continue;
+        const parts = lines[i].split("|");
+        if (parts.length < 8) continue;
+        if (parts[1].trim() !== String(n)) continue;
+        if (statusIdx >= parts.length - 1) continue; // guard malformed row
+        parts[statusIdx] = ` ${canon} `;
+        lines[i] = parts.join("|");
+        changed = true;
+        break;
+      }
+      if (!changed) return NextResponse.json({ error: "row not found" }, { status: 404 });
 
-  try {
-    atomicWrite(file, lines.join("\n"));
-  } catch {
-    return NextResponse.json({ error: "write failed" }, { status: 500 });
+      try {
+        atomicWriteWithBackup(file, lines.join("\n"));
+      } catch {
+        return NextResponse.json({ error: "write failed" }, { status: 500 });
+      }
+      return NextResponse.json({ ok: true, status: canon });
+    }, { timeoutMs: 8_000 });
+  } catch (err) {
+    return NextResponse.json({ error: `tracker locked: ${err instanceof Error ? err.message : "timed out"}` }, { status: 503 });
   }
-  return NextResponse.json({ ok: true, status: canon });
 }

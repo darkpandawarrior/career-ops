@@ -26,6 +26,28 @@ export function statusBlock(status: number | null | undefined, headers: Record<s
   return null;
 }
 
+// Knock-out fields: visa/sponsorship/work-authorization/clearance questions can
+// disqualify the whole application. We never auto-decide pass/fail (the profile's
+// visa_status is free text) — just flag EARLY, before the drafting pass spends any
+// LLM time, so the human can bail before paying that cost.
+const VISA_RX = /\bvisa\b|sponsorship|sponsor(?:ed)? (?:work )?(?:visa|status)|work authorization|authoriz(?:ed|ation) to work|security clearance|\bclearance\b|right to work/i;
+
+/** Pure label scan — no DOM/profile access, so it's unit-testable like statusBlock.
+ *  Returns one `warn` issue per knock-out-shaped field found (never a `block`: the
+ *  user decides whether to proceed). */
+export function knockoutWarnings(fields: { label?: string }[]): ApplyIssue[] {
+  const hits = fields.filter((f) => VISA_RX.test(f.label || ""));
+  if (!hits.length) return [];
+  const names = hits.map((f) => f.label).filter(Boolean).slice(0, 3).join("; ");
+  return [
+    {
+      level: "warn",
+      code: "knockout-question",
+      message: `This form asks about visa/sponsorship/work-authorization/clearance (${names}) — a potential deal-breaker. Check it against your situation before spending time drafting the rest.`,
+    },
+  ];
+}
+
 const CONSENT_ROOTS =
   '#onetrust-banner-sdk, #CybotCookiebotDialog, #truste-consent-track, .qc-cmp2-container, #usercentrics-root, [id*="cookie" i][class*="banner" i], [class*="cookie-consent" i], [aria-label*="cookie" i]';
 const CONSENT_BUTTONS = [

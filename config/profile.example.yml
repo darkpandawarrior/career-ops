@@ -72,6 +72,18 @@ location:
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
+# ── Output Language ─────────────────────────────────────────────────────────
+#
+# language.output controls the language of human-facing OUTPUT PROSE: reports,
+# tracker notes, PDFs, cover letters, outreach, interview prep, and form
+# answers. Independent from language.modes_dir (which selects a locale's mode
+# files/market vocabulary, e.g. modes/de, modes/es, modes/it, modes/ko) — you
+# can request English output while still using DACH market vocabulary, or vice
+# versa. Default when the key is absent: "en".
+language:
+  output: en
+  # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
+
 # Optional follow-up cadence preferences for `node followup-cadence.mjs`.
 # CLI flags still win for one-off runs (for example `--applied-days 10`).
 # followup_cadence:
@@ -118,6 +130,17 @@ cover_letter:
       # Only trigger this entry when the JD location is in one of these countries.
       countries: [Spain, Mexico, Argentina, Colombia, Chile]
 
+# ── Outreach / greeting ─────────────────────────────────────────────────────
+#
+# Used by the greeting variant of `/career-ops contacto` (the short first-touch
+# message for BOSS Zhipin 打招呼, job-board chat, or a cold-email opener).
+#
+# greeting_max_chars is the hard character budget for that message. Default when
+# the key is absent: 150 (BOSS Zhipin's greeting limit). Raise or lower it to
+# match the platform you're messaging on.
+# outreach:
+#   greeting_max_chars: 150
+
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #
 # Auto-PDF threshold during evaluation (used by `/career-ops pipeline` and
@@ -150,3 +173,54 @@ cover_letter:
 #     cross_role_bucket: "all_EM_roles"
 #     applied_to: ["Senior Software Engineer"]
 #     last_apply_date: "2026-01-01"
+
+# ── Spend Tier ──────────────────────────────────────────────────────────────
+#
+# Controls which model is used for batch and pipeline evaluations.
+# Set once at onboarding; can be changed here at any time.
+#
+#   economy  → cheapest model  (Claude: claude-haiku-4-5; Gemini: gemini-2.5-flash)
+#   standard → default model   (Claude: claude-sonnet-4-6; Gemini: gemini-2.5-flash)
+#   premium  → strongest model (Claude: claude-opus-4-6; Gemini: gemini-2.5-pro)
+#
+# Standard and premium can also apply a cheap pre-screen gate in batch mode: a
+# fast/cheap-model worker scores each offer first; only offers scoring
+# >= batch_prescreen_threshold are forwarded to the full model, saving tokens
+# on obvious mismatches.
+#
+# Omitting this key (or leaving it commented out) is equivalent to "standard".
+#
+spend_tier: standard  # economy | standard | premium
+
+# Opt-in cheap pre-screen gate for standard and premium tiers in batch mode.
+# If true, runs a fast/cheap-model scoring pass before evaluating with the
+# full model.
+# batch_prescreen: false
+
+# Score threshold for the pre-screen gate (default: 3.0). Offers scoring below
+# this threshold skip the full-model evaluation and use the pre-screen report
+# as-is.
+# batch_prescreen_threshold: 3.0
+
+# ── Broad Search via Apify (opt-in, COSTS MONEY) ────────────────────────────
+#
+# A fundamentally different capability from the zero-token providers/*.mjs
+# scanners: a query-driven "search by role + location across whole boards"
+# sweep of LinkedIn, Indeed, Glassdoor, and Wellfound via paid Apify actors
+# (apify-search.mjs). Unlike every provider in portals.yml, this makes real,
+# billed API calls (a few cents to a couple dollars per run depending on
+# volume) — so it is OFF BY DEFAULT and never runs as part of a routine
+# `node scan.mjs`.
+#
+# To run it: `node scan.mjs --apify` (runs after the normal zero-token scan)
+# or `node apify-search.mjs` directly. Requires APIFY_TOKEN in .env — see
+# .env.example. Each platform's result count is hard-capped at 50 regardless
+# of max_results_per_platform below (see apify-search.mjs's spend guardrail);
+# the script prints an estimated cost before making any request.
+#
+# broad_search:
+#   enabled: false
+#   platforms: [linkedin, indeed, glassdoor, wellfound]
+#   role_query: "Android Engineer"
+#   location_query: "India"
+#   max_results_per_platform: 10

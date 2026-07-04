@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, User, Mail, Phone, Globe, MapPin, Building2, Clock, CalendarDays, DollarSign, GraduationCap, FileText, Link2, Code2, MessageSquareText, ListChecks, Bookmark, X } from "lucide-react";
+import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, User, Mail, Phone, Globe, MapPin, Building2, Clock, CalendarDays, DollarSign, GraduationCap, FileText, Link2, Code2, MessageSquareText, ListChecks, Bookmark, X, Send, SkipForward, HelpCircle } from "lucide-react";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
 import type { ApplyField } from "@/lib/apply/extract";
@@ -43,6 +43,8 @@ export function ApplyView() {
   const prevStatus = useRef(a.status);
   const [justDrafted, setJustDrafted] = useState(false);
   const [shot, setShot] = useState<number | null>(null); // lightbox: review a fill screenshot full-size
+  const [markingApplied, setMarkingApplied] = useState(false);
+  const [markedApplied, setMarkedApplied] = useState(false);
 
   useEffect(() => {
     if (shot === null) return;
@@ -123,6 +125,40 @@ export function ApplyView() {
   const failed = a.steps.filter((s) => !s.ok).length;
   const partial = done && (failed > 0 || a.issues.some((i) => i.code === "fill-mismatch" || i.code === "required-empty"));
 
+  // "done" hands off to the user to click Submit themselves — this is the one-click
+  // shortcut so they don't also have to go mark the tracker row by hand afterward.
+  // Reuses the same write path as StatusSelect (POST /api/status), never a new one.
+  async function markApplied() {
+    if (!a.n || markingApplied) return;
+    setMarkingApplied(true);
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ n: a.n, status: "Applied" }),
+      });
+      if (!res.ok) throw new Error("write failed");
+      setMarkedApplied(true);
+      // In queue mode, a logged Applied is the natural "advance" signal — move on
+      // to the next item automatically (still just calling the same open()).
+      if (inQueue) void a.queueNext();
+    } catch {
+      setMarkingApplied(false);
+    }
+  }
+
+  // Human-confirmed only: clicking this both logs Applied (if we have a tracker
+  // row) AND dismisses the passive-detection banner — never auto-logged.
+  async function confirmSubmitted() {
+    a.dismissSubmitDetected();
+    await markApplied();
+  }
+
+  const inQueue = a.queue.length > 0;
+  const queuePos = a.queueIndex + 1;
+  const queueTotal = a.queue.length;
+  const queueHasNext = a.queueIndex + 1 < a.queue.length;
+
   return (
     <div className="mx-auto max-w-2xl">
       <style>{STYLE}</style>
@@ -155,13 +191,35 @@ export function ApplyView() {
         </div>
       )}
 
+      {/* batch queue rail — additive; absent entirely for a single-job apply */}
+      {inQueue && (
+        <div className="co-rise mb-4 flex items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft/50 px-4 py-2.5 text-sm">
+          <ListChecks className="size-4 shrink-0 text-brand" />
+          <span className="font-medium text-foreground">
+            Application <span className="tabular-nums">{queuePos}</span> of <span className="tabular-nums">{queueTotal}</span>
+          </span>
+          <span className="min-w-0 flex-1 truncate text-muted">{a.company}</span>
+          <button
+            onClick={() => void a.queueNext()}
+            disabled={!queueHasNext}
+            title={queueHasNext ? "Skip this one and open the next queued application" : "This is the last queued application"}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3 py-1 text-xs font-medium text-muted transition-colors hover:text-brand disabled:opacity-40"
+          >
+            <SkipForward className="size-3.5" /> Skip / Next
+          </button>
+          <button onClick={a.stopQueue} title="Leave the queue (this application stays open)" className="shrink-0 text-xs text-faint transition-colors hover:text-foreground">
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* journey: Read → Draft → Review */}
       <PhaseRail phase={phase} />
 
       {!busy && (
         <div className="co-rise mb-4 flex items-baseline justify-between gap-3">
           <h2 className="font-display text-xl text-landing drop-shadow-sm">{a.title || "Application"}</h2>
-          <button onClick={a.reset} className="inline-flex items-center gap-1 text-xs text-faint transition-colors hover:text-foreground">
+          <button onClick={inQueue ? a.stopQueue : a.reset} className="inline-flex items-center gap-1 text-xs text-faint transition-colors hover:text-foreground">
             <RotateCcw className="size-3" /> new
           </button>
         </div>
@@ -327,15 +385,72 @@ export function ApplyView() {
               </div>
             </div>
           )}
+          {/* passive submit-detection (Part 2): the real page's URL changed after
+              handoff — a common "redirected to a confirmation page" signal. Purely
+              observational (page.url() polling); this banner is a QUESTION, never
+              an auto-log. The user clicks to confirm, same /api/status write as
+              "Mark as Applied". */}
+          {done && a.submitDetected && (
+            <div className="co-rise mt-4 flex items-start gap-2.5 rounded-xl border border-brand/40 bg-brand-soft px-4 py-3 text-sm">
+              <HelpCircle className="mt-0.5 size-5 shrink-0 text-brand" />
+              <div className="min-w-0 flex-1">
+                <span className="font-medium text-foreground">Looks like the application page changed — did you submit it?</span>{" "}
+                <span className="text-muted">career-ops never logs this on its own; confirm and I&apos;ll mark it Applied{inQueue ? " and move to the next one" : ""}.</span>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {a.n ? (
+                    <button onClick={confirmSubmitted} className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3 py-1 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200">
+                      <Check className="size-3.5" /> Yes, mark Applied
+                    </button>
+                  ) : (
+                    <span className="text-xs text-faint">(no tracker row linked to this application — nothing to mark)</span>
+                  )}
+                  <button onClick={a.dismissSubmitDetected} className="text-xs text-faint transition-colors hover:text-foreground">
+                    Not yet
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {done && (
             <div className="co-rise mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm backdrop-blur-sm">
               <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" />
               <div>
                 <span className="font-medium text-emerald-700 dark:text-emerald-400">The pre-filled application is open in a separate Chrome window.</span>{" "}
                 <span className="text-muted">Switch to it, review every answer, and click Submit there yourself — career-ops never submits for you. (You can also enlarge the shots above to double-check.)</span>
-                <button onClick={a.bringForward} className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400">
-                  <ExternalLink className="size-3.5" /> Can&apos;t find it? Bring the application window forward
-                </button>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <button onClick={a.bringForward} className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 underline-offset-2 hover:underline dark:text-emerald-400">
+                    <ExternalLink className="size-3.5" /> Can&apos;t find it? Bring the application window forward
+                  </button>
+                  {a.n && (
+                    <button
+                      onClick={markApplied}
+                      disabled={markingApplied}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/20 disabled:opacity-60 dark:text-emerald-400"
+                    >
+                      {markedApplied ? (
+                        <>
+                          <Check className="size-3.5" /> Marked as Applied
+                        </>
+                      ) : markingApplied ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" /> Marking…
+                        </>
+                      ) : (
+                        <>
+                          <Send className="size-3.5" /> Mark as Applied
+                        </>
+                      )}
+                    </button>
+                  )}
+                  {inQueue && (
+                    <button
+                      onClick={() => void a.queueNext()}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3 py-1 text-xs font-medium text-muted transition-colors hover:text-brand"
+                    >
+                      <SkipForward className="size-3.5" /> {queueHasNext ? "Next queued application" : "Finish queue"}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

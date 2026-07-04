@@ -10,16 +10,19 @@
  * 5. All rows have proper pipe-delimited format
  * 6. No pending TSVs in tracker-additions/ (only in merged/ or archived/)
  * 7. states.yml canonical IDs for cross-system consistency
+ * 8. Stale report-number reservation sentinels are garbage-collected
+ * 9. No duplicate reports (two files claiming the same report number)
+ * 10. No orphan reports (a report file with no referencing tracker row)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
 
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
-import { join, dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { join, dirname } from 'path';
+import { resolveColumns } from './tracker-parse.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
 // CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
 const APPS_FILE = process.env.CAREER_OPS_TRACKER
@@ -73,25 +76,10 @@ const lines = content.split('\n');
 // original 9-column layout or a customized one with an extra column (e.g. a
 // Location column after Role). Fixed-position indexing would otherwise read
 // Location where Score is expected and flag false errors. Falls back to the
-// legacy fixed layout when no recognizable header row is found.
-const LEGACY_COLMAP = { num: 1, date: 2, company: 3, role: 4, score: 5, status: 6, pdf: 7, report: 8, notes: 9 };
-const HEADER_ALIASES = {
-  '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
-  'role': 'role', 'puesto': 'role', 'location': 'location', 'score': 'score',
-  'status': 'status', 'pdf': 'pdf', 'report': 'report', 'notes': 'notes',
-};
-function detectColumns(allLines) {
-  for (const line of allLines) {
-    if (!line.startsWith('|')) continue;
-    const cells = line.split('|').map(s => s.trim().toLowerCase());
-    if (!cells.includes('company') || !cells.includes('role')) continue;
-    const map = {};
-    cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
-    if (['num', 'company', 'role', 'score', 'status'].every(k => map[k] != null)) return map;
-  }
-  return null;
-}
-const COLMAP = detectColumns(lines) || LEGACY_COLMAP;
+// legacy fixed layout when no recognizable header row is found. Shared with
+// merge-tracker.mjs/dedup-tracker.mjs/set-status.mjs via tracker-parse.mjs so
+// this logic can't drift out of sync with theirs.
+const COLMAP = resolveColumns(lines);
 const MAX_IDX = Math.max(...Object.values(COLMAP));
 
 const entries = [];
@@ -248,6 +236,51 @@ if (existsSync(REPORTS_DIR)) {
   }
 }
 if (staleSentinels === 0) ok('No stale reservation sentinels');
+
+// --- Check 9: Duplicate reports (same NNN claimed by multiple files) ---
+// reserve-report-num.mjs hands out each NNN once; two report files sharing a
+// leading number means a reservation collision (or a manual copy/rename).
+let duplicateReportNums = 0;
+if (existsSync(REPORTS_DIR)) {
+  const reportNumMap = new Map();
+  for (const name of readdirSync(REPORTS_DIR)) {
+    const m = name.match(/^(\d+)-.+\.md$/);
+    if (!m) continue;
+    const num = m[1];
+    if (!reportNumMap.has(num)) reportNumMap.set(num, []);
+    reportNumMap.get(num).push(name);
+  }
+  for (const [num, files] of reportNumMap) {
+    if (files.length > 1) {
+      error(`Duplicate report number ${num}: ${files.join(', ')}`);
+      duplicateReportNums++;
+    }
+  }
+}
+if (duplicateReportNums === 0) ok('No duplicate report numbers');
+
+// --- Check 10: Orphan reports (report file with no tracker row) ---
+// Every reports/NNN-*.md should be referenced by some row's report column as
+// [NNN](...) — a file with no referencing row was never linked in (or its row
+// was deleted after linking).
+let orphanReports = 0;
+if (existsSync(REPORTS_DIR)) {
+  const referencedNums = new Set();
+  for (const e of entries) {
+    const m = e.report.match(/\[(\d+)\]/);
+    if (m) referencedNums.add(m[1]);
+  }
+  for (const name of readdirSync(REPORTS_DIR)) {
+    const m = name.match(/^(\d+)-.+\.md$/);
+    if (!m) continue;
+    const num = m[1];
+    if (!referencedNums.has(num) && !referencedNums.has(String(parseInt(num, 10)))) {
+      warn(`Orphan report (no tracker row references it): ${name}`);
+      orphanReports++;
+    }
+  }
+}
+if (orphanReports === 0) ok('No orphan reports');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

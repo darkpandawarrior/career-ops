@@ -1,4 +1,4 @@
-﻿const withLevels = (title: string, levels: string[] = ['Junior', 'Senior', 'Lead']) => [title, ...levels.map((level) => `${level} ${title}`)];
+const withLevels = (title: string, levels: string[] = ['Junior', 'Senior', 'Lead']) => [title, ...levels.map((level) => `${level} ${title}`)];
 
 export const ROLE_CATALOG = Object.freeze([
   { category: 'Engineering and technology', roles: [

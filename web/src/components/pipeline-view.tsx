@@ -276,53 +276,78 @@ export function PipelineView({
           <InboxEmpty count={pendingInbox.length} filtered={q.trim().length > 0} />
         )
       ) : filtered.length > 0 ? (
-        /* ── Tracker table ── */
-        <div className="mt-4 overflow-hidden rounded-2xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
-              <tr>
-                {SORT_KEYS.map((k) => (
-                  <th
-                    key={k}
-                    className="cursor-pointer select-none px-4 py-2.5 font-medium hover:text-foreground"
-                    onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
-                  >
-                    <span className="inline-flex items-center gap-1">
-                      {k}
-                      <ChevronsUpDown className="size-3" />
-                    </span>
-                  </th>
-                ))}
-                <th className="px-4 py-2.5 font-medium">notes</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map((r, i) => (
-                <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
-                  <td className="px-4 py-3 font-medium">
-                    <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
-                      <CompanyLogo name={r.company} size={20} />
-                      {r.company}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-muted">
-                    <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-muted">
-                    <StatusCell n={r.n} status={r.status} onSaved={() => router.refresh()} />
-                  </td>
-                  <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
-                  <td className="px-4 py-3 text-muted">
-                    <NotesCell n={r.n} notes={r.notes} onSaved={() => router.refresh()} />
-                  </td>
+        <>
+          {/* ── Tracker table (desktop) ── */}
+          <div className="mt-4 hidden overflow-hidden rounded-2xl border border-border md:block">
+            <table className="w-full text-sm">
+              <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
+                <tr>
+                  {SORT_KEYS.map((k) => (
+                    <th
+                      key={k}
+                      className="cursor-pointer select-none px-4 py-2.5 font-medium hover:text-foreground"
+                      onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        {k}
+                        <ChevronsUpDown className="size-3" />
+                      </span>
+                    </th>
+                  ))}
+                  <th className="px-4 py-2.5 font-medium">notes</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filtered.map((r, i) => (
+                  <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
+                    <td className="px-4 py-3 font-medium">
+                      <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+                        <CompanyLogo name={r.company} size={20} />
+                        {r.company}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 text-muted">
+                      <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+                    </td>
+                    <td className="px-4 py-3 text-muted">
+                      <StatusCell n={r.n} status={r.status} onSaved={() => router.refresh()} />
+                    </td>
+                    <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
+                    <td className="px-4 py-3 text-muted">
+                      <NotesCell n={r.n} notes={r.notes} onSaved={() => router.refresh()} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ── Tracker cards (mobile) ── */}
+          <div className="mt-4 space-y-2.5 md:hidden">
+            {filtered.map((r, i) => (
+              <div key={`${r.n}-${i}`} className="rounded-xl border border-border bg-surface/40 p-3.5 transition-colors hover:border-brand/30">
+                <div className="flex items-start gap-2.5">
+                  <CompanyLogo name={r.company} size={24} />
+                  <Link href={`/pipeline/${r.n}`} className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">{r.company}</p>
+                    <p className="truncate text-[13px] text-muted">{r.role}</p>
+                  </Link>
+                  <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+                </div>
+                <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-border pt-2.5">
+                  <StatusCell n={r.n} status={r.status} onSaved={() => router.refresh()} />
+                  <span className="shrink-0 text-xs tabular-nums text-faint">{r.date}</span>
+                </div>
+                <div className="mt-1.5 text-xs text-muted">
+                  <NotesCell n={r.n} notes={r.notes} onSaved={() => router.refresh()} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       ) : (
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
           <p className="font-display text-lg">No matches</p>

@@ -28,23 +28,43 @@
  *   node scan.mjs --verify --headed-fallback  # retry anti-bot-blocked URLs in a headed browser (needs a display)
  *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
+ *   node scan.mjs --agent-handoff              # for scan_method:websearch companies, probe Greenhouse/Ashby/Lever
+ *                                               # slug candidates (same logic as `verify-portals.mjs --add`) and print
+ *                                               # suggested portals.yml edits — never writes the file, since a
+ *                                               # name-derived slug can collide with an unrelated company
+ *   node scan.mjs --apify                      # after the zero-token scan, also run a broad paid search across
+ *                                               # LinkedIn/Indeed/Glassdoor/Wellfound via Apify actors (apify-search.mjs).
+ *                                               # Off by default — costs real money per run. See broad_search: in
+ *                                               # config/profile.yml and APIFY_TOKEN in .env.example.
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
-import { pathToFileURL, fileURLToPath } from 'url';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'fs';
+import { pathToFileURL } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
 
+// ---------------------------------------------------------------------------
+// Bootstrap: load .env before anything else
+// ---------------------------------------------------------------------------
+try {
+  const { config } = await import('dotenv');
+  config();
+} catch {
+  // dotenv is optional — fall back to process.env if not installed
+}
+
 import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
+import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
+import { classifyFetchError, discoverAlternates } from './verify-portals.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const _SCAN_ENGINE = path.dirname(fileURLToPath(import.meta.url));
-const _SCAN_DATA_ROOT = process.env.CAREER_OPS_ROOT ? path.resolve(process.env.CAREER_OPS_ROOT) : _SCAN_ENGINE;
+const { engineRoot: _SCAN_ENGINE, dataRoot: _SCAN_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(_SCAN_DATA_ROOT, 'portals.yml');
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(_SCAN_DATA_ROOT, 'config/profile.yml');
 const SCAN_HISTORY_PATH = path.join(_SCAN_DATA_ROOT, 'data/scan-history.tsv');
@@ -56,73 +76,6 @@ const PROVIDERS_DIR = path.resolve(_SCAN_ENGINE, 'providers');
 mkdirSync(path.join(_SCAN_DATA_ROOT, 'data'), { recursive: true });
 
 const CONCURRENCY = 10;
-
-// ── Provider loading ────────────────────────────────────────────────
-
-async function loadProviders(dir) {
-  const providers = new Map();
-  if (!existsSync(dir)) return providers;
-  // Alphabetical order so detect() priority is deterministic across machines.
-  const entries = readdirSync(dir)
-    .filter(f => f.endsWith('.mjs') && !f.startsWith('_'))
-    .sort();
-  for (const file of entries) {
-    const full = path.join(dir, file);
-    let mod;
-    try {
-      mod = await import(pathToFileURL(full).href);
-    } catch (err) {
-      console.error(`⚠️  ${file}: failed to load — ${err.message}`);
-      continue;
-    }
-    const p = mod.default;
-    if (!p || typeof p.fetch !== 'function' || !p.id) {
-      console.error(`⚠️  ${file}: skipping — default export must be { id, fetch }`);
-      continue;
-    }
-    if (providers.has(p.id)) {
-      console.error(`⚠️  ${file}: duplicate provider id "${p.id}" — keeping first`);
-      continue;
-    }
-    providers.set(p.id, p);
-  }
-  return providers;
-}
-
-// Resolve which provider handles a tracked_companies entry.
-// 1. Explicit `provider:` field wins (skips detect()).
-// 2. local-parser when parser.command + script are configured (before API detect).
-// 3. Otherwise each provider's detect() runs in load order; first hit wins.
-function resolveProvider(entry, providers, { skipIds = [] } = {}) {
-  if (entry.provider) {
-    const p = providers.get(entry.provider);
-    if (!p) return { error: `unknown provider: ${entry.provider}` };
-    return { provider: p };
-  }
-
-  const localParser = providers.get('local-parser');
-  if (localParser && !skipIds.includes('local-parser')) {
-    try {
-      const hit = localParser.detect?.(entry);
-      if (hit) return { provider: localParser };
-    } catch (err) {
-      console.error(`⚠️  local-parser: detect() threw for "${entry.name}" — ${err.message}`);
-    }
-  }
-
-  for (const p of providers.values()) {
-    if (skipIds.includes(p.id)) continue;
-    let hit;
-    try {
-      hit = p.detect?.(entry);
-    } catch (err) {
-      console.error(`⚠️  ${p.id}: detect() threw for "${entry.name}" — ${err.message}`);
-      continue;
-    }
-    if (hit) return { provider: p };
-  }
-  return null;
-}
 
 // ── Title filter ────────────────────────────────────────────────────
 
@@ -494,6 +447,17 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
   'skipped_blocked_host',
 ]);
 
+// A classifier-confirmed "expired" can be a false positive (e.g. a bot-block
+// misread as a dead posting — see the rediscover-fallback comment in
+// verifyOffers()). Unlike `added`, which recycles on the configured
+// recheck_after_days, expired/skipped_expired default to a much longer
+// cooldown so a genuinely dead posting isn't re-surfaced every scan — but it
+// is NOT permanent. 45 days is a judgment call: long enough that a real
+// closure doesn't nag, short enough that a misclassification self-heals well
+// within a job search's timeline.
+const EXPIRED_STATUSES = new Set(['expired', 'skipped_expired']);
+const EXPIRED_RECHECK_AFTER_DAYS = 45;
+
 function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
   const startDate = new Date(`${start}T00:00:00Z`);
@@ -508,6 +472,11 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
     const parts = status.split(':');
     const cooldownUntil = parts[parts.length - 1];
     return today < cooldownUntil;
+  }
+  if (EXPIRED_STATUSES.has(status)) {
+    const ageDays = daysBetweenIsoDates(firstSeen, today);
+    if (ageDays == null) return true;
+    return ageDays < EXPIRED_RECHECK_AFTER_DAYS;
   }
   if (status !== 'added') return true;
   if (recheckAfterDays == null) return true;
@@ -671,6 +640,19 @@ Paste job URLs below as \`- [ ] {url}\` then run \`/career-ops pipeline\`.
 const PENDING_MARKERS = ['## Pending', '## Pendientes'];
 const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
 
+// Atomic file replace via a same-directory temp file + rename, so a reader
+// never sees a partially written pipeline.md (mirrors tracker.mjs's writer).
+function writeFileAtomic(filePath, content) {
+  const tmp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    writeFileSync(tmp, content, 'utf-8');
+    renameSync(tmp, filePath);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
 export function appendToPipeline(offers) {
   if (offers.length === 0) return;
 
@@ -703,7 +685,7 @@ export function appendToPipeline(offers) {
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   }
 
-  writeFileSync(PIPELINE_PATH, text, 'utf-8');
+  writeFileAtomic(PIPELINE_PATH, text);
 }
 
 export function appendToScanHistory(offers, date, status = 'added') {
@@ -878,6 +860,17 @@ async function main() {
   // --rediscover-404: when a tracked company's URL 404/410s, search for the
   // moved role and re-verify before marking it expired. Opt-in; rides on --verify.
   const rediscover = args.includes('--rediscover-404');
+  // --agent-handoff: for each scan_method:websearch company, probe Greenhouse/
+  // Ashby/Lever slug candidates the SAME way `verify-portals.mjs --add` does,
+  // instead of only printing an inert console list. Opt-in — this makes extra
+  // network calls beyond the normal zero-token scan, so it doesn't run by
+  // default on every routine scan.
+  const agentHandoffProbe = args.includes('--agent-handoff');
+  // --apify: after the normal zero-token scan completes, run a broad,
+  // query-driven search across LinkedIn/Indeed/Glassdoor/Wellfound via paid
+  // Apify actors (see apify-search.mjs). Opt-in and OFF by default — it costs
+  // real money per run, unlike every zero-token provider in this file.
+  const runApifySearch = args.includes('--apify');
   const companyFlag = args.indexOf('--company');
   const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
 
@@ -956,6 +949,7 @@ async function main() {
             company: entry.name,
             method: 'websearch',
             query: entry.scan_query || entry.search_query || entry.careers_url || '',
+            careersUrl: entry.careers_url || '',
           });
         }
         continue;
@@ -1004,6 +998,7 @@ async function main() {
   let totalDupes = 0;
   const newOffers = [];
   const errors = [...resolveErrors];
+  const emptyTargets = [];
 
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
@@ -1029,6 +1024,9 @@ async function main() {
         throw new Error(`${provider.id}: fetch() did not return an array`);
       }
       totalFound += jobs.length;
+      if (!company._isBoard && jobs.length === 0) {
+        emptyTargets.push(company.name);
+      }
 
       for (const job of jobs) {
         // Trust enrichment — runs before filters, never drops
@@ -1090,7 +1088,11 @@ async function main() {
         });
       }
     } catch (err) {
-      errors.push({ company: company.name, error: err.message });
+      errors.push({
+        company: company.name,
+        error: err.message,
+        kind: classifyFetchError(err),
+      });
     }
   });
 
@@ -1223,11 +1225,62 @@ async function main() {
     if (agentHandoff.length > 25) {
       console.log(`  … ${agentHandoff.length - 25} more omitted; narrow with --company or inspect portals.yml`);
     }
+
+    if (agentHandoffProbe) {
+      // Deterministic, zero-LLM auto-detection: probe Greenhouse/Ashby/Lever
+      // slug candidates derived from the company name — the SAME mechanism
+      // `verify-portals.mjs --add` uses. This can NEVER write to portals.yml:
+      // a name-derived slug can collide with an unrelated company that
+      // happens to share the guessed slug (e.g. "Hevo" the SaaS vs. an
+      // unrelated "hevo" on lever.co), so every hit is a suggestion for the
+      // user to verify and apply by hand, not an auto-applied config change.
+      console.log(`\nProbing ATS slugs for ${agentHandoff.length} websearch-only compan${agentHandoff.length === 1 ? 'y' : 'ies'} (--agent-handoff)...`);
+      let suggested = 0;
+      for (const item of agentHandoff) {
+        let hit;
+        try {
+          hit = await discoverAlternates(item.company, {});
+        } catch (err) {
+          console.log(`  ✗ ${item.company}: probe failed — ${err.message}`);
+          continue;
+        }
+        if (!hit) continue;
+        suggested++;
+        const jobsHint = hit.status === 'live' ? `${hit.jobCount} live job(s)` : 'live but empty — verify before adding';
+        console.log(`  → ${item.company}: possible ${hit.ats} board at slug "${hit.slug}" (${jobsHint})`);
+        console.log(`      Suggested portals.yml change — verify this is really ${item.company}, then replace:`);
+        console.log(`        careers_url: ${item.careersUrl || '(none set)'}  (remove scan_method/scan_query)`);
+        console.log(`      with:`);
+        console.log(`        careers_url: ${hit.url}`);
+      }
+      if (suggested === 0) {
+        console.log(`  No ATS slug matches found for any websearch-only company — these likely are genuinely custom/token-gated.`);
+      } else {
+        console.log(`\n${suggested} suggestion(s) above — a name-derived slug can collide with an unrelated company, so verify each before editing portals.yml.`);
+      }
+    }
   }
 
-  if (errors.length > 0) {
-    console.log(`\nErrors (${errors.length}):`);
-    for (const e of errors) {
+  const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
+  const networkTargets = errors.filter((e) => e.kind === 'network');
+  const otherErrors = errors.filter((e) => e.kind !== 'slug_gone' && e.kind !== 'network');
+
+  if (unreachableTargets.length > 0) {
+    const names = unreachableTargets.map((e) => e.company).join(', ');
+    console.log(`\n⚠️  ${unreachableTargets.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
+  }
+  if (emptyTargets.length > 0) {
+    console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
+  }
+  if (networkTargets.length > 0) {
+    console.log(`\nNetwork errors (${networkTargets.length}):`);
+    for (const e of networkTargets) {
+      console.log(`  ✗ ${e.company}: ${e.error}`);
+    }
+  }
+  if (otherErrors.length > 0) {
+    console.log(`\nErrors (${otherErrors.length}):`);
+    for (const e of otherErrors) {
       console.log(`  ✗ ${e.company}: ${e.error}`);
     }
   }
@@ -1245,6 +1298,15 @@ async function main() {
     } else {
       console.log(`\nResults saved to ${PIPELINE_PATH} and ${SCAN_HISTORY_PATH}`);
     }
+  }
+
+  // --apify: broad paid search, opt-in, runs after the zero-token scan above.
+  if (runApifySearch) {
+    console.log(`\n${'━'.repeat(45)}`);
+    console.log('Broad search via Apify (--apify, paid)');
+    console.log(`${'━'.repeat(45)}`);
+    const { runBroadSearch } = await import('./apify-search.mjs');
+    await runBroadSearch({ dryRun });
   }
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);

@@ -4,7 +4,7 @@ description: AI job search command center -- evaluate offers, generate CVs, scan
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | deep | pdf | latex | cover | eu-swe | oferta | ofertas | apply | batch | tracker | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | patterns | followup | update | email-sweep]"
+argument-hint: "[scan | deep | pdf | latex | cover | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview/redflag | patterns | followup | update | email-sweep | email | add | expand]"
 license: MIT
 ---
 
@@ -47,16 +47,23 @@ Determine the mode from `$mode`:
 | `interview/plan` | `interview/plan` |
 | `interview/practice` | `interview/practice` |
 | `interview/debrief` | `interview/debrief` |
+| `interview/redflag` | `interview/redflag` |
 | `pdf` | `pdf` |
 | `latex` | `latex` |
 | `training` | `training` |
 | `project` | `project` |
 | `tracker` | `tracker` |
+| `agent-inbox` | `agent-inbox` |
+| `inbox` | `agent-inbox` |
 | `pipeline` | `pipeline` |
 | `apply` | `apply` |
 | `scan` | `scan` |
 | `batch` | `batch` |
 | `email-sweep` | `email-sweep` |
+| `email` | `email` |
+| `add` | `add` |
+| `expand` | `expand` |
+| `ko` | `ko` (Korean locale pack — see `modes/ko/README.md`) |
 | `patterns` | `patterns` |
 | `followup` | `followup` |
 | `update` | `update` |
@@ -100,16 +107,21 @@ Available commands:
   /career-ops interview/plan → Time-blocked prep plan for an upcoming interview
   /career-ops interview/practice → Practice interview, one question at a time with feedback
   /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round
+  /career-ops interview/redflag → Structural red-flag check on a company from interview transcript signal
   /career-ops pdf       → PDF only, ATS-optimized CV
   /career-ops latex     → Export CV as LaTeX/Overleaf .tex
   /career-ops cover     → Cover letter: standalone JD paste or /career-ops cover {slug}
   /career-ops training  → Evaluate course/cert against North Star
   /career-ops project   → Evaluate portfolio project idea
   /career-ops tracker   → Application status overview
+  /career-ops agent-inbox → Queue/drain requests for the next session (data/agent-inbox.md)
   /career-ops apply     → Live application assistant (reads form + generates answers)
   /career-ops scan      → Scan portals and discover new offers
   /career-ops batch     → Batch processing with parallel workers
   /career-ops email-sweep → Scan Gmail for application-status changes (rejections, interviews, offers) and merge into tracker
+  /career-ops email     → Draft a formal outbound application email (draft-only, never sends — distinct from email-sweep)
+  /career-ops add       → Fetch a project/paper/role URL into cv.md / article-digest.md
+  /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops patterns  → Analyze rejection patterns and improve targeting
   /career-ops followup  → Follow-up cadence tracker: flag overdue, generate drafts
   /career-ops update    → Update career-ops system files with diff preview + compat check
@@ -132,7 +144,7 @@ Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `contacto`, `apply`, `p
 ### Standalone modes (only their mode file):
 Read `modes/{mode}.md`
 
-Applies to: `tracker`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `training`, `project`, `patterns`, `followup`, `cover`, `email-sweep`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `interview/redflag`, `latex`, `training`, `project`, `patterns`, `followup`, `cover`, `email-sweep`, `email`, `add`, `expand`
 
 ### Modes delegated to subagent:
 For `scan`, `apply` (with Playwright), `pipeline` (3+ URLs), and `email-sweep`: launch as a worker/subagent with the content of `modes/{mode}.md` injected into the worker prompt (`email-sweep` does not need `_shared.md` — it has no scoring logic). If your CLI exposes an `Agent(...)` primitive, the call looks like this:
