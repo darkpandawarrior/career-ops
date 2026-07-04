@@ -111,6 +111,18 @@ function statusRank(status) {
 }
 
 /**
+ * An Applied+ row (Applied, Responded, Interview, Offer) represents a real
+ * action already taken — it must never be collapsed into another row by
+ * title/company matching alone, only by exact report identity.
+ *
+ * @param {string} status - Raw or normalized status value.
+ * @returns {boolean}
+ */
+function isAdvancedStatus(status) {
+  return statusRank(status) >= STATUS_RANK.applied;
+}
+
+/**
  * Extract the report number from a Markdown report link.
  *
  * Tracker report cells are normally written as links like
@@ -169,12 +181,19 @@ function normalizeRole(role) {
  * two different "Software Engineer" openings). Titles that are merely similar
  * are kept as separate rows.
  *
+ * An Applied+ row is never clustered by title match alone, even an exact one —
+ * two rows can legitimately share a title (e.g. re-applying to a reposted
+ * role, or a tracking mistake worth a human's eyes) and collapsing them would
+ * silently discard a real applied-application record. Only exact report
+ * identity may remove an Applied+ row.
+ *
  * @param {object} a - First parsed applications.md row.
  * @param {object} b - Second parsed applications.md row.
  * @returns {boolean} True when dedup may cluster the two rows as duplicates.
  */
 function roleMatch(a, b) {
   if (sameReportIdentity(a, b)) return true;
+  if (isAdvancedStatus(a.status) || isAdvancedStatus(b.status)) return false;
   return normalizeRole(a.role) === normalizeRole(b.role);
 }
 
