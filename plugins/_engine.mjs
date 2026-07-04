@@ -24,7 +24,7 @@
  * all reuse it with no prod-vs-test drift.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
@@ -113,6 +113,29 @@ export async function loadPluginConfig(root) {
  * @property {string} [homepage]
  * @property {string} dir
  */
+/**
+ * True if `candidateAbs` resolves (symlinks followed) to inside `dirAbs`.
+ * A raw startsWith() on unresolved paths is bypassable via a symlink that
+ * textually starts with the right prefix but points elsewhere — resolve both
+ * sides with realpathSync first. Fails closed (returns false) if either path
+ * doesn't exist, since a manifest referencing a nonexistent file is invalid
+ * anyway.
+ * @param {string} dirAbs
+ * @param {string} candidateAbs
+ * @returns {boolean}
+ */
+function isContainedIn(dirAbs, candidateAbs) {
+  let realDir, realCandidate;
+  try {
+    realDir = realpathSync(dirAbs);
+    realCandidate = realpathSync(candidateAbs);
+  } catch {
+    return false;
+  }
+  const rel = path.relative(realDir, realCandidate);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
 export function validateManifest(m, dir, dirName) {
   const label = dirName;
   if (!m || typeof m !== 'object') { warnSkip(label, 'manifest.json is not an object'); return null; }
@@ -155,7 +178,8 @@ export function validateManifest(m, dir, dirName) {
   const entry = typeof m.entry === 'string' && m.entry.trim() ? m.entry : 'index.mjs';
   if (!entry.endsWith('.mjs')) { warnSkip(label, `entry "${entry}" must be a .mjs file`); return null; }
   const entryAbs = path.resolve(dir, entry);
-  if (entryAbs !== dir && !entryAbs.startsWith(dir + path.sep)) { warnSkip(label, `entry "${entry}" escapes the plugin directory`); return null; }
+  if (!existsSync(entryAbs)) { warnSkip(label, `entry file not found: ${entry}`); return null; }
+  if (!isContainedIn(dir, entryAbs)) { warnSkip(label, `entry "${entry}" escapes the plugin directory`); return null; }
 
   // Optional companion skill (Open-Agent-Skill-Standard SKILL.md). Traversal-
   // guarded like entry. Surfaced on-demand via `plugins.mjs skill <id>`; never
@@ -164,8 +188,8 @@ export function validateManifest(m, dir, dirName) {
   if (m.skill !== undefined) {
     if (typeof m.skill !== 'string' || !m.skill.endsWith('.md')) { warnSkip(label, 'skill must be a relative .md path'); return null; }
     const skillAbs = path.resolve(dir, m.skill);
-    if (skillAbs !== dir && !skillAbs.startsWith(dir + path.sep)) { warnSkip(label, `skill "${m.skill}" escapes the plugin directory`); return null; }
     if (!existsSync(skillAbs)) { warnSkip(label, `skill file not found: ${m.skill}`); return null; }
+    if (!isContainedIn(dir, skillAbs)) { warnSkip(label, `skill "${m.skill}" escapes the plugin directory`); return null; }
     skill = m.skill;
   }
 

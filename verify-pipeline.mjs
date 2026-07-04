@@ -10,6 +10,9 @@
  * 5. All rows have proper pipe-delimited format
  * 6. No pending TSVs in tracker-additions/ (only in merged/ or archived/)
  * 7. states.yml canonical IDs for cross-system consistency
+ * 8. Stale report-number reservation sentinels are garbage-collected
+ * 9. No duplicate reports (two files claiming the same report number)
+ * 10. No orphan reports (a report file with no referencing tracker row)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -248,6 +251,51 @@ if (existsSync(REPORTS_DIR)) {
   }
 }
 if (staleSentinels === 0) ok('No stale reservation sentinels');
+
+// --- Check 9: Duplicate reports (same NNN claimed by multiple files) ---
+// reserve-report-num.mjs hands out each NNN once; two report files sharing a
+// leading number means a reservation collision (or a manual copy/rename).
+let duplicateReportNums = 0;
+if (existsSync(REPORTS_DIR)) {
+  const reportNumMap = new Map();
+  for (const name of readdirSync(REPORTS_DIR)) {
+    const m = name.match(/^(\d+)-.+\.md$/);
+    if (!m) continue;
+    const num = m[1];
+    if (!reportNumMap.has(num)) reportNumMap.set(num, []);
+    reportNumMap.get(num).push(name);
+  }
+  for (const [num, files] of reportNumMap) {
+    if (files.length > 1) {
+      error(`Duplicate report number ${num}: ${files.join(', ')}`);
+      duplicateReportNums++;
+    }
+  }
+}
+if (duplicateReportNums === 0) ok('No duplicate report numbers');
+
+// --- Check 10: Orphan reports (report file with no tracker row) ---
+// Every reports/NNN-*.md should be referenced by some row's report column as
+// [NNN](...) — a file with no referencing row was never linked in (or its row
+// was deleted after linking).
+let orphanReports = 0;
+if (existsSync(REPORTS_DIR)) {
+  const referencedNums = new Set();
+  for (const e of entries) {
+    const m = e.report.match(/\[(\d+)\]/);
+    if (m) referencedNums.add(m[1]);
+  }
+  for (const name of readdirSync(REPORTS_DIR)) {
+    const m = name.match(/^(\d+)-.+\.md$/);
+    if (!m) continue;
+    const num = m[1];
+    if (!referencedNums.has(num) && !referencedNums.has(String(parseInt(num, 10)))) {
+      warn(`Orphan report (no tracker row references it): ${name}`);
+      orphanReports++;
+    }
+  }
+}
+if (orphanReports === 0) ok('No orphan reports');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

@@ -55,7 +55,10 @@ export default {
       const props = { Role: { title: rich(role) }, Company: { rich_text: rich(company) } };
       const status = canonicalStatus(row.status);
       if (status) props.Status = { select: { name: status } };
-      const score = parseFloat(String(row.score ?? '').replace(/[^\d.]/g, ''));
+      // Slash-formatted scores like "4.2/5" — parse only the numerator, or the
+      // denominator's digits bleed into the result (e.g. "4.2/5" -> 4.25).
+      const scoreNumerator = String(row.score ?? '').split('/')[0];
+      const score = parseFloat(scoreNumerator.replace(/[^\d.]/g, ''));
       if (Number.isFinite(score)) props.Score = { number: score };
 
       if (ctx?.dryRun) { ctx.log(`would push: ${company} — ${role}`); pushed++; continue; }
