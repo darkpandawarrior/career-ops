@@ -494,16 +494,25 @@ search_queries:
 #   pinpoint        <slug>.pinpointhq.com
 #   rippling        ats.rippling.com/<slug>/jobs
 #   jibeapply       <slug>.jibeapply.com/jobs  (or provider: jibeapply + api: for a branded host's own /jobs path)
+#   workday         <tenant>.<instance>.myworkdayjobs.com/<site>  (or api: field for a branded custom domain)
+#   successfactors  <slug>.successfactors.(eu|com) / jobs2web.com  (or provider: successfactors + api: for a branded RMK site)
+#   avature         <slug>.avature.net                  (or provider: avature + api: for a branded custom domain)
+#   amazon          amazon.jobs                         (or api: field)
+#   dassault        3ds.com / *.3ds.com                  (or api: field)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
 # bypass detect(). The `provider:` field wins over auto-detection.
+# workday and smartrecruiters also accept an explicit `api:` override so a
+# branded careers_url (e.g. https://www.zeiss.com/career) can stay as the
+# public link while `api:` points at the real ATS endpoint.
 #
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
-# field: 4dayweek, arbeitnow, arbeitsagentur, glints, himalayas, ibm, jobicy,
-# jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive, thehub,
-# weworkremotely, workingnomads. Examples for every built-in provider are below.
+# field: 4dayweek, arbeitnow, arbeitsagentur, getonbrd, glints, himalayas, ibm,
+# jobicy, jobstreet, justjoin, landingjobs, nofluffjobs, remoteok, remotive,
+# thehub, weworkremotely, workingnomads. Examples for every built-in provider
+# are below.
 
 # ── Built-in provider examples ────────────────────────────────────
 # Commented config for each provider in providers/. Copy a stanza into
@@ -541,7 +550,50 @@ search_queries:
 #   careers_url: https://solid.jobs/public-api/offers/engineering
 #   enabled: true
 #
+# - name: Example Workday Co
+#   careers_url: https://exampleco.wd5.myworkdayjobs.com/External  # any <tenant>.<instance>.myworkdayjobs.com/<site>
+#   max_pages: 100         # optional page cap (20 jobs/page, default 100, max 1500)
+#   enabled: true
+#
+# - name: Example Workday Co (branded domain)
+#   careers_url: https://www.exampleco.com/careers        # stays the public page
+#   provider: workday
+#   api: https://exampleco.wd3.myworkdayjobs.com/External # real Workday tenant URL
+#   enabled: true
+#
+# - name: Example SuccessFactors Co
+#   careers_url: https://exampleco.successfactors.com     # any *.successfactors.(eu|com) / jobs2web.com host
+#   enabled: true
+#
+# - name: Example SuccessFactors Co (branded RMK domain)
+#   careers_url: https://jobs.exampleco.com                # branded RMK career site
+#   provider: successfactors
+#   api: https://jobs.exampleco.com                        # RMK origin (often same as careers_url)
+#   enabled: true
+#
+# - name: Example Avature Co
+#   careers_url: https://exampleco.avature.net/careers    # any *.avature.net host
+#   max_pages: 50          # optional page cap (6 jobs/page, default 50, max 200)
+#   enabled: true
+#
+# - name: Amazon / AWS
+#   provider: amazon
+#   amazon:
+#     loc_query: Germany           # optional free-text location filter
+#     base_query: machine learning # optional keyword filter
+#     category: software-development # optional facet (repeatable via array)
+#   enabled: true
+#
+# - name: Dassault Systèmes
+#   careers_url: https://www.3ds.com/careers/jobs
+#   enabled: true
+#
 # -- Job boards / aggregators (no careers_url; set provider: explicitly) --
+#
+# - name: Get on Board                    # LatAm/remote tech board
+#   provider: getonbrd
+#   max_pages: 3          # optional page cap (100 jobs/page, default 3, max 50)
+#   enabled: true
 #
 # - name: 4 Day Week                      # 4-day-week / reduced-hours roles
 #   provider: 4dayweek
@@ -577,7 +629,7 @@ search_queries:
 # - name: Jobstreet — Indonesia          # SEEK aggregator
 #   provider: jobstreet
 #   searchKeywords: "Software Engineer"
-#   siteKey: ID-Main      # optional SEEK site key (default ID-Main)
+#   siteKey: ID-Main      # SEEK site key (ID-Main, SG-Main, MY-Main)
 #   searchLocation: ""    # optional location filter
 #   enabled: true
 #
@@ -1543,24 +1595,24 @@ job_boards:
 
   - name: Jobstreet Indonesia
     provider: jobstreet
-    api: https://id.jobstreet.com/api/chalice-search/v4/search
+    api: https://id.jobstreet.com/api/jobsearch/v5/search
     siteKey: ID-Main
     searchKeywords: "data scientist"
     searchLocation: "Jakarta"
     pageSize: 30
     maxPages: 3
     enabled: false
-    notes: "Indonesia's largest job board (SEEK group). Public JSON search API — zero tokens."
+    notes: "Indonesia's largest job board (SEEK group). Uses SEEK v5 JobSearch API — zero tokens."
 
   - name: Glints Indonesia
     provider: glints
-    api: https://glints.com/api/graphql
+    api: https://glints.com/api/v2-alc/graphql       # searchJobsV3 endpoint
     searchKeywords: "data scientist"
     countryCode: ID
     pageSize: 30
     maxPages: 3
     enabled: false
-    notes: "SEA job platform covering ID/SG/MY/VN. Undocumented public GraphQL API — adjust graphqlQuery if schema changes."
+    notes: "SEA job platform covering ID/SG/MY/VN. Uses searchJobsV3 GraphQL endpoint (v2-alc). WAF blocks non-browser requests — works best from Playwright context."
 
   # ── HigherEdJobs (university / higher-ed RSS) ────────────────────────
   # Public no-auth RSS category feed. cat_id selects the HigherEdJobs
