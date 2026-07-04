@@ -4,7 +4,7 @@ description: AI job search command center -- evaluate offers, generate CVs, scan
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | deep | pdf | latex | cover | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview/redflag | patterns | followup | update | email-sweep | email | add]"
+argument-hint: "[scan | deep | pdf | latex | cover | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview/redflag | patterns | followup | update | email-sweep | email | add | expand]"
 license: MIT
 ---
 
@@ -62,6 +62,7 @@ Determine the mode from `$mode`:
 | `email-sweep` | `email-sweep` |
 | `email` | `email` |
 | `add` | `add` |
+| `expand` | `expand` |
 | `ko` | `ko` (Korean locale pack — see `modes/ko/README.md`) |
 | `patterns` | `patterns` |
 | `followup` | `followup` |
@@ -120,6 +121,7 @@ Available commands:
   /career-ops email-sweep → Scan Gmail for application-status changes (rejections, interviews, offers) and merge into tracker
   /career-ops email     → Draft a formal outbound application email (draft-only, never sends — distinct from email-sweep)
   /career-ops add       → Fetch a project/paper/role URL into cv.md / article-digest.md
+  /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops patterns  → Analyze rejection patterns and improve targeting
   /career-ops followup  → Follow-up cadence tracker: flag overdue, generate drafts
   /career-ops update    → Update career-ops system files with diff preview + compat check
@@ -142,7 +144,7 @@ Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `contacto`, `apply`, `p
 ### Standalone modes (only their mode file):
 Read `modes/{mode}.md`
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `interview/redflag`, `latex`, `training`, `project`, `patterns`, `followup`, `cover`, `email-sweep`, `email`, `add`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `interview/redflag`, `latex`, `training`, `project`, `patterns`, `followup`, `cover`, `email-sweep`, `email`, `add`, `expand`
 
 ### Modes delegated to subagent:
 For `scan`, `apply` (with Playwright), `pipeline` (3+ URLs), and `email-sweep`: launch as a worker/subagent with the content of `modes/{mode}.md` injected into the worker prompt (`email-sweep` does not need `_shared.md` — it has no scoring logic). If your CLI exposes an `Agent(...)` primitive, the call looks like this:
