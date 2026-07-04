@@ -90,6 +90,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `detect-reposts.mjs` | Repost detector — flags roles re-listed 2+ times in 90 days from scan-history.tsv (JSON or `--summary` table output) |
 | `data/follow-ups.md` | Follow-up history tracker |
 | `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
+| `apify-search.mjs` | Broad, query-driven search across LinkedIn/Indeed/Glassdoor/Wellfound via paid Apify actors. **Off by default — costs real money per run.** Opt in with `node scan.mjs --apify` (runs after the zero-token scan) or `node apify-search.mjs` directly; requires `APIFY_TOKEN` in `.env` and reads `broad_search:` in `config/profile.yml`. Distinct from the generic per-company `apify` provider plugin in `plugins/apify/` (one actor per `portals.yml` entry) — this is a whole-board sweep by role+location. |
 | `process-quality.mjs` | Recruiting-process friction signal at company level (reschedules, silence gaps, contradictory feedback) |
 | `invite-match.mjs` | Fuzzy-matches a pasted interview-invite email to its tracker row (company/date/req-ID extraction) |
 | `set-status.mjs` | Canonical CLI for tracker status updates — `node set-status.mjs <report#\|company> <State> [--dry-run] [--json]` |

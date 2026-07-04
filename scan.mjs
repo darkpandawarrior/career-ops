@@ -28,10 +28,18 @@
  *   node scan.mjs --verify --headed-fallback  # retry anti-bot-blocked URLs in a headed browser (needs a display)
  *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between checks (stay under rate limits)
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
+ *   node scan.mjs --agent-handoff              # for scan_method:websearch companies, probe Greenhouse/Ashby/Lever
+ *                                               # slug candidates (same logic as `verify-portals.mjs --add`) and print
+ *                                               # suggested portals.yml edits — never writes the file, since a
+ *                                               # name-derived slug can collide with an unrelated company
+ *   node scan.mjs --apify                      # after the zero-token scan, also run a broad paid search across
+ *                                               # LinkedIn/Indeed/Glassdoor/Wellfound via Apify actors (apify-search.mjs).
+ *                                               # Off by default — costs real money per run. See broad_search: in
+ *                                               # config/profile.yml and APIFY_TOKEN in .env.example.
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'fs';
-import { pathToFileURL, fileURLToPath } from 'url';
+import { pathToFileURL } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
 
@@ -49,14 +57,14 @@ import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
-import { classifyFetchError } from './verify-portals.mjs';
+import { classifyFetchError, discoverAlternates } from './verify-portals.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const _SCAN_ENGINE = path.dirname(fileURLToPath(import.meta.url));
-const _SCAN_DATA_ROOT = process.env.CAREER_OPS_ROOT ? path.resolve(process.env.CAREER_OPS_ROOT) : _SCAN_ENGINE;
+const { engineRoot: _SCAN_ENGINE, dataRoot: _SCAN_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(_SCAN_DATA_ROOT, 'portals.yml');
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(_SCAN_DATA_ROOT, 'config/profile.yml');
 const SCAN_HISTORY_PATH = path.join(_SCAN_DATA_ROOT, 'data/scan-history.tsv');
@@ -852,6 +860,17 @@ async function main() {
   // --rediscover-404: when a tracked company's URL 404/410s, search for the
   // moved role and re-verify before marking it expired. Opt-in; rides on --verify.
   const rediscover = args.includes('--rediscover-404');
+  // --agent-handoff: for each scan_method:websearch company, probe Greenhouse/
+  // Ashby/Lever slug candidates the SAME way `verify-portals.mjs --add` does,
+  // instead of only printing an inert console list. Opt-in — this makes extra
+  // network calls beyond the normal zero-token scan, so it doesn't run by
+  // default on every routine scan.
+  const agentHandoffProbe = args.includes('--agent-handoff');
+  // --apify: after the normal zero-token scan completes, run a broad,
+  // query-driven search across LinkedIn/Indeed/Glassdoor/Wellfound via paid
+  // Apify actors (see apify-search.mjs). Opt-in and OFF by default — it costs
+  // real money per run, unlike every zero-token provider in this file.
+  const runApifySearch = args.includes('--apify');
   const companyFlag = args.indexOf('--company');
   const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
 
@@ -930,6 +949,7 @@ async function main() {
             company: entry.name,
             method: 'websearch',
             query: entry.scan_query || entry.search_query || entry.careers_url || '',
+            careersUrl: entry.careers_url || '',
           });
         }
         continue;
@@ -1205,6 +1225,40 @@ async function main() {
     if (agentHandoff.length > 25) {
       console.log(`  … ${agentHandoff.length - 25} more omitted; narrow with --company or inspect portals.yml`);
     }
+
+    if (agentHandoffProbe) {
+      // Deterministic, zero-LLM auto-detection: probe Greenhouse/Ashby/Lever
+      // slug candidates derived from the company name — the SAME mechanism
+      // `verify-portals.mjs --add` uses. This can NEVER write to portals.yml:
+      // a name-derived slug can collide with an unrelated company that
+      // happens to share the guessed slug (e.g. "Hevo" the SaaS vs. an
+      // unrelated "hevo" on lever.co), so every hit is a suggestion for the
+      // user to verify and apply by hand, not an auto-applied config change.
+      console.log(`\nProbing ATS slugs for ${agentHandoff.length} websearch-only compan${agentHandoff.length === 1 ? 'y' : 'ies'} (--agent-handoff)...`);
+      let suggested = 0;
+      for (const item of agentHandoff) {
+        let hit;
+        try {
+          hit = await discoverAlternates(item.company, {});
+        } catch (err) {
+          console.log(`  ✗ ${item.company}: probe failed — ${err.message}`);
+          continue;
+        }
+        if (!hit) continue;
+        suggested++;
+        const jobsHint = hit.status === 'live' ? `${hit.jobCount} live job(s)` : 'live but empty — verify before adding';
+        console.log(`  → ${item.company}: possible ${hit.ats} board at slug "${hit.slug}" (${jobsHint})`);
+        console.log(`      Suggested portals.yml change — verify this is really ${item.company}, then replace:`);
+        console.log(`        careers_url: ${item.careersUrl || '(none set)'}  (remove scan_method/scan_query)`);
+        console.log(`      with:`);
+        console.log(`        careers_url: ${hit.url}`);
+      }
+      if (suggested === 0) {
+        console.log(`  No ATS slug matches found for any websearch-only company — these likely are genuinely custom/token-gated.`);
+      } else {
+        console.log(`\n${suggested} suggestion(s) above — a name-derived slug can collide with an unrelated company, so verify each before editing portals.yml.`);
+      }
+    }
   }
 
   const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
@@ -1244,6 +1298,15 @@ async function main() {
     } else {
       console.log(`\nResults saved to ${PIPELINE_PATH} and ${SCAN_HISTORY_PATH}`);
     }
+  }
+
+  // --apify: broad paid search, opt-in, runs after the zero-token scan above.
+  if (runApifySearch) {
+    console.log(`\n${'━'.repeat(45)}`);
+    console.log('Broad search via Apify (--apify, paid)');
+    console.log(`${'━'.repeat(45)}`);
+    const { runBroadSearch } = await import('./apify-search.mjs');
+    await runBroadSearch({ dryRun });
   }
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);

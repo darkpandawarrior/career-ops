@@ -201,3 +201,26 @@ spend_tier: standard  # economy | standard | premium
 # this threshold skip the full-model evaluation and use the pre-screen report
 # as-is.
 # batch_prescreen_threshold: 3.0
+
+# ── Broad Search via Apify (opt-in, COSTS MONEY) ────────────────────────────
+#
+# A fundamentally different capability from the zero-token providers/*.mjs
+# scanners: a query-driven "search by role + location across whole boards"
+# sweep of LinkedIn, Indeed, Glassdoor, and Wellfound via paid Apify actors
+# (apify-search.mjs). Unlike every provider in portals.yml, this makes real,
+# billed API calls (a few cents to a couple dollars per run depending on
+# volume) — so it is OFF BY DEFAULT and never runs as part of a routine
+# `node scan.mjs`.
+#
+# To run it: `node scan.mjs --apify` (runs after the normal zero-token scan)
+# or `node apify-search.mjs` directly. Requires APIFY_TOKEN in .env — see
+# .env.example. Each platform's result count is hard-capped at 50 regardless
+# of max_results_per_platform below (see apify-search.mjs's spend guardrail);
+# the script prints an estimated cost before making any request.
+#
+# broad_search:
+#   enabled: false
+#   platforms: [linkedin, indeed, glassdoor, wellfound]
+#   role_query: "Android Engineer"
+#   location_query: "India"
+#   max_results_per_platform: 10

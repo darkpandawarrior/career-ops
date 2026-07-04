@@ -166,8 +166,18 @@ export async function probeSlug(ats, slug, { fetchJson = defaultFetchJson } = {}
   }
 }
 
-/** Probe slug variants across all ATSes; prefer live boards over empty ones. */
-async function discoverAlternates(name, { fetchJson }) {
+/**
+ * Probe slug variants across all ATSes (Greenhouse/Ashby/Lever); prefer live
+ * boards over empty ones. Exported so other callers (e.g. scan.mjs's
+ * `--agent-handoff` auto-detection for `scan_method: websearch` companies)
+ * can reuse the exact same slug-guessing the `--add` flow uses, instead of
+ * duplicating it.
+ *
+ * @param {string} name - Company display name.
+ * @param {{fetchJson?: Function}} [deps]
+ * @returns {Promise<object|null>} The best hit (live, else empty), or null.
+ */
+export async function discoverAlternates(name, { fetchJson = defaultFetchJson } = {}) {
   let bestEmpty = null;
   for (const slug of deriveSlugCandidates(name)) {
     for (const ats of Object.keys(ATS)) {
