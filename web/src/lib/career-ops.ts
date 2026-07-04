@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
+import { parseReport } from "@/lib/format";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -254,6 +255,16 @@ export function readReport(n: string, root: string = careerOpsRoot()): ReportDat
 
 export function findApplication(n: string, root: string = careerOpsRoot()): Application | null {
   return readApplications(root).find((a) => a.n === n) ?? null;
+}
+
+/** The application's posting URL, resolved from its linked report's `**URL:**`
+ *  field (applications.md itself has no URL column — see readApplications).
+ *  Used by the apply queue to know what to open for a tracker row. */
+export function applicationUrl(app: Application, root: string = careerOpsRoot()): string | null {
+  const report = readReportForApplication(app, root);
+  if (!report) return null;
+  const url = parseReport(report.content).fields.find((f) => f.label === "URL")?.value;
+  return url && /^https?:\/\//.test(url) ? url : null;
 }
 
 /**

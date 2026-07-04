@@ -584,3 +584,20 @@ export async function handoffSession(id: string): Promise<void> {
   }
   await s.page.bringToFront().catch(() => {});
 }
+
+/** Read-only: the session's current page URL (post-handoff, the human is looking
+ *  at the real ATS page). PURELY OBSERVATIONAL — calls only page.url(), never
+ *  clicks/types/navigates anything, so it cannot interact with a submit control.
+ *  Used to poll for a path change (a common "form was submitted, redirected to a
+ *  confirmation page" signal) and surface a human-confirm prompt — never to act
+ *  on the page itself. Returns null if the session has closed. */
+export function sessionUrlPath(id: string): { url: string; path: string } | null {
+  const s = SESSIONS.get(id);
+  if (!s) return null;
+  const url = s.page.url();
+  try {
+    return { url, path: new URL(url).pathname };
+  } catch {
+    return { url, path: url };
+  }
+}
