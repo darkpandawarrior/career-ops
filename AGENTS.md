@@ -90,6 +90,10 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `detect-reposts.mjs` | Repost detector — flags roles re-listed 2+ times in 90 days from scan-history.tsv (JSON or `--summary` table output) |
 | `data/follow-ups.md` | Follow-up history tracker |
 | `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
+| `process-quality.mjs` | Recruiting-process friction signal at company level (reschedules, silence gaps, contradictory feedback) |
+| `invite-match.mjs` | Fuzzy-matches a pasted interview-invite email to its tracker row (company/date/req-ID extraction) |
+| `set-status.mjs` | Canonical CLI for tracker status updates — `node set-status.mjs <report#\|company> <State> [--dry-run] [--json]` |
+| `add-entry.mjs` | Backs `/career-ops add` — fetches a project/paper/role URL into cv.md / article-digest.md |
 | `check-liveness.mjs` | Job posting liveness checker |
 | `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
 | `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy). Header includes `**Legitimacy:** {tier}`. |
