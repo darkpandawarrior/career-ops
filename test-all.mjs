@@ -2259,6 +2259,116 @@ try {
   fail(`shared role matcher / dedup safety tests crashed: ${e.message}`);
 }
 
+// ── SET-STATUS.MJS CLI CONTRACT ─────────────────────────────────
+// set-status.mjs is the canonical write path for tracker status updates but had
+// zero test coverage despite being called from multiple modes. Covers: a clean
+// single-row update, ambiguous company-name rejection (never guesses), --dry-run
+// making no write, idempotent re-runs, and invalid-state rejection before any
+// write. Only CAREER_OPS_TRACKER is overridden (matching the dedup-tracker /
+// merge-tracker tests above) — states.yml and role-matcher.mjs still resolve
+// from the real repo, which is exactly what set-status.mjs does in production.
+console.log('\n🧪 Testing set-status.mjs CLI contract...');
+try {
+  /**
+   * Run set-status.mjs against a fixture tracker, tolerating non-zero exit
+   * codes (ambiguous match / invalid state are expected failures, not crashes).
+   * Mirrors run()'s execFileSync usage but keeps stdout+exit code on failure —
+   * run() itself discards both, which the ambiguous/invalid-state assertions need.
+   *
+   * @param {string[]} args
+   * @param {string} tracker
+   * @returns {{status: number, stdout: string}}
+   */
+  function runSetStatus(args, tracker) {
+    try {
+      const stdout = execFileSync(NODE, ['set-status.mjs', ...args], {
+        cwd: ROOT, encoding: 'utf-8', timeout: 30000,
+        env: { ...process.env, CAREER_OPS_TRACKER: tracker },
+      });
+      return { status: 0, stdout };
+    } catch (e) {
+      return { status: e.status ?? 1, stdout: e.stdout ?? '' };
+    }
+  }
+
+  const statusTmp = mkdtempSync(join(tmpdir(), 'career-ops-set-status-'));
+  try {
+    mkdirSync(join(statusTmp, 'data'));
+    const tracker = join(statusTmp, 'data', 'applications.md');
+    const fixture =
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 41 | 2026-01-10 | Acme | Backend Engineer | 4.1/5 | Evaluated | ❌ | [41](../reports/041-acme.md) | first sibling |\n' +
+      '| 42 | 2026-01-11 | Acme | Frontend Engineer | 4.0/5 | Evaluated | ❌ | [42](../reports/042-acme.md) | second sibling, same company |\n' +
+      '| 43 | 2026-01-12 | Globex | Data Engineer | 3.7/5 | Evaluated | ❌ | [43](../reports/043-globex.md) | unambiguous row |\n';
+    writeFileSync(tracker, fixture);
+
+    // (a) single unambiguous report-number update succeeds and writes the status
+    const byNum = runSetStatus(['43', 'Interview', '--json'], tracker);
+    const afterByNum = readFileSync(tracker, 'utf-8');
+    if (byNum.status === 0 && /\|\s*Interview\s*\|/.test(afterByNum.split('\n').find(l => l.startsWith('| 43')))) {
+      pass('set-status: unambiguous report-number update writes the new status');
+    } else {
+      fail(`set-status: report-number update failed (exit ${byNum.status}): ${afterByNum}`);
+    }
+
+    // (b) ambiguous company match (2 rows, same company) is rejected, not guessed
+    const beforeAmbiguous = readFileSync(tracker, 'utf-8');
+    const ambiguous = runSetStatus(['Acme', 'Applied', '--json'], tracker);
+    const afterAmbiguous = readFileSync(tracker, 'utf-8');
+    let ambiguousJson = null;
+    try { ambiguousJson = JSON.parse(ambiguous.stdout); } catch { /* leave null, checked below */ }
+    if (ambiguous.status === 3 && ambiguousJson?.code === 'ambiguous' && afterAmbiguous === beforeAmbiguous) {
+      pass('set-status: ambiguous company match exits 3 with a clear error and writes nothing');
+    } else {
+      fail(`set-status: ambiguous company match not rejected cleanly (exit ${ambiguous.status}, code ${ambiguousJson?.code}, tracker changed: ${afterAmbiguous !== beforeAmbiguous})`);
+    }
+
+    // (c) --dry-run makes no actual write to the fixture file
+    const beforeDryRun = readFileSync(tracker, 'utf-8');
+    const dryRun = runSetStatus(['41', 'Applied', '--dry-run', '--json'], tracker);
+    const afterDryRun = readFileSync(tracker, 'utf-8');
+    let dryRunJson = null;
+    try { dryRunJson = JSON.parse(dryRun.stdout); } catch { /* leave null, checked below */ }
+    if (dryRun.status === 0 && dryRunJson?.dryRun === true && dryRunJson?.changed === true && afterDryRun === beforeDryRun) {
+      pass('set-status: --dry-run resolves+validates but writes nothing');
+    } else {
+      fail(`set-status: --dry-run mutated the tracker or misreported (exit ${dryRun.status}, changed ${dryRunJson?.changed}, tracker changed: ${afterDryRun !== beforeDryRun})`);
+    }
+
+    // (d) re-running the same update is idempotent — second run reports no change
+    const firstRun = runSetStatus(['41', 'Applied', '--json'], tracker);
+    const afterFirstRun = readFileSync(tracker, 'utf-8');
+    const secondRun = runSetStatus(['41', 'Applied', '--json'], tracker);
+    const afterSecondRun = readFileSync(tracker, 'utf-8');
+    let firstJson = null, secondJson = null;
+    try { firstJson = JSON.parse(firstRun.stdout); } catch { /* leave null, checked below */ }
+    try { secondJson = JSON.parse(secondRun.stdout); } catch { /* leave null, checked below */ }
+    if (firstJson?.changed === true && secondJson?.changed === false && afterFirstRun === afterSecondRun) {
+      pass('set-status: re-running the same update is idempotent (second run reports no change)');
+    } else {
+      fail(`set-status: idempotency broken (first changed ${firstJson?.changed}, second changed ${secondJson?.changed}, tracker stable: ${afterFirstRun === afterSecondRun})`);
+    }
+
+    // (e) an invalid/unrecognized state value is rejected before any write happens
+    const beforeInvalid = readFileSync(tracker, 'utf-8');
+    const invalid = runSetStatus(['41', 'NotARealState', '--json'], tracker);
+    const afterInvalid = readFileSync(tracker, 'utf-8');
+    let invalidJson = null;
+    try { invalidJson = JSON.parse(invalid.stdout); } catch { /* leave null, checked below */ }
+    if (invalid.status === 1 && invalidJson?.code === 'invalid-state' && afterInvalid === beforeInvalid) {
+      pass('set-status: unrecognized state is rejected before any write');
+    } else {
+      fail(`set-status: invalid state not rejected cleanly (exit ${invalid.status}, code ${invalidJson?.code}, tracker changed: ${afterInvalid !== beforeInvalid})`);
+    }
+  } finally {
+    rmSync(statusTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`set-status.mjs CLI contract tests crashed: ${e.message}`);
+}
+
 // dedup-tracker / normalize-statuses rebuilt promoted rows with
 // `parts.slice(1, -1)`, which assumes the closing `|` produced a trailing empty
 // cell. A valid row written WITHOUT a trailing pipe keeps its real last cell

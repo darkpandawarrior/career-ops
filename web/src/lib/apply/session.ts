@@ -15,7 +15,7 @@ async function humanType(page: Page, loc: Locator, value: string): Promise<void>
 }
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
-import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
+import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, knockoutWarnings, type ApplyIssue } from "./diagnose";
 import { agentInterpretForm } from "./agent-interpret";
 
 /** The frame with the most interactive controls — where the agentic interpreter
@@ -319,7 +319,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // 6) Soft issues the user should know about — surfaced, never silent.
   const [cap, multi] = await Promise.all([captchaWarning(page), multiStepInfo(page)]);
   const unlabeled = form.fields.filter((f) => !(f.label || "").trim()).length;
-  const issues: ApplyIssue[] = [...consentIssues];
+  const issues: ApplyIssue[] = [...consentIssues, ...knockoutWarnings(form.fields)];
   if (cap) issues.push(cap);
   if (multi) issues.push(multi);
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "This form had an uncommon layout, so AI read its fields live — give them an extra check before submitting." });
@@ -381,7 +381,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   s.frame = frame;
   s.fields = form.fields;
   if (form.title) s.title = form.title;
-  const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }];
+  const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }, ...knockoutWarnings(s.fields)];
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "AI also read the fields live (uncommon layout) — give them an extra check." });
   const cap = await captchaWarning(s.page);
   if (cap) issues.push(cap);
