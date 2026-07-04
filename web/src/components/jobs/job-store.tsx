@@ -64,8 +64,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(JOBS_KEY);
       const arr = raw ? JSON.parse(raw) : null;
       if (Array.isArray(arr)) {
+        // Validate shape — a malformed entry (missing id / non-array steps) would
+        // otherwise crash consumers that index job.steps and white-screen the app.
+        const restored: Job[] = arr
+          .filter((j: unknown): j is Job => !!j && typeof (j as Job).id === "string")
+          .map((j: Job) => ({ ...j, steps: Array.isArray(j.steps) ? j.steps : [] }));
         // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
+        setJobs(restored.map((j) => (j.status === "running" ? { ...j, status: "error", steps: [...j.steps, { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
       }
     } catch {
       /* ignore */
@@ -124,9 +129,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
         let text = "";
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
-        const steps: JobStep[] = [];
+        let sawTerminal = false;
+        const steps: JobStep[] = [...job.steps]; // seed with the initial "Starting…" step so /api/runs/save matches the UI
         const finish = (status: "done" | "error", lastLabel?: string) => {
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
+          if (lastLabel) steps.push({ kind: "status", label: lastLabel, ts: Date.now() });
           patch(id, (j) => ({
             ...j,
             status,
@@ -187,8 +194,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
                   text = full.slice(-8000);
                   patch(id, (j) => ({ ...j, text }));
                 } else if (ev.type === "done") {
-                  // handled on close
+                  sawTerminal = true; // handled on close
                 } else if (ev.type === "error") {
+                  sawTerminal = true;
                   finish("error", ev.msg || "Error");
                   return;
                 }
@@ -197,7 +205,11 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               }
             }
           }
-          finish("done", "Done");
+          if (sawTerminal) {
+            finish("done", "Done");
+          } else {
+            finish("error", "Stream ended unexpectedly");
+          }
         } catch {
           finish("error", "Connection error");
         }

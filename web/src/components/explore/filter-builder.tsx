@@ -205,6 +205,7 @@ export function FilterBuilder({
             <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
             <input
               type="range"
+              aria-label="Scan depth"
               min={50}
               max={500}
               step={50}

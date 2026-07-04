@@ -184,10 +184,11 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         }
         if (name) seenRadio.add(name);
         const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
-        const options = group.map((r) => clean(labelFor(r) || (r as HTMLInputElement).value)).filter(Boolean);
+        const rawOptions = group.map((r) => clean(labelFor(r) || (r as HTMLInputElement).value));
+        const options = rawOptions.filter(Boolean);
         group.forEach((r, i) => {
           r.setAttribute("data-co-field", fid);
-          r.setAttribute("data-co-option", options[i] ?? String(i));
+          r.setAttribute("data-co-option", rawOptions[i] || String(i));
         });
         const lbl = clean(groupLabel(el, options)) || name;
         fields.push({ id: fid, type: "radio", label: lbl, required, options, ...richContext(el, lbl) });

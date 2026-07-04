@@ -52,6 +52,7 @@ type ExploreCtx = {
   status: string;
   partial: boolean;
   error: string;
+  errorCode: string;
   added: Set<string>;
   adding: Set<string>;
   discover: () => Promise<void>;
@@ -86,6 +87,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState("");
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState("");
+  const [errorCode, setErrorCode] = useState("");
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState<Set<string>>(new Set());
   const [mode, setModeState] = useState<ExploreMode>("scan");
@@ -119,6 +121,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setCompaniesScanned(0);
     setPartial(false);
     setError("");
+    setErrorCode("");
     setStatus("Casting the net across the ATS network…");
     const init: Partial<Record<AtsSource, SourceState>> = {};
     for (const a of f.ats) init[a] = { state: "queued" };
@@ -130,6 +133,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
     const acc: DiscoveredOffer[] = [];
     let sawError = "";
+    let sawErrorCode = "";
     try {
       const r = await fetch("/api/explore", {
         method: "POST",
@@ -139,6 +143,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       if (r.status === 400) {
         const d = await r.json().catch(() => ({}));
         sawError = d.error || "The scanner isn't available.";
+        sawErrorCode = d.code || "";
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
@@ -211,6 +216,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);
+      setErrorCode(sawErrorCode);
       setPhase("failed");
     } else {
       setPhase(isBroadSearch(f) ? "empty-current" : "empty-loose");
@@ -218,7 +224,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addToPipeline = useCallback(async (list: DiscoveredOffer[]) => {
-    const fresh = list.filter((o) => !added.has(o.url));
+    const fresh = list.filter((o) => !added.has(o.url) && !adding.has(o.url));
     if (fresh.length === 0) return 0;
     setAdding((s) => new Set([...s, ...fresh.map((o) => o.url)]));
     try {
@@ -239,7 +245,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         return next;
       });
     }
-  }, [added]);
+  }, [added, adding]);
 
   const applyPatch = useCallback((raw: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => {
     const next = parseExplorePatch(raw, filtersRef.current, opts?.merge ?? false);
@@ -258,6 +264,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setStatus("");
     setPartial(false);
     setError("");
+    setErrorCode("");
     setAiTrace([]);
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
   }, []);
@@ -378,11 +385,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, sources, matchCount, companiesScanned, status, partial, error, added, adding,
+      offers, sources, matchCount, companiesScanned, status, partial, error, errorCode, added, adding,
       discover, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, status, partial, error, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, status, partial, error, errorCode, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

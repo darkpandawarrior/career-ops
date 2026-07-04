@@ -64,10 +64,29 @@ process.stdin.on("end", () => {
     });
     let out = "";
     let err = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* ignore */
+      }
+      resolve({ added: 0, error: "writer timed out" });
+    }, 30_000);
     child.stdout.on("data", (d: Buffer) => (out += d.toString()));
     child.stderr.on("data", (d: Buffer) => (err += d.toString()));
-    child.on("error", (e) => resolve({ added: 0, error: e instanceof Error ? e.message : "spawn failed" }));
+    child.on("error", (e) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve({ added: 0, error: e instanceof Error ? e.message : "spawn failed" });
+    });
     child.on("close", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       try {
         const parsed = JSON.parse(out.trim() || "{}") as AddResult;
         resolve({ added: parsed.added ?? 0, error: parsed.error });

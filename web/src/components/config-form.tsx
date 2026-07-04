@@ -277,6 +277,8 @@ export function ConfigForm() {
       </label>
       <button
         type="button"
+        role="switch"
+        aria-checked={logos}
         onClick={() => setLogos((v) => !v)}
         className="flex w-full items-center justify-between gap-4 rounded-xl border border-border bg-surface/50 px-4 py-3 text-left transition-colors hover:bg-surface-hover"
       >

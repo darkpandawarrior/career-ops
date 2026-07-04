@@ -89,12 +89,20 @@ export function runDiscovery(
     let outBuf = "";
     let errBuf = "";
 
+    let killer9: ReturnType<typeof setTimeout> | null = null;
     const killer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
       } catch {
         /* ignore */
       }
+      killer9 = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+      }, 5_000);
     }, 230_000);
 
     const handleLine = (line: string) => {
@@ -165,12 +173,14 @@ export function runDiscovery(
 
     child.on("error", (e) => {
       clearTimeout(killer);
+      if (killer9) clearTimeout(killer9);
       cleanupTempPortals(tempPortals);
       onEvent({ kind: "error", message: e instanceof Error ? e.message : "scanner failed to start" });
       resolve(offers);
     });
     child.on("close", () => {
       clearTimeout(killer);
+      if (killer9) clearTimeout(killer9);
       cleanupTempPortals(tempPortals);
       if (outBuf.trim()) handleLine(outBuf);
       resolve(offers);

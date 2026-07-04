@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 
 // A thin client mirror of the pipeline so BOTH the pages and the assistant
@@ -26,17 +26,25 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
   const [inbox, setInbox] = useState<InboxJob[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
+  // Overlapping refetch() calls (mount + focus firing close together) can resolve
+  // out of order; this sequence guard discards a stale response instead of letting
+  // it clobber fresher state.
+  const seqRef = useRef(0);
 
   const refetch = useCallback(() => {
+    const mySeq = ++seqRef.current;
     setLoading(true);
     fetch("/api/pipeline")
       .then((r) => r.json())
       .then((d) => {
+        if (mySeq !== seqRef.current) return;
         setInbox(Array.isArray(d.inbox) ? d.inbox : []);
         setApplications(Array.isArray(d.applications) ? d.applications : []);
       })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (mySeq === seqRef.current) setLoading(false);
+      });
   }, []);
 
   useEffect(() => {

@@ -57,7 +57,6 @@ export function readCanonicalStates(): CanonicalState[] {
   } catch {
     /* fall through to fallback */
   }
-  cache = FALLBACK;
   return FALLBACK;
 }
 

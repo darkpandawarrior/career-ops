@@ -17,16 +17,18 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
   const log = async () => {
     setState("logging");
     try {
-      await fetch("/api/followups/log", {
+      const res = await fetch("/api/followups/log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ num: followup.num, company: followup.company, note: "Followed up" }),
       });
-    } catch {
-      /* best-effort */
+      if (!res.ok) throw new Error(`log failed (${res.status})`);
+      onLogged?.();
+      setState("done");
+    } catch (e) {
+      console.error("Failed to log follow-up", e);
+      setState("idle");
     }
-    onLogged?.();
-    setState("done");
   };
 
   return (

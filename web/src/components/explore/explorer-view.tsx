@@ -37,7 +37,7 @@ export function ExplorerView({
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, status, error, mode, setMode, aiIntent, setAiIntent, discoverAI } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, status, error, errorCode, mode, setMode, aiIntent, setAiIntent, discoverAI } = useExplore();
   const inited = useRef(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [cli, setCli] = useState<{ id: string | null; name?: string }>({ id: null });
@@ -158,7 +158,7 @@ export function ExplorerView({
                 rerunLabel="Run the free Scan"
               />
             )}
-            {phase === "failed" && <FailedCard msg={error || status} onRetry={() => void discoverAI()} />}
+            {phase === "failed" && <FailedCard msg={error || status} code={errorCode} onRetry={() => void discoverAI()} />}
           </div>
         )
       ) : (
@@ -220,7 +220,7 @@ export function ExplorerView({
               rerunLabel="Widen to 30 days · clear location"
             />
           )}
-          {phase === "failed" && <FailedCard msg={error || status} onRetry={() => void discover()} />}
+          {phase === "failed" && <FailedCard msg={error || status} code={errorCode} onRetry={() => void discover()} />}
         </>
       )}
     </div>
@@ -261,10 +261,12 @@ function EmptyState({ tone, title, body, onRerun, rerunLabel }: { tone: "good" |
   );
 }
 
-function FailedCard({ msg, onRetry }: { msg: string; onRetry: () => void }) {
+function FailedCard({ msg, code, onRetry }: { msg: string; code?: string; onRetry: () => void }) {
   // The scanner-missing 400 (data-only / pre-scan-ats-full checkout) must NOT
   // offer a "Try again" that re-fails forever — give a real next step instead.
-  const scannerMissing = /isn'?t available|data only|complete career-ops checkout|scanner/i.test(msg);
+  // Prefer the structured code from the API; fall back to the regex for paths
+  // (e.g. discoverAI's stream errors) that don't carry a code yet.
+  const scannerMissing = code === "scanner_missing" || /isn'?t available|data only|complete career-ops checkout|scanner/i.test(msg);
   if (scannerMissing) {
     return (
       <div className="rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">

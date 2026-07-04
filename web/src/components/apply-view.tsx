@@ -44,6 +44,13 @@ export function ApplyView() {
   const [justDrafted, setJustDrafted] = useState(false);
   const [shot, setShot] = useState<number | null>(null); // lightbox: review a fill screenshot full-size
 
+  useEffect(() => {
+    if (shot === null) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setShot(null);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [shot]);
+
   // When the planner finishes drafting, the form is full of drafts but the next
   // move is the USER's (review → "Fill the real form"; we never submit). Without a
   // signal, that review-gate reads as "stuck". So on prefilling→ready we surface a

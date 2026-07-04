@@ -27,7 +27,9 @@ export function resolveTailoredCv(root: string, company?: string): string | null
   const first = slug.split("-")[0];
   const matches = files.filter((f) => {
     const l = f.toLowerCase();
-    return l.includes(slug) || (first.length > 2 && l.includes(first));
+    if (l.includes(slug)) return true;
+    const segs = l.replace(/\.pdf$/, "").split(/[^a-z0-9]+/);
+    return first.length > 2 && segs.includes(first);
   });
   if (!matches.length) return null;
   matches.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);

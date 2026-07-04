@@ -48,6 +48,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     setPhase("parsing");
     setTrace("Reading your CV…");
     setErr("");
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       const r = await fetch("/api/cv/ingest", init);
       if (r.status === 404) {
@@ -66,7 +67,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
         setPhase("error");
         return;
       }
-      const reader = r.body.getReader();
+      reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
       for (;;) {
@@ -75,6 +76,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
         buf += dec.decode(value, { stream: true });
         const parsed = parseCvStream(buf);
         if (parsed.error) {
+          await reader.cancel().catch(() => {});
           setErr(parsed.error === "unreadable" ? "I couldn't read text from that file (it may be a scanned image). Paste the text instead." : "Couldn't parse the CV — paste the text instead.");
           setPhase("error");
           return;
@@ -93,6 +95,7 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
       setSeed(final.seed);
       setPhase("review");
     } catch (e) {
+      await reader?.cancel().catch(() => {});
       setErr(e instanceof Error ? e.message : "stream error");
       setPhase("error");
     }

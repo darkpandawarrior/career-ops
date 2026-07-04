@@ -9,6 +9,7 @@ export function scrub(s: string): string {
   return (s || "")
     .replace(/\/Users\/[^/\s"']+/g, "~")
     .replace(/\/home\/[^/\s"']+/g, "~")
+    .replace(/[A-Za-z]:\\Users\\[^\\/\s"']+/gi, "~")
     .replace(/(sk|key|token|secret|bearer|api[-_]?key)([-_=:\s"']+)[A-Za-z0-9._-]{8,}/gi, "$1$2[redacted]");
 }
 

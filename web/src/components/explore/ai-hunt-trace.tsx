@@ -51,7 +51,9 @@ export function AiHuntTrace({ trace }: { trace: AiTraceChunk[] }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
-  }, [sentences.length]);
+    // sentences is capped at 6 (see .slice(-6) above) — once capped, length alone
+    // stops changing even as newer lines push older ones out, so key on content.
+  }, [sentences.join("|")]);
 
   if (sentences.length === 0) return null;
 

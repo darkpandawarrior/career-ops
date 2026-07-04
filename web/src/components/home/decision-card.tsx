@@ -20,11 +20,12 @@ export function DecisionCard({ app }: { app: Application }) {
   const setStatus = async (status: "Applied" | "Discarded") => {
     setBusy(status);
     try {
-      await fetch("/api/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n: app.n, status }) });
+      const res = await fetch("/api/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ n: app.n, status }) });
+      if (!res.ok) throw new Error(`status update failed (${res.status})`);
       setDone(status);
       router.refresh();
-    } catch {
-      /* ignore */
+    } catch (e) {
+      console.error("Failed to update status", e);
     } finally {
       setBusy("");
     }

@@ -13,6 +13,7 @@ export function CvEditor() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetch("/api/cv")
@@ -21,6 +22,7 @@ export function CvEditor() {
         setContent(d.content ?? "");
         setExists(d.exists ?? false);
       })
+      .catch(() => setError("Couldn't load cv.md."))
       .finally(() => setLoaded(true));
   }, []);
 
@@ -33,11 +35,16 @@ export function CvEditor() {
         body: JSON.stringify({ content }),
       });
       if (res.ok) {
+        setError("");
         setDirty(false);
         setExists(true);
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
+      } else {
+        setError("Couldn't save cv.md — try again.");
       }
+    } catch {
+      setError("Couldn't save cv.md — check your connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -51,6 +58,7 @@ export function CvEditor() {
           <p className="mt-1 text-sm text-muted">
             Edit <code className="text-foreground">cv.md</code> with live preview.
             {!exists && loaded && <span className="ml-1 text-faint">No cv.md yet — start typing to create it.</span>}
+            {error && <span className="ml-1 text-red-500">{error}</span>}
           </p>
         </div>
         <button

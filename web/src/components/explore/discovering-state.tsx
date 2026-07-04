@@ -30,14 +30,21 @@ html.dark .co-ledger{color:hsl(158 64% 62%)}
 export function useCountUp(target: number): number {
   const [val, setVal] = useState(target);
   const raf = useRef(0);
+  const valueRef = useRef(target);
   useEffect(() => {
+    // Scheduling the next frame lives here in tick(), not inside the setVal
+    // updater — Strict Mode can invoke updaters twice to catch exactly that kind
+    // of impurity, which would otherwise spawn two concurrent RAF chains.
     const tick = () => {
-      setVal((v) => {
-        const diff = target - v;
-        if (Math.abs(diff) < 0.5) return target;
-        raf.current = requestAnimationFrame(tick);
-        return v + diff * 0.18;
-      });
+      const diff = target - valueRef.current;
+      if (Math.abs(diff) < 0.5) {
+        valueRef.current = target;
+        setVal(target);
+        return;
+      }
+      valueRef.current = valueRef.current + diff * 0.18;
+      setVal(valueRef.current);
+      raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf.current);

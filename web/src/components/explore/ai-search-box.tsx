@@ -57,6 +57,7 @@ export function AiSearchBox({
         <textarea
           ref={ref}
           rows={2}
+          aria-label="Describe the role you're looking for"
           value={intent}
           onChange={(e) => {
             onIntent(e.target.value);
@@ -98,7 +99,12 @@ export function AiSearchBox({
           <button
             key={ex}
             type="button"
-            onClick={() => onIntent(ex)}
+            onClick={() => {
+              onIntent(ex);
+              // intent is controlled state — the textarea's DOM value updates on
+              // the next render, so grow() must wait a frame to read the new scrollHeight.
+              requestAnimationFrame(grow);
+            }}
             className="rounded-full border border-border bg-surface/40 px-3 py-1.5 text-[12px] text-muted transition hover:border-brand/40 hover:text-brand"
           >
             {ex}

@@ -39,8 +39,9 @@ export function StatusSelect({ n, current }: { n: string; current: string }) {
   const known = (CANONICAL_STATES as readonly string[]).includes(status);
   return (
     <span className="inline-flex items-center gap-2">
-      <label className="text-xs text-faint">status</label>
+      <label htmlFor={`status-${n}`} className="text-xs text-faint">status</label>
       <select
+        id={`status-${n}`}
         value={status}
         onChange={onChange}
         disabled={busy}

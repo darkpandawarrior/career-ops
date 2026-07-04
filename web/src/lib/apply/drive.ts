@@ -61,15 +61,26 @@ function plannerTurn(binPath: string, args: string[]): Promise<{ out: string; se
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
+    let killer9: ReturnType<typeof setTimeout> | null = null;
     const killer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
       } catch {
         /* ignore */
       }
+      // SIGTERM can be ignored/trapped — force-kill after a grace period so a
+      // stuck child never leaves this promise (and the turn loop) hanging forever.
+      killer9 = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+      }, 5_000);
     }, 90_000);
     child.on("close", () => {
       clearTimeout(killer);
+      if (killer9) clearTimeout(killer9);
       let out = buf;
       let sessionId: string | null = null;
       try {
@@ -83,6 +94,7 @@ function plannerTurn(binPath: string, args: string[]): Promise<{ out: string; se
     });
     child.on("error", () => {
       clearTimeout(killer);
+      if (killer9) clearTimeout(killer9);
       resolve({ out: buf, sessionId: null });
     });
   });
@@ -202,7 +214,11 @@ Reply ONE action JSON.`
     try {
       const loc = act.ref ? frame.locator(`[data-co-ref="${act.ref}"]`).first() : null;
       if (act.action === "click" && loc) {
-        const txt = (await loc.innerText().catch(() => "")) || (await loc.getAttribute("value").catch(() => "")) || "";
+        const txt = [
+          await loc.innerText().catch(() => ""),
+          await loc.getAttribute("value").catch(() => ""),
+          await loc.getAttribute("aria-label").catch(() => ""),
+        ].filter(Boolean).join(" ");
         if (SUBMIT_RX.test(txt)) {
           note = "refused to click a submit control (the human submits)";
           detail = `blocked submit "${txt.slice(0, 40)}"`;
