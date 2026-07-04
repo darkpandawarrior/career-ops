@@ -21,6 +21,11 @@ const devOrigins = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Pin the workspace root explicitly. A root package-lock.json AND a
+  // web/package-lock.json both exist here, so Turbopack's root inference can
+  // guess wrong and spawn hundreds of postcss workers (Windows OOM). Same bug
+  // as upstream commit 8560153 / PR #1530 / issues #1416, #1415.
+  turbopack: { root: import.meta.dirname },
   // Allow a throwaway build dir (e.g. BUILD_DIST=.next-prod) so a production
   // `next build` can run without clobbering a live `next dev` .next.
   ...(process.env.BUILD_DIST ? { distDir: process.env.BUILD_DIST } : {}),

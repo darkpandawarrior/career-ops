@@ -37,7 +37,7 @@ function KeywordField({
 }) {
   const [draft, setDraft] = useState("");
   const commit = (text: string) => {
-    const parts = text.split(",");
+    const parts = text.split(/[,\n;\t\r]/);
     const next = cleanChips([...values, ...parts]);
     onChange(next);
     setDraft("");
@@ -57,7 +57,7 @@ function KeywordField({
         value={draft}
         onChange={(e) => {
           const val = e.target.value;
-          if (val.endsWith(",")) commit(val);
+          if (/[,\n;\t\r]$/.test(val)) commit(val);
           else setDraft(val);
         }}
         onKeyDown={(e) => {
@@ -70,9 +70,14 @@ function KeywordField({
         }}
         onPaste={(e) => {
           const text = e.clipboardData.getData("text");
-          if (text.includes(",")) {
+          if (/[,\n;\t\r]/.test(text)) {
             e.preventDefault();
             commit(draft + text);
+          } else if (text) {
+            // No delimiter in the pasted text — merge into the draft instead of
+            // force-committing a single chip, so the user can keep editing it.
+            e.preventDefault();
+            setDraft(draft + text);
           }
         }}
         onBlur={() => draft.trim() && commit(draft)}

@@ -29,6 +29,28 @@ describe("cleanChips", () => {
       "APM",
     ]);
   });
+
+  it("drops punctuation-only entries with no letters or numbers", () => {
+    expect(cleanChips(["*", "---", "...", "Android"])).toEqual(["Android"]);
+  });
+
+  it("handles tab-delimited input passed in as separate array entries", () => {
+    expect(cleanChips("Android\tKotlin".split("\t"))).toEqual(["Android", "Kotlin"]);
+  });
+
+  it("handles CR-delimited input passed in as separate array entries", () => {
+    expect(cleanChips("Android\rKotlin".split("\r"))).toEqual(["Android", "Kotlin"]);
+  });
+
+  it("handles mixed-delimiter input (comma, newline, semicolon, tab all present)", () => {
+    expect(cleanChips("Android,Kotlin\nJava;Compose\tSwift".split(/[,\n;\t]/))).toEqual([
+      "Android",
+      "Kotlin",
+      "Java",
+      "Compose",
+      "Swift",
+    ]);
+  });
 });
 
 describe("parseExplorePatch", () => {
