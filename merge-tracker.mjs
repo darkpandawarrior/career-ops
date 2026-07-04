@@ -408,6 +408,25 @@ function extractReportNum(reportStr) {
 }
 
 /**
+ * Extract a requisition/job-ID number from a free-text notes field.
+ *
+ * The tier-3 fuzzy company+role match has no way to tell apart two distinct
+ * postings with similar/generic titles (e.g. two different "Software
+ * Engineer" reqs at the same company). When the notes field carries a req or
+ * job ID, it's a stronger identity signal than title similarity — use it as an
+ * additional guard so same-title-different-req rows are never collapsed.
+ *
+ * @param {string} notes - Free-text notes cell from the tracker or TSV addition.
+ * @returns {string|null} The extracted requisition number, or null when absent.
+ */
+function extractReqNumber(notes) {
+  if (!notes) return null;
+  const m = String(notes).match(/req\s*#?\s*(\d+)|job\s*id:?\s*(\d+)|#(\d{4,})/i);
+  if (!m) return null;
+  return m[1] || m[2] || m[3];
+}
+
+/**
  * Parse a score cell into a numeric value for score-upgrade decisions.
  *
  * The merge path compares old and new scores to decide whether to update an
@@ -532,26 +551,29 @@ function parseTsvContent(content, filename) {
     }
 
     // Detect column order: some TSVs have (status, score), others have (score, status)
-    // Heuristic: if col4 looks like a score and col5 looks like a status, they're swapped
+    // Content-based first: a column matching a score pattern (N/5, N.N/5, N/A, DUP) IS
+    // the score column, and the other of the two ambiguous columns is then the status
+    // column — regardless of position. Only when content is inconclusive (both or
+    // neither column looks like a score) do we fall back to the fixed-position
+    // assumption (col4=status, col5=score), and that fallback is logged since it's
+    // a guess rather than a detection.
     const col4 = parts[4].trim();
     const col5 = parts[5].trim();
-    const col4LooksLikeScore = /^\d+\.?\d*\/5$/.test(col4) || col4 === 'N/A' || col4 === 'DUP';
-    const col5LooksLikeScore = /^\d+\.?\d*\/5$/.test(col5) || col5 === 'N/A' || col5 === 'DUP';
-    const col4LooksLikeStatus = /^(evaluated|applied|responded|interview|offer|rejected|discarded|skip|evaluada|aplicado|respondido|entrevista|oferta|rechazado|descartado|no aplicar|cerrada|duplicado|repost|condicional|hold|monitor)/i.test(col4);
-    const col5LooksLikeStatus = /^(evaluated|applied|responded|interview|offer|rejected|discarded|skip|evaluada|aplicado|respondido|entrevista|oferta|rechazado|descartado|no aplicar|cerrada|duplicado|repost|condicional|hold|monitor)/i.test(col5);
+    const looksLikeScore = (v) => /^\d+(\.\d+)?\/5$/.test(v) || /^N\/A$/i.test(v) || /^DUP$/i.test(v);
+    const col4LooksLikeScore = looksLikeScore(col4);
+    const col5LooksLikeScore = looksLikeScore(col5);
 
     let statusCol, scoreCol;
-    if (col4LooksLikeStatus && !col4LooksLikeScore) {
-      // Standard format: col4=status, col5=score
-      statusCol = col4; scoreCol = col5;
-    } else if (col4LooksLikeScore && col5LooksLikeStatus) {
+    if (col4LooksLikeScore && !col5LooksLikeScore) {
       // Swapped format: col4=score, col5=status
       statusCol = col5; scoreCol = col4;
     } else if (col5LooksLikeScore && !col4LooksLikeScore) {
-      // col5 is definitely score → col4 must be status
+      // Standard format: col4=status, col5=score
       statusCol = col4; scoreCol = col5;
     } else {
-      // Default: standard format (status before score)
+      // Inconclusive (both or neither column looks like a score) — fall back to the
+      // fixed-position assumption and flag it rather than silently guessing.
+      console.warn(`⚠️  ${filename}: could not detect status/score column order by content, defaulting to position (col4=status, col5=score)`);
       statusCol = col4; scoreCol = col5;
     }
 
@@ -647,10 +669,13 @@ if (tsvFiles.length === 0) {
   process.exit(0);
 }
 
-// Sort files numerically for deterministic processing
+// Sort files numerically by their LEADING report number for deterministic
+// processing. parseInt stops at the first non-digit, so trailing digits in a
+// company slug (e.g. "42-acme2.tsv") no longer get concatenated into the sort
+// key the way `replace(/\D/g, '')` did.
 tsvFiles.sort((a, b) => {
-  const numA = parseInt(a.replace(/\D/g, '')) || 0;
-  const numB = parseInt(b.replace(/\D/g, '')) || 0;
+  const numA = parseInt(a, 10) || 0;
+  const numB = parseInt(b, 10) || 0;
   return numA - numB;
 });
 
@@ -706,8 +731,14 @@ for (const file of tsvFiles) {
   if (!duplicate) {
     // Company + role fuzzy match
     const normCompany = normalizeCompany(addition.company);
+    const additionReqNum = extractReqNumber(addition.notes);
     duplicate = existingApps.find(app => {
       if (normalizeCompany(app.company) !== normCompany) return false;
+      // A different req/job-ID in the notes means these are distinct postings
+      // (e.g. two separate "Software Engineer" reqs) even if the fuzzy title
+      // match would otherwise say they're the same opening — don't collapse them.
+      const appReqNum = extractReqNumber(app.notes);
+      if (additionReqNum && appReqNum && additionReqNum !== appReqNum) return false;
       return roleFuzzyMatch(addition.role, app.role);
     });
   }
