@@ -138,6 +138,7 @@ function checkPlaywrightMcp(root) {
 const USER_LAYER_PREREQS = [
   {
     path: 'cv.md',
+    severity: 'setup',
     fix: [
       'Create cv.md in the project root with your CV in markdown',
       'See examples/ for reference CVs',
@@ -145,6 +146,7 @@ const USER_LAYER_PREREQS = [
   },
   {
     path: 'config/profile.yml',
+    severity: 'setup',
     fix: [
       'Run: cp config/profile.example.yml config/profile.yml',
       'Then edit it with your details',
@@ -159,6 +161,7 @@ const USER_LAYER_PREREQS = [
   },
   {
     path: 'portals.yml',
+    severity: 'setup',
     fix: [
       'Run: cp templates/portals.example.yml portals.yml',
       'Then customize with your target companies',
@@ -170,9 +173,12 @@ function prereqPresent(root, path) {
   return existsSync(join(root, ...path.split('/')));
 }
 
-function checkPrereq({ path, fix }) {
+function checkPrereq({ path, severity, fix }) {
   if (prereqPresent(projectRoot, path)) {
     return { pass: true, label: `${path} found` };
+  }
+  if (severity === 'setup') {
+    return { pass: false, severity, label: `${path} not found (run onboarding to create it)`, fix };
   }
   return { pass: false, label: `${path} not found`, fix };
 }
@@ -242,7 +248,11 @@ async function checkPortalSlugs(root) {
       pass: false,
       label: `${unresolved.length} ATS slug(s) in portals.yml do not resolve`,
       fix: [
-        ...unresolved.map((r) => `${r.name}: ${r.ats || '?'}/${r.slug || '?'} — ${r.reason || 'unresolved'}`),
+        ...unresolved.map((r) => {
+          let line = `${r.name}: ${r.ats || '?'}/${r.slug || '?'} — ${r.reason || 'unresolved'}`;
+          if (r.suggested) line += ` → try ${r.suggested.ats}/${r.suggested.slug}`;
+          return line;
+        }),
         'Probe variants with: node verify-portals.mjs --add "<company>"',
       ],
     };
@@ -331,7 +341,7 @@ async function main() {
 
   for (const result of checks) {
     const fixes = Array.isArray(result.fix) ? result.fix : result.fix ? [result.fix] : [];
-    if (result.warn) {
+    if (result.warn || (result.severity === 'setup' && !result.pass)) {
       warnings++;
       console.log(`${yellow('⚠')} ${result.label}`);
       for (const hint of fixes) {
