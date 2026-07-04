@@ -14,7 +14,7 @@
  * Run: node career-ops/merge-tracker.mjs [--dry-run] [--verify]
  */
 
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, renameSync, existsSync, rmSync, statSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, renameSync, existsSync, rmSync, statSync, realpathSync, copyFileSync } from 'fs';
 import { join, basename, dirname, resolve, relative, isAbsolute, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -383,13 +383,16 @@ function validateStatus(status) {
  * Company names can contain spaces, punctuation, or branding variants in the
  * tracker and incoming TSV rows. Removing non-alphanumeric characters gives the
  * merge step a stable same-company key before it compares report numbers or
- * fuzzy role titles.
+ * fuzzy role titles. Uses a Unicode-aware letter/number class (`\p{L}\p{N}`)
+ * rather than an ASCII-only filter, so accented and non-Latin-script company
+ * names (e.g. "Café", "株式会社") still normalize to a usable key instead of
+ * being stripped to empty/garbled strings (matches dedup-tracker.mjs).
  *
  * @param {string} name - Company name from the tracker or addition row.
- * @returns {string} Lowercase alphanumeric company key.
+ * @returns {string} Lowercase company key.
  */
 function normalizeCompany(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 /**
@@ -799,6 +802,8 @@ if (newLines.length > 0) {
 
 // Write back
 if (!DRY_RUN) {
+  // Backup first (best-effort — a failed snapshot must never block the real write).
+  try { copyFileSync(APPS_FILE, APPS_FILE + '.bak'); } catch { /* non-fatal */ }
   writeFileAtomic(APPS_FILE, appLines.join('\n'));
 
   // Move processed files to merged/

@@ -38,7 +38,7 @@
  * 2 row not found or unreadable tracker · 3 ambiguous company match.
  */
 
-import { readFileSync, existsSync, writeFileSync, renameSync, rmSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, renameSync, rmSync, copyFileSync } from 'fs';
 import { join, dirname, basename, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
@@ -319,6 +319,8 @@ const changed = statusChanged || noteChanged;
 if (changed && !flags.dryRun) {
   lines[target.lineIdx] = rebuildRow(parts);
   try {
+    // Backup first (best-effort — a failed snapshot must never block the real write).
+    try { copyFileSync(APPS_FILE, APPS_FILE + '.bak'); } catch { /* non-fatal */ }
     writeFileAtomic(APPS_FILE, lines.join('\n'));
   } catch (err) {
     failWith(EXIT_USAGE, 'write-failure', `Failed to write tracker at ${APPS_FILE}: ${err.message}`);

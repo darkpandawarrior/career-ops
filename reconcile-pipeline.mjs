@@ -292,6 +292,7 @@ if (DRY_RUN) {
   process.exit(0);
 }
 
-copyFileSync(PIPELINE_FILE, `${PIPELINE_FILE}.pre-reconcile.bak`);
+const backupPath = `${PIPELINE_FILE}.pre-reconcile.bak-${Date.now()}`;
+copyFileSync(PIPELINE_FILE, backupPath);
 writeFileSync(PIPELINE_FILE, newContent);
-console.log(`✅ pipeline.md updated (backup: ${PIPELINE_FILE}.pre-reconcile.bak)`);
+console.log(`✅ pipeline.md updated (backup: ${backupPath})`);
