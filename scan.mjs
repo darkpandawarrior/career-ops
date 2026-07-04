@@ -30,13 +30,24 @@
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
  */
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'fs';
 import { pathToFileURL, fileURLToPath } from 'url';
 import path from 'path';
 import * as yaml from 'js-yaml';
 
+// ---------------------------------------------------------------------------
+// Bootstrap: load .env before anything else
+// ---------------------------------------------------------------------------
+try {
+  const { config } = await import('dotenv');
+  config();
+} catch {
+  // dotenv is optional — fall back to process.env if not installed
+}
+
 import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
+import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
 
@@ -57,73 +68,6 @@ const PROVIDERS_DIR = path.resolve(_SCAN_ENGINE, 'providers');
 mkdirSync(path.join(_SCAN_DATA_ROOT, 'data'), { recursive: true });
 
 const CONCURRENCY = 10;
-
-// ── Provider loading ────────────────────────────────────────────────
-
-async function loadProviders(dir) {
-  const providers = new Map();
-  if (!existsSync(dir)) return providers;
-  // Alphabetical order so detect() priority is deterministic across machines.
-  const entries = readdirSync(dir)
-    .filter(f => f.endsWith('.mjs') && !f.startsWith('_'))
-    .sort();
-  for (const file of entries) {
-    const full = path.join(dir, file);
-    let mod;
-    try {
-      mod = await import(pathToFileURL(full).href);
-    } catch (err) {
-      console.error(`⚠️  ${file}: failed to load — ${err.message}`);
-      continue;
-    }
-    const p = mod.default;
-    if (!p || typeof p.fetch !== 'function' || !p.id) {
-      console.error(`⚠️  ${file}: skipping — default export must be { id, fetch }`);
-      continue;
-    }
-    if (providers.has(p.id)) {
-      console.error(`⚠️  ${file}: duplicate provider id "${p.id}" — keeping first`);
-      continue;
-    }
-    providers.set(p.id, p);
-  }
-  return providers;
-}
-
-// Resolve which provider handles a tracked_companies entry.
-// 1. Explicit `provider:` field wins (skips detect()).
-// 2. local-parser when parser.command + script are configured (before API detect).
-// 3. Otherwise each provider's detect() runs in load order; first hit wins.
-function resolveProvider(entry, providers, { skipIds = [] } = {}) {
-  if (entry.provider) {
-    const p = providers.get(entry.provider);
-    if (!p) return { error: `unknown provider: ${entry.provider}` };
-    return { provider: p };
-  }
-
-  const localParser = providers.get('local-parser');
-  if (localParser && !skipIds.includes('local-parser')) {
-    try {
-      const hit = localParser.detect?.(entry);
-      if (hit) return { provider: localParser };
-    } catch (err) {
-      console.error(`⚠️  local-parser: detect() threw for "${entry.name}" — ${err.message}`);
-    }
-  }
-
-  for (const p of providers.values()) {
-    if (skipIds.includes(p.id)) continue;
-    let hit;
-    try {
-      hit = p.detect?.(entry);
-    } catch (err) {
-      console.error(`⚠️  ${p.id}: detect() threw for "${entry.name}" — ${err.message}`);
-      continue;
-    }
-    if (hit) return { provider: p };
-  }
-  return null;
-}
 
 // ── Title filter ────────────────────────────────────────────────────
 
@@ -495,6 +439,17 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
   'skipped_blocked_host',
 ]);
 
+// A classifier-confirmed "expired" can be a false positive (e.g. a bot-block
+// misread as a dead posting — see the rediscover-fallback comment in
+// verifyOffers()). Unlike `added`, which recycles on the configured
+// recheck_after_days, expired/skipped_expired default to a much longer
+// cooldown so a genuinely dead posting isn't re-surfaced every scan — but it
+// is NOT permanent. 45 days is a judgment call: long enough that a real
+// closure doesn't nag, short enough that a misclassification self-heals well
+// within a job search's timeline.
+const EXPIRED_STATUSES = new Set(['expired', 'skipped_expired']);
+const EXPIRED_RECHECK_AFTER_DAYS = 45;
+
 function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
   const startDate = new Date(`${start}T00:00:00Z`);
@@ -509,6 +464,11 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
     const parts = status.split(':');
     const cooldownUntil = parts[parts.length - 1];
     return today < cooldownUntil;
+  }
+  if (EXPIRED_STATUSES.has(status)) {
+    const ageDays = daysBetweenIsoDates(firstSeen, today);
+    if (ageDays == null) return true;
+    return ageDays < EXPIRED_RECHECK_AFTER_DAYS;
   }
   if (status !== 'added') return true;
   if (recheckAfterDays == null) return true;
@@ -672,6 +632,19 @@ Paste job URLs below as \`- [ ] {url}\` then run \`/career-ops pipeline\`.
 const PENDING_MARKERS = ['## Pending', '## Pendientes'];
 const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
 
+// Atomic file replace via a same-directory temp file + rename, so a reader
+// never sees a partially written pipeline.md (mirrors tracker.mjs's writer).
+function writeFileAtomic(filePath, content) {
+  const tmp = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    writeFileSync(tmp, content, 'utf-8');
+    renameSync(tmp, filePath);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
 export function appendToPipeline(offers) {
   if (offers.length === 0) return;
 
@@ -704,7 +677,7 @@ export function appendToPipeline(offers) {
     text = text.slice(0, insertAt) + block + text.slice(insertAt);
   }
 
-  writeFileSync(PIPELINE_PATH, text, 'utf-8');
+  writeFileAtomic(PIPELINE_PATH, text);
 }
 
 export function appendToScanHistory(offers, date, status = 'added') {
