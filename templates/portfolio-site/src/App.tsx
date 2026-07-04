@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Mail, MapPin, ArrowUpRight, MessageCircle, FileText, Github, Linkedin } from "lucide-react";
+import { Mail, MapPin, ArrowUpRight, MessageCircle, FileText } from "lucide-react";
+import { GithubIcon, LinkedinIcon } from "./icons.tsx";
 import { profile, metrics, experience, education, caseStudies, skills, projects, openSource, recentGrowth } from "./data/profile.ts";
 import { FloatingChat, openChat } from "./FloatingChat.tsx";
 import { TiltPhone } from "./TiltPhone.tsx";
@@ -430,7 +431,7 @@ function Contact() {
             rel="noreferrer"
             className="flex items-center gap-2 rounded-full border border-line px-6 py-2.5 font-semibold text-zinc-200 transition hover:border-accent hover:text-accent"
           >
-            <Github size={16} /> GitHub
+            <GithubIcon size={16} /> GitHub
           </a>
           <a
             href={profile.linkedin}
@@ -438,7 +439,7 @@ function Contact() {
             rel="noreferrer"
             className="flex items-center gap-2 rounded-full border border-line px-6 py-2.5 font-semibold text-zinc-200 transition hover:border-accent hover:text-accent"
           >
-            <Linkedin size={16} /> LinkedIn
+            <LinkedinIcon size={16} /> LinkedIn
           </a>
         </div>
       </div>
