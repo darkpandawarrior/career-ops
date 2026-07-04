@@ -32,6 +32,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
+import * as yaml from 'js-yaml';
 
 // ---------------------------------------------------------------------------
 // Bootstrap: load .env before anything else
@@ -100,9 +101,25 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
   process.exit(0);
 }
 
+// Determine spend_tier from profile.yml to pick the default model.
+// economy/standard → gemini-2.5-flash (cheapest, generous free tier);
+// premium → gemini-2.5-pro. --model or GEMINI_MODEL always win over this.
+let spendTier = 'standard';
+if (existsSync(PATHS.profileYml)) {
+  try {
+    const profile = yaml.load(readFileSync(PATHS.profileYml, 'utf-8'));
+    if (profile && typeof profile.spend_tier === 'string' && profile.spend_tier.trim()) {
+      spendTier = profile.spend_tier.trim().toLowerCase();
+    }
+  } catch (err) {
+    console.warn(`⚠️   Could not parse config/profile.yml: ${err.message}`);
+  }
+}
+const defaultModel = spendTier === 'premium' ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
+
 // Parse flags
 let jdText = '';
-let modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+let modelName = process.env.GEMINI_MODEL || defaultModel;
 let saveReport = true;
 
 for (let i = 0; i < args.length; i++) {

@@ -10,6 +10,16 @@ Eres un worker de evaluación de ofertas de empleo for the candidate (read name 
 
 ---
 
+## Regla de Idioma (Language Rule)
+
+Antes de escribir cualquier prosa de cara al usuario, lee `config/profile.yml` si existe y resuelve `language.output` (código de idioma ISO). Si la clave no existe, el default es `en`.
+
+`language.output` es independiente de `language.modes_dir`: `modes_dir` selecciona qué locale de mode files/vocabulario de mercado se usa; `output` selecciona el idioma en el que se escribe la prosa. `modes_dir` nunca debe forzar el idioma de salida.
+
+**Escribe TODA la prosa de cara al usuario (report, tracker notes, PDF, resumen JSON en sus campos de texto libre) en `language.output`**, sin importar el idioma de este prompt ni el del JD. Los nombres de campo/keys YAML de los bloques machine-readable (Machine Summary, JSON final) se mantienen exactamente como están especificados — esta regla no los afecta. Si `language.output` está ausente, usa el default existente: idioma del JD (EN por defecto).
+
+---
+
 ## Fuentes de Verdad (LEER antes de evaluar)
 
 | Archivo | Ruta absoluta | Cuándo |
