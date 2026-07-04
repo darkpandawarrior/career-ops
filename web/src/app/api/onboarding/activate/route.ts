@@ -1,4 +1,4 @@
-﻿import path from "node:path";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import yaml from "js-yaml";
 import { runOnboarding } from "@/lib/onboarding/run";

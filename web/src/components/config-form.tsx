@@ -11,6 +11,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { readLocalConfig } from "@/lib/local-config";
 
 type Cli = {
   id: string;
@@ -43,23 +44,16 @@ export function ConfigForm() {
 
   // Load saved prefs
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const v = JSON.parse(raw);
-        // key/manual are not wired yet (nothing reads them) → never restore into
-        // those dead panels; only the Installed-CLI path is functional.
-        if (v.mode === "cli") setMode("cli");
-        // cliId is NOT restored from localStorage — it's per-profile and the
-        // source of truth is the server (/api/cli). localStorage holds only the
-        // global UI prefs (mode/provider/apiKey/logos).
-        if (v.provider) setProvider(v.provider);
-        if (typeof v.apiKey === "string") setApiKey(v.apiKey);
-        if (typeof v.logos === "boolean") setLogos(v.logos);
-      }
-    } catch {
-      /* ignore */
-    }
+    const v = readLocalConfig();
+    // key/manual are not wired yet (nothing reads them) → never restore into
+    // those dead panels; only the Installed-CLI path is functional.
+    if (v.mode === "cli") setMode("cli");
+    // cliId is NOT restored from localStorage — it's per-profile and the
+    // source of truth is the server (/api/cli). localStorage holds only the
+    // global UI prefs (mode/provider/apiKey/logos).
+    if (v.provider) setProvider(v.provider);
+    if (typeof v.apiKey === "string") setApiKey(v.apiKey);
+    if (typeof v.logos === "boolean") setLogos(v.logos);
   }, []);
 
   // Detect installed CLIs + the ACTIVE profile's saved choice (profile-aware).

@@ -15,6 +15,7 @@ import { WorkerCard } from "@/components/jobs/worker-card";
 import { dispatch, type ActionCtx, type DoneInfo } from "@/app/actions/registry";
 import { scoreNum } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { readLocalConfig } from "@/lib/local-config";
 
 // ── message model: messages are PART arrays so a live worker card can render
 // inline next to text, both fed by the single JobsProvider store ──────────────
@@ -26,7 +27,6 @@ type Part =
   | { type: "confirm"; cid: string; summary: string; state: "pending" | "done" | "cancelled" };
 type Msg = { role: "user" | "assistant"; parts: Part[] };
 
-const CONFIG_KEY = "career-ops:config";
 const CHAT_KEY = "career-ops:chat";
 // back-compat shims — the old directives still work, mapped onto the registry
 const NAV_RE = /<<\s*go:\s*(\/[a-z0-9/_-]*)\s*>>/gi;
@@ -172,12 +172,7 @@ export function AssistantConsole() {
       } catch {
         /* fall back to localStorage */
       }
-      try {
-        const raw = localStorage.getItem(CONFIG_KEY);
-        if (!cancelled) setCliId(raw ? JSON.parse(raw).cliId || null : null);
-      } catch {
-        if (!cancelled) setCliId(null);
-      }
+      if (!cancelled) setCliId(readLocalConfig().cliId || null);
     }
     read();
     window.addEventListener("storage", read);

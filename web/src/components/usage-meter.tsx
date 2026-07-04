@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Gauge } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { readLocalConfig } from "@/lib/local-config";
 
 type Usage = { window5h: { tokens: number }; window7d: { tokens: number } };
 
@@ -27,9 +28,8 @@ export function UsageMeter() {
   const [budget, setBudget] = useState(DEFAULT_BUDGET);
 
   useEffect(() => {
+    setCli(readLocalConfig().cliId || null);
     try {
-      const cfg = localStorage.getItem("career-ops:config");
-      setCli(cfg ? JSON.parse(cfg).cliId || null : null);
       const b = localStorage.getItem("career-ops:usage-budget");
       if (b) setBudget({ ...DEFAULT_BUDGET, ...JSON.parse(b) });
     } catch {
