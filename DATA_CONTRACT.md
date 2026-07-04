@@ -10,6 +10,7 @@ These files contain your personal data, customizations, and work product. Update
 |------|---------|
 | `cv.md` | Your CV in markdown |
 | `config/profile.yml` | Your identity, targets, comp range |
+| `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases (optional; seeded from `config/cv-facts.example.json`) |
 | `modes/_profile.md` | Your archetypes, narrative, negotiation scripts |
 | `modes/_custom.md` | Your house rules, custom workflows & output preferences (procedural — survives updates) |
 | `voice-dna.md` | Your writing voice guardrail — banned words, anti-AI-slop rules, tone (optional) |
@@ -75,6 +76,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `plugins-registry.json` | Curated list of approved community plugins (the trust root) |
 | `plugin-install.mjs` / `plugin-audit.mjs` / `validate-plugin-registry.mjs` | Plugin install/audit/registry-validation utilities |
 | `config/plugins.example.yml` | Plugin activation template (seed for `config/plugins.yml`) |
+| `config/cv-facts.example.json` | CV fact-check template (seed for `config/cv-facts.json`) |
 | `batch/batch-prompt.md` | Batch worker prompt |
 | `batch/batch-runner.sh` | Batch orchestrator |
 | `dashboard/*` | Go TUI dashboard |

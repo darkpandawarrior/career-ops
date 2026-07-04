@@ -480,6 +480,19 @@ process_offer() {
 
   echo "--- Processing offer #$id: $url (report $report_num, attempt $((retries + 1)))"
 
+  # Pre-fetch the JD via the provider API (zero LLM tokens — a shell-level node
+  # call). The worker then reads clean JD text from jd_file instead of
+  # WebFetching the full HTML page (~80-90% fewer worker tokens, and avoids the
+  # SPA mis-fetches that produce wrong-company evaluations). On a miss or unknown
+  # provider, remove jd_file so the worker falls back to its own WebFetch path
+  # (see batch-prompt.md "if file empty, WebFetch {{URL}}").
+  if node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_file" 2>/dev/null && [ -s "$jd_file" ]; then
+    echo "    JD pre-fetched via provider API ($(wc -c < "$jd_file") bytes)"
+  else
+    rm -f "$jd_file"
+    echo "    JD pre-fetch missed — worker will WebFetch"
+  fi
+
   # Build the prompt with placeholders replaced
   local prompt
   if [[ "$SKIP_PDF" == "true" ]]; then

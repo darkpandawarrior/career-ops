@@ -49,6 +49,7 @@ writing-samples/*
 # User config and customization (never auto-updated)
 config/profile.yml
 config/job-search.yml
+config/cv-facts.json
 portals.yml
 modes/_profile.md
 modes/_custom.md
