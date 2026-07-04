@@ -4,7 +4,7 @@ import localFont from "next/font/local";
 // network fetches during `next build`.
 export const inter = localFont({
   src: [
-    { path: "../../../fonts/dm-sans-latin.woff2", weight: "100 900", style: "normal" },
+    { path: "../fonts/dm-sans-latin.woff2", weight: "100 900", style: "normal" },
   ],
   variable: "--font-inter",
   display: "swap",
@@ -12,7 +12,7 @@ export const inter = localFont({
 
 export const instrumentSerif = localFont({
   src: [
-    { path: "../../../fonts/space-grotesk-latin.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/space-grotesk-latin.woff2", weight: "400", style: "normal" },
   ],
   variable: "--font-instrument-serif",
   display: "swap",
@@ -20,7 +20,7 @@ export const instrumentSerif = localFont({
 
 export const instrumentSerifItalic = localFont({
   src: [
-    { path: "../../../fonts/space-grotesk-latin.woff2", weight: "400", style: "normal" },
+    { path: "../fonts/space-grotesk-latin.woff2", weight: "400", style: "normal" },
   ],
   variable: "--font-instrument-serif-italic",
   display: "swap",
