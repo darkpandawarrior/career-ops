@@ -1,6 +1,7 @@
 import { pipelineSummary } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { canonStatus, scoreNum } from "@/lib/format";
+import { OutcomePatterns } from "@/components/analytics/outcome-patterns";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,8 @@ export default async function Analytics() {
           <Bar key={name} label={name} value={n} pct={(n / maxCompany) * 100} />
         ))}
       </Section>
+
+      <OutcomePatterns />
     </div>
   );
 }
