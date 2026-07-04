@@ -25,13 +25,16 @@
  * directory). Only the Status and Notes cells of the matched row change;
  * every other byte of the tracker round-trips untouched.
  *
- * NOTE on concurrency: unlike merge-tracker.mjs (which holds an exclusive
- * filesystem lock across its read-modify-write), this script does not lock
- * the tracker — see the maintenance note in the porting report about the
- * multiple independent tracker-writing code paths already in this repo
- * (merge-tracker.mjs, tracker.mjs, web/src/app/api/status/route.ts). Adding a
- * 4th writer with its own bespoke lock would not actually protect against the
- * other 3, so this script keeps its read-modify-write window short instead.
+ * NOTE on concurrency: this script now takes the SAME exclusive filesystem
+ * lock merge-tracker.mjs uses (extracted into tracker-lock.mjs), and the
+ * Next.js dashboard's status API takes the equivalent lock too (see
+ * web/src/lib/core/tracker-lock.ts). Previously this script reasoned that
+ * "adding a 4th bespoke lock wouldn't help since the other 3 don't share one"
+ * and kept its read-modify-write window short instead of locking. That
+ * reasoning no longer holds: merge-tracker.mjs, this script, and the web API
+ * route now all acquire the identical lock (same lock-directory derivation,
+ * same acquire/release protocol), so a batch merge and a dashboard status
+ * click can no longer race each other into a silent lost update.
  *
  * Exit codes: 0 success (including no-op re-runs) · 1 usage error,
  * non-canonical state, unreadable states.yml, or write failure ·
@@ -46,6 +49,7 @@ import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { rebuildRow } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Same multi-profile resolution pattern as analyze-patterns.mjs/invite-match.mjs.
@@ -233,23 +237,30 @@ if (!existsSync(APPS_FILE)) {
  * Find the tracker row matching the CLI selector.
  *
  * @param {object[]} rows - Parsed data rows (parseTrackerRow output + lineIdx).
+ * @param {{release: Function}} [lock] - Held tracker lock, released before any
+ *   process-exiting failure so a bad selector never leaves the lock held.
  * @returns {object} The single matched row. Exits the process on 0 or 2+ matches.
  */
-function resolveRow(rows) {
+function resolveRow(rows, lock) {
   if (/^\d+$/.test(selector)) {
     const num = parseInt(selector, 10);
     const row = rows.find(r => r.num === num);
     if (!row) {
+      lock?.release();
       failWith(EXIT_NOT_FOUND, 'not-found', `No tracker row with #${num}`);
     }
     return row;
   }
 
   const key = normalizeCompany(selector);
-  if (!key) failUsage(`Selector "${selector}" is empty after normalization`);
+  if (!key) {
+    lock?.release();
+    failUsage(`Selector "${selector}" is empty after normalization`);
+  }
   let matches = rows.filter(r => normalizeCompany(r.company) === key);
 
   if (matches.length === 0) {
+    lock?.release();
     failWith(EXIT_NOT_FOUND, 'not-found', `No tracker row with company matching "${selector}"`);
   }
   if (matches.length > 1 && flags.role) {
@@ -260,6 +271,7 @@ function resolveRow(rows) {
   if (matches.length > 1) {
     const candidates = matches.map(r => ({ num: r.num, company: r.company, role: r.role }));
     const listing = candidates.map(c => `#${c.num}\t${c.company}\t${c.role}`).join('\n');
+    lock?.release();
     failWith(EXIT_AMBIGUOUS, 'ambiguous',
       `Company "${selector}" matches ${matches.length} rows — pass the # or narrow with --role:\n${listing}`,
       { candidates });
@@ -267,12 +279,29 @@ function resolveRow(rows) {
   return matches[0];
 }
 
-// ── read-modify-write ─────────────────────────────────────────────
+// ── read-modify-write (under the shared tracker lock — same lock
+// merge-tracker.mjs and the web dashboard's status API use, so a batch merge
+// and a CLI status update can never race each other into a lost update) ─────
+
+const lockDir = lockDirFor(canonicalizeTrackerPath(APPS_FILE), process.env.CAREER_OPS_TRACKER_LOCK);
+let trackerLock;
+try {
+  trackerLock = await acquireTrackerLock(lockDir, {
+    timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 10_000,
+    retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+    staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: APPS_FILE,
+  });
+  process.once('exit', () => trackerLock?.release());
+} catch (err) {
+  failWith(EXIT_USAGE, 'lock-timeout', err.message);
+}
 
 let content;
 try {
   content = readFileSync(APPS_FILE, 'utf-8');
 } catch (err) {
+  trackerLock.release();
   failWith(EXIT_NOT_FOUND, 'read-failure', `Cannot read tracker at ${APPS_FILE}: ${err.message}`);
 }
 const lines = content.split('\n');
@@ -284,10 +313,11 @@ for (let i = 0; i < lines.length; i++) {
   if (row) rows.push({ ...row, lineIdx: i });
 }
 if (rows.length === 0) {
+  trackerLock.release();
   failWith(EXIT_NOT_FOUND, 'empty-tracker', `Tracker at ${APPS_FILE} has no data rows`);
 }
 
-const target = resolveRow(rows);
+const target = resolveRow(rows, trackerLock);
 const oldStatus = target.status;
 const note = flags.note != null ? cell(flags.note) : null;
 
@@ -302,6 +332,7 @@ parts[colmap.status] = newStatus;
 let noteChanged = false;
 if (note) {
   if (colmap.notes == null) {
+    trackerLock.release();
     failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
   }
   const existing = parts[colmap.notes] ?? '';
@@ -323,9 +354,11 @@ if (changed && !flags.dryRun) {
     try { copyFileSync(APPS_FILE, APPS_FILE + '.bak'); } catch { /* non-fatal */ }
     writeFileAtomic(APPS_FILE, lines.join('\n'));
   } catch (err) {
+    trackerLock.release();
     failWith(EXIT_USAGE, 'write-failure', `Failed to write tracker at ${APPS_FILE}: ${err.message}`);
   }
 }
+trackerLock.release();
 
 // ── report ───────────────────────────────────────────────────────
 

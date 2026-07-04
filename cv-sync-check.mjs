@@ -11,11 +11,15 @@
  */
 
 import { readFileSync, existsSync, statSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const projectRoot = __dirname;
+// engineRoot: where this script + system-layer files (modes/, batch/) live —
+// always the script's own directory. dataRoot: where the user-layer files
+// (cv.md, config/, article-digest.md) live — CAREER_OPS_ROOT in a multi-profile
+// setup, else the same as engineRoot. See AGENTS.md's Data Contract for the
+// System Layer / User Layer split.
+const { engineRoot, dataRoot: projectRoot } = resolveCareerOpsRoot(import.meta.url);
 
 const warnings = [];
 const errors = [];
@@ -46,10 +50,11 @@ if (!existsSync(profilePath)) {
   }
 }
 
-// 3. Check for hardcoded metrics in prompt files
+// 3. Check for hardcoded metrics in prompt files (system-layer — always at the
+// engine root, regardless of which profile's data is being checked).
 const filesToCheck = [
-  { path: join(projectRoot, 'modes', '_shared.md'), name: '_shared.md' },
-  { path: join(projectRoot, 'batch', 'batch-prompt.md'), name: 'batch-prompt.md' },
+  { path: join(engineRoot, 'modes', '_shared.md'), name: '_shared.md' },
+  { path: join(engineRoot, 'batch', 'batch-prompt.md'), name: 'batch-prompt.md' },
 ];
 
 // Pattern: numbers that look like hardcoded metrics (e.g., "170+ hours", "90% self-service")

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { withTrackerLock } from "@/lib/core/tracker-lock";
 
 /**
  * Profile-aware tracker write helpers — port dashboard-web/server.mjs's
@@ -25,38 +26,51 @@ function columnIndex(lines: string[], header: string): number | null {
   return null;
 }
 
-/** Set a single cell (by application number `n`) in data/applications.md. */
-export function setAppCell(
+/** Set a single cell (by application number `n`) in data/applications.md.
+ *  Holds the same cross-process tracker lock merge-tracker.mjs/set-status.mjs
+ *  and the /api/status route use, so this can't race a batch merge or a
+ *  status-dropdown click into a silently lost update. A held-lock timeout
+ *  surfaces as "error" (same result shape as a write failure) rather than
+ *  throwing, since EditResult has no dedicated timeout variant. Async because
+ *  the lock wait must never block the server's event loop (see
+ *  tracker-lock.ts's withTrackerLock doc comment) — callers now `await` it. */
+export async function setAppCell(
   n: string,
   header: "Notes" | "Status",
   value: string,
   root: string = careerOpsRoot(),
-): EditResult {
+): Promise<EditResult> {
   if (/[|\r\n]/.test(value)) return "invalid"; // would scramble the markdown row
   const file = path.join(root, "data", "applications.md");
-  let md: string;
   try {
-    md = fs.readFileSync(file, "utf8");
-  } catch {
-    return "not-found";
-  }
-  const lines = md.split("\n");
-  const col = columnIndex(lines, header) ?? (header === "Status" ? 6 : 9);
-  let changed = false;
-  for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].trim().startsWith("|")) continue;
-    const parts = lines[i].split("|");
-    if (parts.length < 8 || parts[1].trim() !== String(n)) continue;
-    if (col >= parts.length - 1) continue;
-    parts[col] = ` ${value} `;
-    lines[i] = parts.join("|");
-    changed = true;
-    break;
-  }
-  if (!changed) return "not-found";
-  try {
-    atomicWriteWithBackup(file, lines.join("\n"));
-    return "ok";
+    return await withTrackerLock(file, () => {
+      let md: string;
+      try {
+        md = fs.readFileSync(file, "utf8");
+      } catch {
+        return "not-found";
+      }
+      const lines = md.split("\n");
+      const col = columnIndex(lines, header) ?? (header === "Status" ? 6 : 9);
+      let changed = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].trim().startsWith("|")) continue;
+        const parts = lines[i].split("|");
+        if (parts.length < 8 || parts[1].trim() !== String(n)) continue;
+        if (col >= parts.length - 1) continue;
+        parts[col] = ` ${value} `;
+        lines[i] = parts.join("|");
+        changed = true;
+        break;
+      }
+      if (!changed) return "not-found";
+      try {
+        atomicWriteWithBackup(file, lines.join("\n"));
+        return "ok";
+      } catch {
+        return "error";
+      }
+    }, { timeoutMs: 8_000 });
   } catch {
     return "error";
   }

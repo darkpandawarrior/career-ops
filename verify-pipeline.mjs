@@ -18,12 +18,11 @@
  */
 
 import { readFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, statSync } from 'fs';
-import { join, dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { join, dirname } from 'path';
 import { resolveColumns } from './tracker-parse.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
 // CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
 const APPS_FILE = process.env.CAREER_OPS_TRACKER
