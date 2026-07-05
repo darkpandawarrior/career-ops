@@ -2,31 +2,61 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import * as yaml from 'js-yaml';
 
-import ashbyProvider from '../../../../providers/ashby.mjs';
-import greenhouseProvider from '../../../../providers/greenhouse.mjs';
-import leverProvider from '../../../../providers/lever.mjs';
-import recruiteeProvider from '../../../../providers/recruitee.mjs';
-import smartRecruitersProvider from '../../../../providers/smartrecruiters.mjs';
-import workableProvider from '../../../../providers/workable.mjs';
-import workdayProvider from '../../../../providers/workday.mjs';
+import { loadProviders, resolveProvider } from '../../../../providers/_registry.mjs';
 import { normalizeJob } from '../scoring/scorer.mjs';
 import { validateJobSearchConfig } from './config-schema.mjs';
 import { buildSearchPlan } from './query-builder.mjs';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DDG_URL = 'https://html.duckduckgo.com/html/';
-const COMPANY_PROVIDERS = new Map([
-  ['greenhouse', greenhouseProvider],
-  ['lever', leverProvider],
-  ['ashby', ashbyProvider],
-  ['workable', workableProvider],
-  ['smartrecruiters', smartRecruitersProvider],
-  ['recruitee', recruiteeProvider],
-  ['workday', workdayProvider],
-]);
+const PROVIDERS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../../providers');
+
+// Loaded once per process and shared by every tracked-company fetch and every
+// job-board fetch below — the same registry scan.mjs/verify-portals.mjs use,
+// so a new providers/*.mjs file needs zero dashboard changes to be picked up.
+let providersPromise;
+function getProviders() {
+  if (!providersPromise) providersPromise = loadProviders(PROVIDERS_DIR);
+  return providersPromise;
+}
+
+// Display labels for provider ids that don't title-case cleanly (acronyms,
+// brand casing, dotted/multi-word names).
+const PROVIDER_LABELS = {
+  '4dayweek': '4 Day Week',
+  arbeitsagentur: 'Arbeitsagentur',
+  bamboohr: 'BambooHR',
+  dassault: 'Dassault Systèmes',
+  getonbrd: 'GetOnBoard',
+  hackernews: 'Hacker News',
+  higheredjobs: 'HigherEdJobs',
+  ibm: 'IBM',
+  jazzhr: 'JazzHR',
+  jibeapply: 'Jibe',
+  jobstreet: 'JobStreet',
+  justjoin: 'JustJoin.it',
+  'local-parser': 'Local parser',
+  nodesk: 'NoDesk',
+  nofluffjobs: 'NoFluffJobs',
+  remoteok: 'RemoteOK',
+  smartrecruiters: 'SmartRecruiters',
+  solidjobs: 'SolidJobs',
+  'startup.ch': 'Startup.ch',
+  startupch: 'Startup.ch',
+  successfactors: 'SuccessFactors',
+  thehub: 'The Hub',
+  themuse: 'The Muse',
+  weworkremotely: 'We Work Remotely',
+  workingnomads: 'Working Nomads',
+};
+
+function providerLabel(id) {
+  return PROVIDER_LABELS[id] || (id.charAt(0).toUpperCase() + id.slice(1));
+}
 
 export async function refreshJobSearch(root, options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -54,11 +84,9 @@ export async function refreshJobSearch(root, options = {}) {
   const sources = await Promise.all([
     measureSource('pipeline', 'Saved pipeline', 'local', () => readPipelineJobs(root), errors),
     measureSource('scan-history', 'Scan history', 'local', () => readScanHistoryJobs(root), errors),
-    measureSource('tracked-companies', 'Tracked company feeds', 'provider', () => fetchTrackedCompanyFeeds(portals, fetchImpl, errors), errors),
-    validation.config.location.search_scopes.includes('remote')
-      ? measureSource('remote-feeds', 'Remote job feeds', 'provider', () => fetchRemoteFeeds(fetchImpl, errors), errors)
-      : Promise.resolve(skippedSource('remote-feeds', 'Remote job feeds', 'provider')),
-    measureSource('generated-search', 'Generated web discovery', 'search', () => searchConfiguredQueries(plan.queries, fetchImpl, errors), errors),
+    measureSource('tracked-companies', 'Tracked company feeds', 'provider', (localErrors) => fetchTrackedCompanyFeeds(portals, fetchImpl, localErrors), errors),
+    measureSource('board-feeds', 'Job board feeds', 'provider', (localErrors) => fetchBoardFeeds(portals, fetchImpl, localErrors), errors),
+    measureSource('generated-search', 'Generated web discovery', 'search', (localErrors) => searchConfiguredQueries(plan.queries, fetchImpl, localErrors), errors),
   ]);
   telemetry.push(...sources.map((source) => source.telemetry));
   const batches = sources.map((source) => source.results);
@@ -135,18 +163,21 @@ export async function refreshJobSearch(root, options = {}) {
   return payload;
 }
 
-async function measureSource(id, label, kind, runner, errors) {
+// Sources run concurrently (Promise.all in refreshJobSearch), so each gets its own
+// local error list instead of diffing a shared array's length — that diff pattern
+// misattributes failures across sources when their promises interleave.
+async function measureSource(id, label, kind, runner, sharedErrors) {
   const startedAt = Date.now();
-  const errorCount = errors.length;
+  const localErrors = [];
   try {
-    const results = await runner();
-    const newErrors = errors.length - errorCount;
+    const results = await runner(localErrors);
+    sharedErrors.push(...localErrors);
     return {
       results,
-      telemetry: resultTelemetry(id, label, kind, results, startedAt, newErrors),
+      telemetry: resultTelemetry(id, label, kind, results, startedAt, localErrors.length),
     };
   } catch (error) {
-    errors.push(`${label}: ${error.message}`);
+    sharedErrors.push(`${label}: ${error.message}`);
     return {
       results: [],
       telemetry: {
@@ -170,16 +201,6 @@ function resultTelemetry(id, label, kind, results, startedAt, failures) {
     durationMs: Date.now() - startedAt,
     refreshedAt: new Date().toISOString(),
     freshness: 'fresh',
-  };
-}
-
-function skippedSource(id, label, kind) {
-  return {
-    results: [],
-    telemetry: {
-      id, label, kind, status: 'skipped', jobs: 0, leads: 0,
-      failures: 0, durationMs: 0, refreshedAt: null, freshness: 'not-run',
-    },
   };
 }
 
@@ -306,7 +327,10 @@ export async function enrichDiscoveryLeads(root, options = {}) {
 
 async function fetchTrackedCompanyFeeds(portals, fetchImpl, errors) {
   const companies = (portals?.tracked_companies || []).filter((company) => company?.enabled !== false);
-  const results = await Promise.allSettled(companies.map((company) => fetchCompany(company, fetchImpl)));
+  const providers = await getProviders();
+  const results = await Promise.allSettled(
+    companies.map((company) => fetchViaProvider(company, providers, fetchImpl, 'ats')),
+  );
   return results.flatMap((result, index) => {
     if (result.status === 'fulfilled') return result.value;
     errors.push(`${companies[index]?.name || 'tracked company'}: ${result.reason?.message || result.reason}`);
@@ -314,140 +338,33 @@ async function fetchTrackedCompanyFeeds(portals, fetchImpl, errors) {
   });
 }
 
-async function fetchCompany(company, fetchImpl) {
-  const provider = detectProvider(company);
-  const implementation = COMPANY_PROVIDERS.get(provider);
-  if (!implementation) return [];
-  const jobs = await implementation.fetch(company, providerContext(fetchImpl));
-  return jobs.map((job) => ({
-    ...job,
-    source: providerLabel(provider),
-    sourceCategory: 'ats',
-    description: job.description || '',
-  }));
-}
-
-function detectProvider(company) {
-  if (company.provider) return String(company.provider).toLowerCase();
-  const value = `${company.api || ''} ${company.careers_url || ''}`.toLowerCase();
-  if (value.includes('greenhouse')) return 'greenhouse';
-  if (value.includes('lever.co')) return 'lever';
-  if (value.includes('ashbyhq')) return 'ashby';
-  if (value.includes('workable.com')) return 'workable';
-  if (value.includes('smartrecruiters.com')) return 'smartrecruiters';
-  if (value.includes('recruitee.com')) return 'recruitee';
-  if (value.includes('myworkdayjobs.com')) return 'workday';
-  return '';
-}
-
-async function fetchRemoteFeeds(fetchImpl, errors) {
-  const feeds = [
-    ['RemoteOK', 'https://remoteok.com/api', parseRemoteOk],
-    ['Remotive', 'https://remotive.com/api/remote-jobs?category=software-dev', parseRemotive],
-    ['Jobicy', 'https://jobicy.com/api/v2/remote-jobs', parseJobicy],
-    ['Himalayas', 'https://himalayas.app/jobs/api', parseHimalayas],
-    ['Arbeitnow', 'https://www.arbeitnow.com/api/job-board-api', parseArbeitnow],
-    ['Working Nomads', 'https://www.workingnomads.com/api/exposed_jobs/', parseWorkingNomads],
-    ['SolidJobs', 'https://solid.jobs/public-api/offers/it', parseSolidJobs],
-  ];
-  const results = await Promise.allSettled(feeds.map(async ([name, url, parser]) => {
-    const data = await fetchJson(url, fetchImpl, { 'user-agent': 'hiresignal/1.0' });
-    return parser(data, name);
-  }));
+// job_boards entries (portals.yml) are resolved through the exact same
+// provider registry as tracked_companies — scan.mjs treats both lists
+// identically, always via an explicit `provider:` field.
+async function fetchBoardFeeds(portals, fetchImpl, errors) {
+  const boards = (portals?.job_boards || []).filter((board) => board?.enabled !== false);
+  const providers = await getProviders();
+  const results = await Promise.allSettled(
+    boards.map((board) => fetchViaProvider(board, providers, fetchImpl, 'board')),
+  );
   return results.flatMap((result, index) => {
     if (result.status === 'fulfilled') return result.value;
-    errors.push(`${feeds[index][0]}: ${result.reason?.message || result.reason}`);
+    errors.push(`${boards[index]?.name || 'job board'}: ${result.reason?.message || result.reason}`);
     return [];
   });
 }
 
-function parseRemoteOk(data, source) {
-  return (Array.isArray(data) ? data : []).filter((job) => job?.position).map((job) => ({
-    title: job.position,
-    company: job.company || 'Unknown company',
-    location: job.location || 'Remote',
-    url: job.url || job.apply_url,
-    source,
-    sourceCategory: 'remote',
-    description: stripHtml(job.description || ''),
-    compensation: job.salary_min || job.salary_max
-      ? `USD ${job.salary_min || ''}-${job.salary_max || ''}`
-      : '',
-  }));
-}
-
-function parseRemotive(data, source) {
-  return (data.jobs || []).map((job) => ({
-    title: job.title,
-    company: job.company_name,
-    location: job.candidate_required_location || 'Remote',
-    url: job.url,
-    source,
-    sourceCategory: 'remote',
-    description: stripHtml(job.description || ''),
-    compensation: job.salary || '',
-  }));
-}
-
-function parseJobicy(data, source) {
-  return (data.jobs || []).map((job) => ({
-    title: job.jobTitle,
-    company: job.companyName,
-    location: job.jobGeo || 'Remote',
-    url: job.url,
-    source,
-    sourceCategory: 'remote',
-    description: `${job.jobExcerpt || ''} ${stripHtml(job.jobDescription || '')}`,
-    compensation: job.annualSalaryMin || job.annualSalaryMax
-      ? `${job.salaryCurrency || ''} ${job.annualSalaryMin || ''}-${job.annualSalaryMax || ''}`
-      : '',
-  }));
-}
-
-function parseHimalayas(data, source) {
-  return (data.jobs || []).map((job) => ({
-    title: job.title,
-    company: job.companyName,
-    location: Array.isArray(job.locationRestrictions) ? job.locationRestrictions.join(', ') : 'Remote',
-    url: job.applicationLink || job.guid,
-    source,
-    sourceCategory: 'remote',
-    description: `${job.excerpt || ''} ${stripHtml(job.description || '')}`,
-  }));
-}
-
-function parseArbeitnow(data, source) {
-  return (data.data || []).map((job) => ({
-    title: job.title,
-    company: job.company_name,
-    location: job.location || '',
-    url: job.url,
-    source,
-    sourceCategory: 'international',
-    description: `${(job.tags || []).join(' ')} ${job.remote ? 'remote' : ''} ${stripHtml(job.description || '')}`,
-  }));
-}
-
-function parseWorkingNomads(data, source) {
-  return (Array.isArray(data) ? data : []).map((job) => ({
-    title: job.title,
-    company: job.company_name || 'Unknown company',
-    location: job.location || 'Remote',
-    url: job.url,
-    source,
-    sourceCategory: 'remote',
-    description: `${job.category_name || ''} ${job.description || ''}`,
-  }));
-}
-
-function parseSolidJobs(data, source) {
-  return (data.jobs || []).map((job) => ({
-    title: job.title,
-    company: job.company || 'Unknown company',
-    location: Array.isArray(job.locations) ? job.locations.join(', ') : job.locations || '',
-    url: job.url,
-    source,
-    sourceCategory: 'regional',
+async function fetchViaProvider(entry, providers, fetchImpl, sourceCategory) {
+  const resolved = resolveProvider(entry, providers, { skipIds: ['local-parser'] });
+  if (!resolved || resolved.error || !resolved.provider) {
+    if (resolved?.error) throw new Error(resolved.error);
+    return [];
+  }
+  const jobs = await resolved.provider.fetch(entry, providerContext(fetchImpl));
+  return jobs.map((job) => ({
+    ...job,
+    source: entry.name || providerLabel(resolved.provider.id),
+    sourceCategory,
     description: job.description || '',
   }));
 }
@@ -592,14 +509,9 @@ async function runReverseAtsScan(root, config) {
   );
 }
 
-async function fetchJson(url, fetchImpl, headers = {}) {
-  const response = await fetchWithTimeout(url, fetchImpl, { headers });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
-}
-
 function providerContext(fetchImpl) {
   return {
+    transport: 'http',
     fetchJson: async (url, options = {}) => {
       const response = await fetchWithTimeout(url, fetchImpl, options);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -610,19 +522,14 @@ function providerContext(fetchImpl) {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.text();
     },
+    // A couple of providers (e.g. startup.ch) need response headers (Set-Cookie)
+    // rather than a parsed body — matches providers/_http.mjs's fetchResponse.
+    fetchResponse: async (url, options = {}) => {
+      const response = await fetchWithTimeout(url, fetchImpl, options);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response;
+    },
   };
-}
-
-function providerLabel(value) {
-  return {
-    greenhouse: 'Greenhouse',
-    lever: 'Lever',
-    ashby: 'Ashby',
-    workable: 'Workable',
-    smartrecruiters: 'SmartRecruiters',
-    recruitee: 'Recruitee',
-    workday: 'Workday',
-  }[value] || value;
 }
 
 async function fetchWithTimeout(url, fetchImpl, options = {}) {
