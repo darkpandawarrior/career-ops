@@ -36,6 +36,11 @@
  *                                               # LinkedIn/Indeed/Glassdoor/Wellfound via Apify actors (apify-search.mjs).
  *                                               # Off by default — costs real money per run. See broad_search: in
  *                                               # config/profile.yml and APIFY_TOKEN in .env.example.
+ *   node scan.mjs --doctor                     # read-only health sweep: reuses verify-portals.mjs's probing
+ *                                               # (ATS slug probes + provider-layer probes) instead of a full
+ *                                               # scan-and-persist run. Prints the same report as
+ *                                               # `node verify-portals.mjs` and exits — never touches pipeline.md
+ *                                               # or scan-history.tsv.
  */
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'fs';
@@ -57,7 +62,7 @@ import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
-import { classifyFetchError, discoverAlternates } from './verify-portals.mjs';
+import { classifyFetchError, discoverAlternates, verifyPortalsFile } from './verify-portals.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const parseYaml = yaml.load;
@@ -871,6 +876,11 @@ async function main() {
   // Apify actors (see apify-search.mjs). Opt-in and OFF by default — it costs
   // real money per run, unlike every zero-token provider in this file.
   const runApifySearch = args.includes('--apify');
+  // --doctor: read-only health sweep. Reuses verify-portals.mjs's probing
+  // (ATS slug probes tier + provider-layer probes tier) instead of a full
+  // scan-and-persist run — no pipeline.md/scan-history.tsv writes, no dry-run
+  // flag needed. Short-circuits main() right after providers/portals load.
+  const doctor = args.includes('--doctor');
   const companyFlag = args.indexOf('--company');
   const filterCompany = companyFlag !== -1 ? args[companyFlag + 1]?.toLowerCase() : null;
 
@@ -883,6 +893,33 @@ async function main() {
   if (providers.size === 0) {
     console.error('Error: no providers loaded from providers/');
     process.exit(1);
+  }
+
+  // --doctor: stop here. Read-only health sweep via verify-portals.mjs's own
+  // sweep function (ATS slug probes + provider-layer probes) — same report as
+  // `node verify-portals.mjs`, just invokable from scan.mjs. No portals.yml
+  // parsing/target-resolution/scan-and-persist below this point.
+  if (doctor) {
+    const httpCtx = makeHttpCtx();
+    const { found, results } = await verifyPortalsFile(PORTALS_PATH, { providers, httpCtx });
+    if (!found) {
+      console.log(`scan --doctor: no portals file at ${PORTALS_PATH} — nothing to verify (run onboarding first).`);
+      return;
+    }
+    console.log(`scan --doctor: ${PORTALS_PATH}\n`);
+    const live = results.filter((r) => r.status === 'live').length;
+    const empty = results.filter((r) => r.status === 'empty').length;
+    const missing = results.filter((r) => r.status === 'missing');
+    const skipped = results.filter((r) => r.status === 'skipped').length;
+    for (const r of results) {
+      const icon = { live: '✅', empty: '🟡', missing: '❌', skipped: '➖' }[r.status] || '?';
+      const source = r.ats ? `${r.ats}/${r.slug}` : (r.provider || '?');
+      const detail = r.status === 'missing' ? `${source} — ${r.reason || 'unresolved'}` : source;
+      console.log(`  ${icon} ${r.name} — ${detail}`);
+    }
+    console.log(`\n${live} live, ${empty} live-but-empty, ${missing.length} unresolved, ${skipped} no-provider (skipped)`);
+    if (missing.length > 0) process.exitCode = 1;
+    return;
   }
 
   // 2. Read portals.yml

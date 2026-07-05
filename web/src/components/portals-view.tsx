@@ -6,15 +6,16 @@ import { Loader2, Radar, Wrench } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
+import { StatusDot, type DotTone } from "@/components/ui/status-dot";
 
 type Company = { name: string; status: string; detail: string };
 type Result = { available: boolean; configured: boolean; companies: Company[] };
 
-const TONE: Record<string, { dot: string; label: string; chip: string }> = {
-  live: { dot: "bg-emerald-500", label: "live", chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
-  empty: { dot: "bg-amber-500", label: "live · empty", chip: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
-  broken: { dot: "bg-red-500", label: "broken", chip: "bg-red-500/15 text-red-700 dark:text-red-400" },
-  skipped: { dot: "bg-zinc-400", label: "no ATS", chip: "bg-surface-hover text-muted" },
+const TONE: Record<string, { tone: DotTone; label: string; chip: string }> = {
+  live: { tone: "good", label: "live", chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" },
+  empty: { tone: "warn", label: "live · empty", chip: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+  broken: { tone: "bad", label: "broken", chip: "bg-red-500/15 text-red-700 dark:text-red-400" },
+  skipped: { tone: "muted", label: "no ATS", chip: "bg-surface-hover text-muted" },
 };
 const ORDER: Record<string, number> = { broken: 0, empty: 1, live: 2, skipped: 3 };
 
@@ -99,7 +100,7 @@ export function PortalsView() {
               return (
                 <li key={c.name} className="flex items-center gap-3 px-4 py-2.5">
                   <CompanyLogo name={c.name} size={20} />
-                  <span className={cn("size-1.5 shrink-0 rounded-full", t.dot)} />
+                  <StatusDot tone={t.tone} />
                   <span className="shrink-0 text-sm font-medium">{c.name}</span>
                   <span className="truncate font-mono text-xs text-faint">{c.detail}</span>
                   <div className="ml-auto flex shrink-0 items-center gap-2">

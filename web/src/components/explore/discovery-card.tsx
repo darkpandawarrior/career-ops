@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins } from "lucide-react";
+import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
@@ -38,6 +38,16 @@ function Logo({ company }: { company: string }) {
 // What a running worker is doing on this exact posting → the live CTA label.
 const WORKER_LABEL: Record<string, string> = { evaluate: "Evaluating…", pdf: "Preparing CV…", research: "Researching…", apply: "Filling…" };
 
+// fetch-jd.mjs only covers these 4 ATS per-job APIs — matches its own
+// detectProvider(). Anything else falls back silently (no preview button).
+const JD_PREVIEW_ATS = new Set<AtsSource>(["greenhouse", "lever", "ashby", "workday"]);
+
+type JdPreviewState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error" }
+  | { status: "ready"; text: string };
+
 export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string }) {
   const { added, adding, addToPipeline } = useExplore();
   const { jobs, startJob } = useJobs();
@@ -62,6 +72,27 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
     startJob({ title: `Evaluate · ${offer.company}`, subtitle: offer.title, kind: "evaluate", input: offer.url, page: "/explore" });
   };
 
+  const [jdPreview, setJdPreview] = useState<JdPreviewState>({ status: "idle" });
+  const canPreviewJd = JD_PREVIEW_ATS.has(offer.ats as AtsSource);
+  const toggleJdPreview = async () => {
+    if (jdPreview.status === "ready" || jdPreview.status === "error") {
+      setJdPreview({ status: "idle" });
+      return;
+    }
+    setJdPreview({ status: "loading" });
+    try {
+      const res = await fetch("/api/explore/fetch-jd", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: offer.url }),
+      });
+      const d = await res.json();
+      setJdPreview(d.ok && d.text ? { status: "ready", text: d.text } : { status: "error" });
+    } catch {
+      setJdPreview({ status: "error" });
+    }
+  };
+
   return (
     <div className="co-rise group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm">
       <div className="flex items-start gap-3">
@@ -73,6 +104,23 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
             {offer.location && <span className="text-faint"> · {offer.location}</span>}
           </p>
         </a>
+        {canPreviewJd && (
+          <button
+            type="button"
+            onClick={toggleJdPreview}
+            title={jdPreview.status === "ready" ? "Hide clean JD text" : "Preview clean JD text (no full-page scrape)"}
+            aria-label="Preview clean JD text"
+            className="-m-1 shrink-0 rounded p-1 text-faint transition-colors hover:text-foreground"
+          >
+            {jdPreview.status === "loading" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : jdPreview.status === "ready" ? (
+              <EyeOff className="size-4" />
+            ) : (
+              <Eye className="size-4" />
+            )}
+          </button>
+        )}
         <a
           href={offer.url}
           target="_blank"
@@ -84,6 +132,15 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
           <ExternalLink className="size-4" />
         </a>
       </div>
+
+      {jdPreview.status === "ready" && (
+        <p className="max-h-40 overflow-auto rounded-md border border-border bg-surface/50 p-2.5 text-[12px] leading-relaxed text-muted whitespace-pre-line">
+          {jdPreview.text}
+        </p>
+      )}
+      {jdPreview.status === "error" && (
+        <p className="text-[11px] text-faint">No clean JD preview available for this posting — open it instead.</p>
+      )}
 
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? offer.ats}</span>

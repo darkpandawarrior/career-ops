@@ -14,6 +14,7 @@ import { ExploreModeToggle } from "./explore-mode-toggle";
 import { AiSearchBox } from "./ai-search-box";
 import { ResultsList, type EnrichedOffer } from "./results-list";
 import { useExplore } from "./explore-provider";
+import { StatusDot } from "@/components/ui/status-dot";
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const CLI_NAMES: Record<string, string> = {
@@ -238,10 +239,9 @@ function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean;
       >
         <Compass className="size-4" /> {label}
       </button>
-      <span className="inline-flex items-center gap-1.5 text-[12px] text-muted">
-        <span className="size-1.5 rounded-full bg-emerald-500" />
+      <StatusDot tone="good" className="text-[12px] text-muted">
         Evaluating a role later costs tokens. Discovering never does.
-      </span>
+      </StatusDot>
     </div>
   );
 }

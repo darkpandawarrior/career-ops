@@ -17,6 +17,11 @@ const OPS: Record<string, { script: string; args: string[]; label: string; timeo
   scan: { script: "scan", args: [], label: "Portal scan", timeout: 280_000 },
   "scan-verify": { script: "scan", args: ["--verify"], label: "Scan + verify liveness", timeout: 280_000 },
   liveness: { script: "check-liveness", args: [], label: "Liveness check", timeout: 200_000 },
+  "process-quality": { script: "process-quality", args: ["--summary"], label: "Process quality", timeout: 60_000 },
+  "detect-reposts": { script: "detect-reposts", args: ["--summary"], label: "Detect reposts", timeout: 60_000 },
+  // Costs real Apify credits per run — the UI requires an explicit confirm
+  // dialog before dispatching this op; never auto-run it.
+  "apify-search": { script: "apify-search", args: [], label: "Broad search (Apify)", timeout: 180_000 },
 };
 
 export async function POST(req: Request) {

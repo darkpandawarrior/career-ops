@@ -30,10 +30,14 @@ Target: ${input}`;
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
 3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to /tmp/cv-{candidate}-{company}.html (candidate = the profile name in kebab-case).
 4. Render the PDF: \`node generate-pdf.mjs /tmp/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
-5. Update the tracker: in data/applications.md, change the PDF column for row #${input} from ❌ to ✅.
+5. Fact-check the tailored CV: run \`node verify-cv-facts.mjs /tmp/cv-{candidate}-{company}.html\`. This is a non-blocking QA gate — do NOT delete or regenerate the PDF if it fails, just note what it flagged for the verdict below.
+6. Update the tracker: in data/applications.md, change the PDF column for row #${input} from ❌ to ✅.
 Do not submit anything anywhere.
 
-End with EXACTLY one final line: VERDICT: {5 if the PDF was written, else 1}/5 — {the output/ path, ≤12 words}`;
+End with EXACTLY one final line, exactly one of:
+- PDF written, fact check passed: VERDICT: 5/5 — {the output/ path, ≤12 words}
+- PDF written, fact check FAILED (exit 1): VERDICT: 3.9/5 — ⚠️ unverified claims, review before sending: {one flagged claim, ≤8 words}
+- PDF not written: VERDICT: 1/5 — {what went wrong, ≤12 words}`;
   }
   if (kind === "fix-portal") {
     const safeInput = input.replace(/[^\w\s.,-]/g, "");

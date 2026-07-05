@@ -4,6 +4,10 @@
 // can never drift between the two halves. Server-only logic (spawning the scanner,
 // writing temp files) lives in lib/core/{scan,portals,pipeline}.ts.
 
+// Capped at these 4 intentionally, not a gap: scan-ats-full.mjs's reverse-discovery
+// datasets (data/ats-datasets/*_companies.json) only exist for these 4 ATS vendors —
+// no public "companies using X" dataset exists for the other providers/*.mjs modules,
+// so there's nothing to reverse-scan for them yet.
 export type AtsSource = "greenhouse" | "lever" | "ashby" | "workday";
 export const ATS_SOURCES: AtsSource[] = ["greenhouse", "lever", "ashby", "workday"];
 export const ATS_LABEL: Record<AtsSource, string> = {

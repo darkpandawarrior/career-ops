@@ -6,6 +6,7 @@ import { Sparkles, Download, RotateCcw, Trash2, Loader2, Wand2, Settings, FileTe
 import { cn } from "@/lib/cn";
 import { themeOptions } from "@/lib/portfolio/themes";
 import { PreviewFrame } from "./preview-frame";
+import { PageShell, PageHeader } from "@/components/ui/page-shell";
 
 type Phase = "empty" | "generating" | "preview" | "error";
 type Version = { stamp: string; isFinal: boolean };
@@ -266,12 +267,11 @@ function RefineBar({ value, onChange, onSubmit, disabled }: { value: string; onC
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <PageShell maxWidth="5xl">
       <style>{`.btn-primary{display:inline-flex;align-items:center;gap:8px;border-radius:999px;background:var(--brand,#e8762a);color:#fff;padding:9px 16px;font-size:14px;font-weight:600}.btn-ghost{display:inline-flex;align-items:center;gap:8px;border-radius:999px;border:1px solid var(--border,#262626);padding:9px 16px;font-size:14px;font-weight:500;color:inherit}`}</style>
-      <h1 className="font-display text-2xl tracking-tight">Portfolio</h1>
-      <p className="mb-6 mt-1 text-sm text-muted">An AI-generated personal site from your CV — preview, refine, analyze, version, and export to deploy.</p>
-      {children}
-    </div>
+      <PageHeader title="Portfolio" description="An AI-generated personal site from your CV — preview, refine, analyze, version, and export to deploy." />
+      <div className="mt-6">{children}</div>
+    </PageShell>
   );
 }
 

@@ -17,6 +17,7 @@ Interactive mode for when the candidate is filling out an application form in Ch
 3. SEARCH      → Match against existing reports in reports/
 4. LOAD        → Read full report + Section H / Application Answers (if they exist)
 5. PREFLIGHT   → Confirm posting liveness + company/role match before drafting
+5b. PRE-SCAN   → Scan page for knock-out questions (degree, experience, work authorization/visa, sponsorship, salary floors)
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
 8. PRESENT     → Show formatted responses for copy-paste
@@ -40,6 +41,24 @@ Before generating any application answers, verify that the form still points to 
 Do not continue to Step 6 until this preflight is resolved.
 
 **Applying to several roles in one sitting?** This preflight verifies the single form in front of you. Before a multi-role session — especially against scanner entries marked `**Verification:** unconfirmed (batch mode)` — run the `pipeline` mode **Liveness sweep** first (`node check-liveness.mjs --file <urls>`). It drops the dead postings from `data/pipeline.md` in one batch so you never open a tab on an expired role.
+
+## Step 5b — Pre-scan for knock-out questions
+
+Read the entire page/form to scan for knock-out questions BEFORE generating full responses (Step 6/7). These are yes/no or single-select questions ATS platforms use to auto-reject candidates who don't meet a hard-gate criterion, independent of the rest of the application.
+
+1. Common knock-out question areas to target:
+   - **Minimum years of experience** (e.g., "Do you have at least 5 years of professional Android/software engineering experience?")
+   - **Degree requirements** (e.g., "Do you have a Bachelor's degree in Computer Science or a related field?")
+   - **Work authorization/visa sponsorship** (e.g., "Will you now or in the future require visa sponsorship to work in [country]?")
+   - **Salary floors/expectations** (e.g., "What is your target salary / CTC expectation?")
+2. Check each one against `config/profile.yml` (location/relocation policy, comp floor, notice period) and `cv.md` (years of experience, degree). This is the same source-of-truth boundary Step 6/7 use — do not invent an answer here either.
+3. If a knock-out question is detected where the candidate's profile is a potential mismatch (e.g., the form filters out sponsorship-needy applicants and the candidate needs sponsorship, or the visible salary floor sits below the candidate's comp floor):
+   - Highlight the specific knock-out question to the candidate immediately, before drafting anything else.
+   - Present a warning block:
+     `⚠️ KNOCK-OUT WARNING: The form asks "[question text]". Based on your profile/CV, answering "[profile answer]" may trigger immediate automatic rejection by the ATS. How would you like to answer this, or do you want to skip applying?`
+   - Stop and wait for the candidate's confirmation before drafting any further answers.
+4. If this is a known ATS from **Known ATS Quirks** below, check whether that platform is one of the ones known to hard-gate on these fields (e.g., Greenhouse/Lever knock-out screening questions) so the warning can name the mechanism, not just the question.
+5. If no knock-out questions are found, or the candidate resolves the warning, proceed to Step 6.
 
 ## Step 1 — Detect the job
 

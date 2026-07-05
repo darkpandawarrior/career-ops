@@ -6,6 +6,7 @@ import { useRef } from "react";
 import { FileText, Sparkles, Check, AlertTriangle, Loader2, ArrowRight, ArrowLeft, UploadCloud, Search, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { BASE_OPTION_CATALOG, COUNTRY_CATALOG, INDUSTRY_CATALOG, REGION_CATALOG, SKILL_CATALOG, rolesForIndustries, skillsForRoles } from "@/lib/onboarding/catalog";
+import { PageShell, PageHeader } from "@/components/ui/page-shell";
 
 // Mirrors onboarding-cli.mjs `prefill` shape (the review form's working state).
 type Review = {
@@ -122,16 +123,15 @@ export function OnboardingFlow() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-10">
+    <PageShell maxWidth="2xl" py="10">
       <Steps step={step} />
 
       {step === "paste" && (
         <section className="mt-8">
-          <h1 className="font-display text-2xl tracking-tight text-landing">Set up your profile</h1>
-          <p className="mt-1 text-sm text-muted">
-            Upload your resume PDF (or paste the text). HireSignal&rsquo;s inference engine drafts your
-            targets, skills and seniority — you review before anything is written.
-          </p>
+          <PageHeader
+            title="Set up your profile"
+            description="Upload your resume PDF (or paste the text). HireSignal’s inference engine drafts your targets, skills and seniority — you review before anything is written."
+          />
 
           <ResumeDropZone busy={busy} onFile={extractFromFile} />
 
@@ -162,11 +162,15 @@ export function OnboardingFlow() {
 
       {step === "review" && review && (
         <section className="mt-8">
-          <h1 className="font-display text-2xl tracking-tight text-landing">Review your profile</h1>
-          <p className="mt-1 text-sm text-muted">
-            Pre-filled from your resume. Complete the required fields (marked
-            <span className="text-brand"> *</span>), then activate.
-          </p>
+          <PageHeader
+            title="Review your profile"
+            description={
+              <>
+                Pre-filled from your resume. Complete the required fields (marked
+                <span className="text-brand"> *</span>), then activate.
+              </>
+            }
+          />
 
           {warnings.length > 0 && (
             <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-muted">
@@ -219,7 +223,7 @@ export function OnboardingFlow() {
           </div>
         </section>
       )}
-    </div>
+    </PageShell>
   );
 }
 

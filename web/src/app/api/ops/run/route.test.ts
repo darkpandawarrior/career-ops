@@ -97,8 +97,11 @@ describe("POST /api/ops/run — allowlist enforcement", () => {
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.error).toBe("unknown op");
-    // The 4 allowlisted ops are surfaced so the client can render valid choices.
-    expect(body.allowed).toEqual(["pipeline-health", "scan", "scan-verify", "liveness"]);
+    // The allowlisted ops are surfaced so the client can render valid choices.
+    expect(body.allowed).toEqual([
+      "pipeline-health", "scan", "scan-verify", "liveness",
+      "process-quality", "detect-reposts", "apify-search",
+    ]);
     expect(h.execFileMock).not.toHaveBeenCalled();
   });
 

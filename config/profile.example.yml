@@ -141,6 +141,17 @@ cover_letter:
 # outreach:
 #   greeting_max_chars: 150
 
+# ── Contact Preferences ──────────────────────────────────────────────────────
+#
+# Used by `/career-ops contacto` to steer the CTA sentence in outreach messages
+# toward how you actually want to be reached. Optional. Omit the whole block,
+# or set preferred_channel to "either", to keep today's behavior unchanged
+# (no channel steering).
+# contact_preferences:
+#   preferred_channel: "email"   # email | phone | either — default "either" if omitted
+#   # Optional. Can inform the CTA wording in `/career-ops contacto`. Keep it one line.
+#   note: "Screens unknown numbers -- please email or text first to schedule a call"
+
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #
 # Auto-PDF threshold during evaluation (used by `/career-ops pipeline` and

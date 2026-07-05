@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bug, X, ShieldCheck } from "lucide-react";
-import { collect, issueBody, issueUrl, type Diag } from "@/lib/report/report";
+import { Bug, X, ShieldCheck, ThumbsUp, Search, Loader2 } from "lucide-react";
+import { collect, fingerprint, issueBody, issueUrl, type Diag } from "@/lib/report/report";
+import { searchIssues, type SimilarIssue } from "@/lib/report/similar-issues";
 import "@/lib/report/logbuf"; // install the client error ring-buffer (side-effect)
 
 // Beta/RC differentiator: a small version+channel pill (only on a pre-release
@@ -14,6 +15,12 @@ export function BetaBanner() {
   const [open, setOpen] = useState(false);
   const [desc, setDesc] = useState("");
   const [diag, setDiag] = useState<Diag | null>(null);
+  const [similar, setSimilar] = useState<SimilarIssue[]>([]);
+  const [checking, setChecking] = useState(false);
+  // Debounces the free-text search once the user has opted in (see checkExisting) so
+  // repeated clicks/edits don't spam the API — the click is what gates the network
+  // call at all, the debounce just coalesces the calls after that consent is given.
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -54,13 +61,38 @@ export function BetaBanner() {
 
   const closeModal = () => {
     setOpen(false);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     triggerRef.current?.focus();
   };
 
   const openReport = async () => {
     setDesc("");
-    setDiag(await collect());
+    setSimilar([]);
+    const d = await collect();
+    setDiag(d);
     setOpen(true);
+    // Exact-match search by fingerprint only — a content-free co-web-<hash>, never
+    // free text — so this is safe to fire the moment the report modal opens (the
+    // user has already committed to reporting a bug by clicking the trigger above).
+    searchIssues(`in:body "${fingerprint(d)}"`).then((found) => {
+      if (found.length) setSimilar(found);
+    });
+  };
+
+  // Free-text search: gated behind this EXPLICIT click, never on keystroke. Typing
+  // itself sends nothing — only pressing this button (the user's deliberate consent,
+  // right before they'd otherwise submit) does, and even then it's debounced so
+  // repeated clicks while still editing don't hammer the API.
+  const checkExisting = () => {
+    const words = desc.trim().split(/\s+/).slice(0, 6).join(" ");
+    if (!words) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    setChecking(true);
+    debounceRef.current = setTimeout(async () => {
+      const found = await searchIssues(`label:web-alpha ${words}`);
+      setChecking(false);
+      if (found.length) setSimilar(found);
+    }, 500);
   };
 
   if (!meta) return null;
@@ -95,10 +127,39 @@ export function BetaBanner() {
               placeholder="What were you doing, and what went wrong?"
               className="w-full resize-none rounded-lg border border-border bg-surface/60 px-3 py-2 text-sm outline-none transition focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
             />
+            {desc.trim().split(/\s+/).length >= 3 && (
+              <button
+                onClick={checkExisting}
+                disabled={checking}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-brand disabled:opacity-60"
+              >
+                {checking ? <Loader2 className="size-3 animate-spin" /> : <Search className="size-3" />} Check for existing reports first
+              </button>
+            )}
             <details className="mt-3 rounded-lg border border-border bg-surface/40">
               <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted">Exactly what gets attached — review before sending ↓</summary>
               <pre className="max-h-52 overflow-auto whitespace-pre-wrap border-t border-border px-3 py-2 font-mono text-[11px] leading-relaxed text-muted">{issueBody(diag, desc)}</pre>
             </details>
+            {similar.length > 0 && (
+              <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Found similar reports — check before filing a new one.</p>
+                <ul className="mt-1.5 space-y-1">
+                  {similar.map((s) => (
+                    <li key={s.number}>
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs text-foreground underline-offset-2 transition-colors hover:text-brand hover:underline"
+                      >
+                        <ThumbsUp className="size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                        <span className="font-mono">#{s.number}</span> {s.title.slice(0, 60)}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <p className="mt-2 flex items-start gap-1.5 text-[11px] text-faint">
               <ShieldCheck className="mt-px size-3.5 shrink-0 text-emerald-500" /> Opens a GitHub issue you confirm — nothing is sent until you click. NEVER includes your CV, profile, application answers, or job URLs.
             </p>

@@ -11,7 +11,7 @@ test('fresh search uses active profile rules, scores results, and persists the c
   await mkdir(path.join(root, 'config'), { recursive: true });
   await mkdir(path.join(root, 'data'), { recursive: true });
   await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig());
-  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  await writeFile(path.join(root, 'portals.yml'), `tracked_companies: []\n${boardsConfig()}`);
   const fetchImpl = async (url) => {
     if (String(url).includes('remoteok.com')) return jsonResponse([]);
     if (String(url).includes('remotive.com')) return jsonResponse({ jobs: [] });
@@ -44,14 +44,14 @@ test('fresh search uses active profile rules, scores results, and persists the c
   assert.ok(payload.telemetry.durationMs >= 0);
   assert.deepEqual(payload.telemetry.sources.map((source) => source.id), [
     'career-ops-scan', 'reverse-ats', 'pipeline', 'scan-history',
-    'tracked-companies', 'remote-feeds', 'generated-search',
+    'tracked-companies', 'board-feeds', 'generated-search',
   ]);
   assert.ok(payload.telemetry.sources.some((source) => source.jobs > 0));
   assert.ok(payload.telemetry.sources.filter((source) => source.status !== 'skipped').every((source) => source.freshness === 'fresh'));
   assert.ok(payload.telemetry.contributors.some((source) => source.source && source.jobs > 0));
 });
 
-test('source telemetry records failures and skipped scopes without failing refresh', async () => {
+test('source telemetry records failures without failing refresh, board feeds are empty when unconfigured', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
   await mkdir(path.join(root, 'config'), { recursive: true });
   await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig().replace('preferred_locations: [India, Remote]', 'preferred_locations: [India]').replace('remote_regions: [Worldwide]', 'remote_regions: []').replace('visa_sponsorship_required: false', 'search_scopes: [local]\n  visa_sponsorship_required: false'));
@@ -62,10 +62,14 @@ test('source telemetry records failures and skipped scopes without failing refre
     runWideScan: async () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const scan = payload.telemetry.sources.find((source) => source.id === 'career-ops-scan');
-  const remote = payload.telemetry.sources.find((source) => source.id === 'remote-feeds');
+  // No job_boards configured in portals.yml → the source still runs (it's no longer
+  // gated by location.search_scopes, only by each board's own `enabled` flag) but has
+  // nothing to fetch, so it succeeds with zero jobs rather than being skipped.
+  const board = payload.telemetry.sources.find((source) => source.id === 'board-feeds');
   const search = payload.telemetry.sources.find((source) => source.id === 'generated-search');
   assert.equal(scan.status, 'failed');
-  assert.equal(remote.status, 'skipped');
+  assert.equal(board.status, 'success');
+  assert.equal(board.jobs, 0);
   assert.equal(search.status, 'partial');
   assert.ok(search.failures > 0);
 });
@@ -109,7 +113,7 @@ test('broad feeds do not admit unrelated jobs with neutral profile scoring', asy
   const root = await mkdtemp(path.join(os.tmpdir(), 'career-ops-search-'));
   await mkdir(path.join(root, 'config'), { recursive: true });
   await writeFile(path.join(root, 'config', 'job-search.yml'), profileConfig());
-  await writeFile(path.join(root, 'portals.yml'), 'tracked_companies: []\n');
+  await writeFile(path.join(root, 'portals.yml'), `tracked_companies: []\n${boardsConfig()}`);
   const fetchImpl = async (url) => {
     if (String(url).includes('remoteok.com')) return jsonResponse([]);
     if (String(url).includes('remotive.com')) return jsonResponse({
@@ -247,6 +251,35 @@ preferences:
   company_types: []
   negative_keywords: []
 weights: { title: 30, skills: 35, experience: 10, location: 15, preferences: 10 }
+`;
+}
+
+// Mirrors templates/portals.example.yml's job_boards: shape — resolved through the
+// same providers/_registry.mjs the tracked_companies feeds use.
+function boardsConfig() {
+  return `job_boards:
+  - name: RemoteOK
+    provider: remoteok
+    enabled: true
+  - name: Remotive
+    provider: remotive
+    enabled: true
+  - name: Jobicy
+    provider: jobicy
+    enabled: true
+  - name: Himalayas
+    provider: himalayas
+    enabled: true
+  - name: Arbeitnow
+    provider: arbeitnow
+    enabled: true
+  - name: Working Nomads
+    provider: workingnomads
+    enabled: true
+  - name: SolidJobs
+    provider: solidjobs
+    careers_url: https://solid.jobs/public-api/offers/it
+    enabled: true
 `;
 }
 

@@ -124,3 +124,6 @@ package-lock.json
 
 # Planning (local scratchpad)
 plan/
+# superpowers writing-plans skill output — canonical copy lives in
+# AgentHarness/plans/<project-slug>/, not in this repo.
+docs/superpowers/

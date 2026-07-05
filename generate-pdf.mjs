@@ -23,6 +23,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
+const PDF_PAGE_MARGIN = '0.6in';
+
 // engineRoot: script location, also where the shared fonts/ assets live.
 // __dirname: the user-data root (output/, data/, cv.md) — CAREER_OPS_ROOT in a
 // multi-profile setup, else the same as engineRoot.
@@ -180,6 +182,34 @@ function validateCvSectionOrder(html, cvMarkdown) {
       throw new Error(`CV section order diverges from cv.md: rendered ${renderedOrder}; cv.md ${sourceOrder}`);
     }
   }
+}
+
+/**
+ * Inject a CSS @page rule for page size + margins into the HTML.
+ *
+ * Puppeteer/Playwright's page.pdf({ margin }) option clips backgrounds at
+ * the margin box, so full-bleed background colors/images get cut off with
+ * a blank border. CSS @page margins instead let printBackground paint to
+ * the true page edge while content still respects the margin. See #1563.
+ *
+ * @param {string} html - Full HTML document to render.
+ * @param {'a4'|'letter'} [format] - Page size.
+ * @returns {string} HTML with a <style>@page{...}</style> block injected.
+ */
+export function injectPrintPageCss(html, format = 'a4') {
+  const normalizedFormat = String(format || 'a4').toLowerCase();
+  const pageSize = normalizedFormat === 'letter' ? 'Letter' : 'A4';
+  const pageStyle = `<style id="career-ops-page-setup">\n@page { size: ${pageSize}; margin: ${PDF_PAGE_MARGIN}; }\n</style>`;
+
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${pageStyle}\n</head>`);
+  }
+
+  if (/<html\b[^>]*>/i.test(html)) {
+    return html.replace(/<html\b[^>]*>/i, match => `${match}\n<head>\n${pageStyle}\n</head>`);
+  }
+
+  return `${pageStyle}\n${html}`;
 }
 
 /**
@@ -343,6 +373,10 @@ export async function inlineLocalFonts(html) {
  * resources (images, fonts) to load — setContent() runs from about:blank
  * and Chromium blocks file:// subresource loads from non-file origins.
  *
+ * Page size/margins are set via an injected CSS @page rule (preferCSSPageSize)
+ * rather than Puppeteer's margin option, so printBackground paints to the
+ * true page edge. See injectPrintPageCss.
+ *
  * Local url('./fonts/...') references are inlined as data: URLs first so
  * fonts also survive the ATS normalization pass (which may strip font refs).
  *
@@ -357,6 +391,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
   mkdirSync(dirname(outputPath), { recursive: true });
 
+  html = injectPrintPageCss(html, format);
   html = await inlineLocalFonts(html);
 
   // Write HTML to a temp file in baseDir so page.goto() gives a file://
@@ -379,15 +414,14 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
     // Generate PDF
     const pdfBuffer = await page.pdf({
-      format: format,
       printBackground: true,
       margin: {
-        top: '0.6in',
-        right: '0.6in',
-        bottom: '0.6in',
-        left: '0.6in',
+        top: '0',
+        right: '0',
+        bottom: '0',
+        left: '0',
       },
-      preferCSSPageSize: false,
+      preferCSSPageSize: true,
     });
 
     // Write PDF

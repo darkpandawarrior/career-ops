@@ -8,6 +8,8 @@ import { CompanyLogo } from "@/components/company-logo";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { PageShell, PageHeader } from "@/components/ui/page-shell";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export type QueueCandidate = { n: string; company: string; role: string; score: string; status: string; url: string | null };
 
@@ -42,24 +44,19 @@ export function ApplyQueueView({ candidates }: { candidates: QueueCandidate[] })
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
-      <div className="flex items-center gap-3">
-        <ListChecks className="size-6 text-brand" />
-        <h1 className="font-display text-2xl tracking-tight text-landing">Apply queue</h1>
-      </div>
-      <p className="mt-1.5 max-w-xl text-sm text-muted">
-        Pick several evaluated roles and queue them. career-ops opens and pre-fills them one at a time — you still review,
-        fill, and click Submit yourself on every single one; the queue just removes the busywork between applications.
-      </p>
+    <PageShell maxWidth="3xl">
+      <PageHeader
+        icon={ListChecks}
+        title="Apply queue"
+        description="Pick several evaluated roles and queue them. career-ops opens and pre-fills them one at a time — you still review, fill, and click Submit yourself on every single one; the queue just removes the busywork between applications."
+      />
 
       {eligible.length === 0 ? (
-        <div className="mt-6 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-          <p className="font-display text-lg">Nothing to queue yet</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
-            Evaluate a few roles from Explore or the Pipeline first — once they have a posting URL and aren&apos;t already
-            applied, they&apos;ll show up here.
-          </p>
-        </div>
+        <EmptyState
+          className="mt-6"
+          title="Nothing to queue yet"
+          description="Evaluate a few roles from Explore or the Pipeline first — once they have a posting URL and aren't already applied, they'll show up here."
+        />
       ) : (
         <>
           <div className="mt-6 flex items-center justify-between">
@@ -110,6 +107,6 @@ export function ApplyQueueView({ candidates }: { candidates: QueueCandidate[] })
           </div>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

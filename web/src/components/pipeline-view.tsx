@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ExternalLink, ChevronsUpDown, Sparkles, Loader2, X, Check } from "lucide-react";
+import { Search, ChevronsUpDown, Loader2, X, ArrowRight } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
-import { useJobs } from "@/components/jobs/job-store";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot, CANONICAL_STATES } from "@/lib/format";
+import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
+import { PageShell, PageHeader } from "@/components/ui/page-shell";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatusDot } from "@/components/ui/status-dot";
 
 // INBOX (the action queue) is the default tab; the rest filter the tracker.
 const TABS = [
@@ -36,7 +39,6 @@ export function PipelineView({
   applications: Application[];
   inbox: InboxJob[];
 }) {
-  const { jobs, startJob } = useJobs();
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -77,38 +79,18 @@ export function PipelineView({
     [params, router, pathname],
   );
 
-  const pendingInbox = useMemo(() => inbox.filter((j) => !j.done), [inbox]);
-
-  // Link each inbox posting to its worker (by URL) so the row can show
-  // Evaluate → Evaluating… → processed·score.
-  const jobByUrl = useMemo(() => {
-    const m = new Map<string, (typeof jobs)[number]>();
-    for (const j of jobs) {
-      if (!j.input || j.kind === "research") continue;
-      const ex = m.get(j.input);
-      if (!ex || j.startedAt > ex.startedAt) m.set(j.input, j);
+  // Pending + deduped by URL (pipeline.md can list the same posting twice) so the
+  // header count, the tab count, and the triage list all agree on one number.
+  const pendingInbox = useMemo(() => {
+    const seen = new Set<string>();
+    const out: InboxJob[] = [];
+    for (const j of inbox) {
+      if (j.done || seen.has(j.url)) continue;
+      seen.add(j.url);
+      out.push(j);
     }
-    return m;
-  }, [jobs]);
-
-  const processedCount = useMemo(
-    () => pendingInbox.filter((j) => jobByUrl.get(j.url)?.status === "done").length,
-    [pendingInbox, jobByUrl],
-  );
-
-  const filteredInbox = useMemo(() => {
-    let list = pendingInbox;
-    if (q.trim()) {
-      const needle = q.toLowerCase();
-      list = list.filter((j) => `${j.company} ${j.role}`.toLowerCase().includes(needle));
-    }
-    // processed (done) rows sink to the bottom — the inbox drains toward processed
-    return [...list].sort((a, b) => {
-      const pa = jobByUrl.get(a.url)?.status === "done" ? 1 : 0;
-      const pb = jobByUrl.get(b.url)?.status === "done" ? 1 : 0;
-      return pa - pb;
-    });
-  }, [pendingInbox, q, jobByUrl]);
+    return out;
+  }, [inbox]);
 
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
@@ -137,31 +119,30 @@ export function PipelineView({
   }, [applications, tab, q, sort, minFilter]);
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
-          <p className="mt-1 text-sm text-muted">
-            <span className="tabular-nums">{pendingInbox.length - processedCount}</span> in inbox
-            {processedCount > 0 && (
-              <>
-                {" "}
-                · <span className="tabular-nums text-brand">{processedCount}</span> processed
-              </>
-            )}{" "}
-            · <span className="tabular-nums">{applications.length}</span> tracked
-          </p>
-        </div>
-        <div className="relative w-64 max-w-[40vw]">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search company or role…"
-            className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-          />
-        </div>
-      </div>
+    <PageShell maxWidth="6xl" className="max-sm:pb-24">
+      <PageHeader
+        title="Pipeline"
+        description={
+          <>
+            <span className="tabular-nums">{pendingInbox.length}</span> in inbox ·{" "}
+            <span className="tabular-nums">{applications.length}</span> tracked
+          </>
+        }
+        actions={
+          // the tracker has its own search; the inbox brings its own facet filters
+          tab !== "INBOX" ? (
+            <div className="relative w-64 max-w-[40vw]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search company or role…"
+                className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+              />
+            </div>
+          ) : undefined
+        }
+      />
 
       {/* funnel mini-viz — status distribution across the tracker */}
       <Funnel applications={applications} />
@@ -171,7 +152,7 @@ export function PipelineView({
         {TABS.map((t) => {
           const count =
             t === "INBOX"
-              ? pendingInbox.length - processedCount
+              ? pendingInbox.length
               : t === "ALL"
                 ? applications.length
                 : applications.filter((r) => canonStatus(r.status).includes(t)).length;
@@ -208,72 +189,29 @@ export function PipelineView({
       )}
 
       {tab === "INBOX" ? (
-        /* ── Inbox: the action queue with worker triggers ── */
-        filteredInbox.length > 0 ? (
-          <ul className="mt-4 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
-            {filteredInbox.slice(0, 60).map((j, i) => {
-              const job = jobByUrl.get(j.url);
-              const processed = job?.status === "done";
-              const launch = () =>
-                startJob({ title: `Evaluate · ${j.company}`, subtitle: j.role, kind: "evaluate", input: j.url, page: "/pipeline" });
-              return (
-                <li
-                  key={`${j.url}-${i}`}
-                  className={cn(
-                    "flex items-center justify-between gap-4 px-4 py-2.5 transition-colors hover:bg-surface-hover",
-                    processed && "opacity-60",
-                  )}
-                >
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <ToggleDone url={j.url} onDone={() => router.refresh()} />
-                    <CompanyLogo name={j.company} size={20} />
-                    <span className="shrink-0 text-sm font-medium">{j.company}</span>
-                    <span className="truncate text-sm text-muted">{j.role}</span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1.5">
-                    {job?.status === "running" ? (
-                      <Link
-                        href={`/jobs/${job.id}`}
-                        className="inline-flex items-center gap-1.5 text-xs font-medium text-brand"
-                      >
-                        <Loader2 className="size-3.5 animate-spin" /> Evaluating…
-                      </Link>
-                    ) : job?.status === "done" ? (
-                      <Link href={`/jobs/${job.id}`} className="inline-flex items-center gap-1.5 text-xs">
-                        {job.result?.score != null && <Badge tone={job.result.tone}>{job.result.score}/5</Badge>}
-                        <span className="text-faint">processed</span>
-                      </Link>
-                    ) : job?.status === "error" ? (
-                      <button type="button" onClick={launch} className="text-xs text-red-400 transition-colors hover:underline">
-                        Retry
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={launch}
-                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-brand"
-                        title="Evaluate this posting — spins up a worker on your CLI"
-                      >
-                        <Sparkles className="size-3.5" />
-                        <span className="hidden sm:inline">Evaluate</span>
-                      </button>
-                    )}
-                    <a
-                      href={j.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-md p-1 text-faint transition-colors hover:text-brand"
-                      aria-label={`Open ${j.company} posting`}
-                    >
-                      <ExternalLink className="size-4" />
-                    </a>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+        /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
+        pendingInbox.length > 0 ? (
+          <InboxTriage inbox={pendingInbox} />
         ) : (
-          <InboxEmpty count={pendingInbox.length} filtered={q.trim().length > 0} />
+          <EmptyState
+            className="mt-4"
+            variant="terminal"
+            title={<>Your <span className="text-brand">inbox</span> is empty.</>}
+            description="Find roles that match your CV — free, no tokens spent."
+            actions={
+              <>
+                <Link
+                  href="/explore?run=1"
+                  className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition hover:bg-brand-200 max-sm:min-h-[44px]"
+                >
+                  Run your first free scan <ArrowRight className="size-4" />
+                </Link>
+                <p className="mt-4 font-mono text-xs text-faint">
+                  Prefer the terminal? <span className="text-foreground/40">$</span> career-ops scan — or drop URLs into data/pipeline.md.
+                </p>
+              </>
+            }
+          />
         )
       ) : filtered.length > 0 ? (
         <>
@@ -354,7 +292,7 @@ export function PipelineView({
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -415,35 +353,6 @@ function Funnel({ applications }: { applications: Application[] }) {
   );
 }
 
-/** Inbox done-checkbox → marks the pipeline.md URL `- [x]` (profile-aware). */
-function ToggleDone({ url, onDone }: { url: string; onDone: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const toggle = async () => {
-    setBusy(true);
-    try {
-      await fetch("/api/pipeline-toggle", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ url, done: true }),
-      });
-      onDone();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      disabled={busy}
-      aria-label="Mark processed"
-      title="Mark this inbox item done"
-      className="grid size-4 shrink-0 place-items-center rounded border border-border text-transparent transition-colors hover:border-brand hover:text-brand"
-    >
-      {busy ? <Loader2 className="size-3 animate-spin text-brand" /> : <Check className="size-3" />}
-    </button>
-  );
-}
 
 /** Inline status editor → POST /api/status {n,status}. */
 function StatusCell({ n, status, onSaved }: { n: string; status: string; onSaved: () => void }) {
@@ -464,7 +373,7 @@ function StatusCell({ n, status, onSaved }: { n: string; status: string; onSaved
   };
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(status))} />
+      <StatusDot dotClassName={statusDot(status)} />
       <select
         defaultValue={status.trim()}
         onChange={(e) => save(e.target.value)}
@@ -532,43 +441,3 @@ function NotesCell({ n, notes, onSaved }: { n: string; notes: string; onSaved: (
   );
 }
 
-// Empty inbox = the app's terminal-card cue (CLI heritage spent once, honestly).
-function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
-  if (filtered) {
-    return (
-      <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-        <p className="font-display text-lg">No matches</p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Clear the search to see the full inbox.</p>
-      </div>
-    );
-  }
-  return (
-    <div className="dot-bg mt-4 overflow-hidden rounded-2xl border border-border bg-surface/50 bg-origin-border bg-gradient-to-tr from-brand/10 via-transparent to-transparent shadow-lg">
-      <div className="flex items-center gap-2 border-b border-foreground/10 px-5 py-3">
-        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
-        <span className="ml-3 font-mono text-xs tracking-wide text-muted">
-          <span className="text-foreground/40">&gt;_</span> career-ops scan
-        </span>
-      </div>
-      <div className="px-6 py-12 text-center">
-        <p className="font-display text-lg">
-          Your <span className="text-brand">inbox</span> is empty.
-        </p>
-        <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
-          {count > 0
-            ? "Nothing pending right now."
-            : "Run a scan or drop job URLs into data/pipeline.md to fill it."}
-        </p>
-        <p className="mt-4 font-mono text-xs text-faint">
-          $ career-ops scan
-          <span
-            aria-hidden="true"
-            className="cli-cursor ml-0.5 inline-block h-[1em] w-[0.35em] bg-current align-middle"
-          />
-        </p>
-      </div>
-    </div>
-  );
-}

@@ -59,21 +59,35 @@ function read(rel: string, root: string = careerOpsRoot()): string | null {
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; done: boolean };
+export type InboxJob = {
+  url: string;
+  company: string;
+  role: string;
+  done: boolean;
+  location?: string;
+  compensation?: string;
+  postedAt?: string;
+};
 
-/** Parse data/pipeline.md — lines like `- [ ] URL | Company | Role`. */
+/** Parse data/pipeline.md — `- [ ] URL | Company | Role [| Location [| Compensation]]`.
+ *  Location/compensation are optional trailing columns (#1015/#1017); anything
+ *  past the 5th column is ignored rather than rejecting the whole line. */
 export function readInbox(root: string = careerOpsRoot()): InboxJob[] {
   const md = read("data/pipeline.md", root);
   if (!md) return [];
   const jobs: InboxJob[] = [];
   for (const line of md.split("\n")) {
-    const m = line.match(/^\s*-\s*\[([ xX])\]\s*(\S+)\s*\|\s*([^|]+?)\s*\|\s*(.+?)\s*$/);
+    const m = line.match(/^\s*-\s*\[([ xX])\]\s*(.+)$/);
     if (!m) continue;
+    const parts = m[2].split("|").map((s) => s.trim());
+    if (parts.length < 3 || !parts[0]) continue; // need at least url | company | role
     jobs.push({
       done: m[1].toLowerCase() === "x",
-      url: m[2],
-      company: m[3].trim(),
-      role: m[4].trim(),
+      url: parts[0],
+      company: parts[1],
+      role: parts[2],
+      location: parts[3] || undefined,
+      compensation: parts[4] || undefined,
     });
   }
   return jobs;
@@ -169,10 +183,18 @@ export type PipelineSummary = {
 };
 
 export function pipelineSummary(root: string = careerOpsRoot()): PipelineSummary {
+  // Join each raw posting's first_seen date (from the scan log) onto it as
+  // postedAt — the inbox triage view orders/facet-filters on it entirely
+  // client-side. Reuses readScanHistory's own TSV parsing (below) instead of a
+  // second one; keeps the EARLIEST first_seen if a url recurs across scans.
+  const scanDates = new Map<string, string>();
+  for (const row of readScanHistory(root).rows) {
+    if (!scanDates.has(row.url) || row.first_seen < scanDates.get(row.url)!) scanDates.set(row.url, row.first_seen);
+  }
   return {
     root,
     rootExists: fs.existsSync(root),
-    inbox: readInbox(root),
+    inbox: readInbox(root).map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
     applications: readApplications(root),
   };
 }
