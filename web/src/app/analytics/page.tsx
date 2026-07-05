@@ -2,6 +2,7 @@ import { pipelineSummary } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { canonStatus, scoreNum } from "@/lib/format";
 import { OutcomePatterns } from "@/components/analytics/outcome-patterns";
+import { PageShell, PageHeader } from "@/components/ui/page-shell";
 
 export const dynamic = "force-dynamic";
 
@@ -44,9 +45,8 @@ export default async function Analytics() {
   const interviews = stageCounts.find((s) => s.key === "INTERVIEW")?.n ?? 0;
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="font-display text-2xl tracking-tight text-landing">Analytics</h1>
-      <p className="mt-1 text-sm text-muted">Across {total} tracked evaluations.</p>
+    <PageShell maxWidth="4xl" py="10">
+      <PageHeader title="Analytics" description={`Across ${total} tracked evaluations.`} />
 
       {/* headline stats */}
       <div className="mt-6 grid gap-4 sm:grid-cols-4">
@@ -75,7 +75,7 @@ export default async function Analytics() {
       </Section>
 
       <OutcomePatterns />
-    </div>
+    </PageShell>
   );
 }
 

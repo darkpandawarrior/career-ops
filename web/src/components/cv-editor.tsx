@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, FolderGit2 } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { RunModeButton } from "@/components/ui/run-mode-button";
+import { PageShell, PageHeader } from "@/components/ui/page-shell";
 
 export function CvEditor() {
   const [content, setContent] = useState("");
@@ -51,30 +53,40 @@ export function CvEditor() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">CV editor</h1>
-          <p className="mt-1 text-sm text-muted">
+    <PageShell maxWidth="6xl">
+      <PageHeader
+        title="CV editor"
+        description={
+          <>
             Edit <code className="text-foreground">cv.md</code> with live preview.
             {!exists && loaded && <span className="ml-1 text-faint">No cv.md yet — start typing to create it.</span>}
             {error && <span className="ml-1 text-red-500">{error}</span>}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving || !dirty}
-          className={cn(
-            "inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-medium transition-colors",
-            dirty
-              ? "bg-brand text-brand-foreground hover:bg-brand-200"
-              : "border border-border bg-surface text-muted",
-          )}
-        >
-          {saving ? <Loader2 className="size-4 animate-spin" /> : saved ? <Check className="size-4" /> : null}
-          {saved ? "Saved" : "Save"}
-        </button>
+          </>
+        }
+        actions={
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving || !dirty}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full px-5 py-2 text-sm font-medium transition-colors",
+              dirty
+                ? "bg-brand text-brand-foreground hover:bg-brand-200"
+                : "border border-border bg-surface text-muted",
+            )}
+          >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : saved ? <Check className="size-4" /> : null}
+            {saved ? "Saved" : "Save"}
+          </button>
+        }
+      />
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <RunModeButton
+          icon={FolderGit2}
+          label="Pull competencies from GitHub"
+          message="Run expand mode — discover competencies from my GitHub/portfolio and add them to cv.md or article-digest.md."
+        />
       </div>
 
       {!loaded ? (
@@ -100,6 +112,6 @@ export function CvEditor() {
           </article>
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

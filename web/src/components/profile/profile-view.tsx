@@ -17,6 +17,7 @@ import {
 import { cn } from "@/lib/cn";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { FullProfile, ProfileMdSection } from "@/lib/full-profile";
 
 type ApiResponse = { exists: boolean; profile: FullProfile; sections: ProfileMdSection[] };
@@ -42,14 +43,19 @@ export function ProfileView() {
     return <Loading label="Loading profile…" />;
   }
   if (state.error || !state.data) {
-    return <Empty>{state.error || "Couldn't load the profile."}</Empty>;
+    return <EmptyState size="sm" description={state.error || "Couldn't load the profile."} />;
   }
   if (!state.data.exists) {
     return (
-      <Empty>
-        No <code className="text-foreground">config/profile.yml</code> yet. Onboard first (chat with the assistant,
-        or run <code className="text-foreground">/career-ops</code> onboarding) to create one.
-      </Empty>
+      <EmptyState
+        size="sm"
+        description={
+          <>
+            No <code className="text-foreground">config/profile.yml</code> yet. Onboard first (chat with the assistant,
+            or run <code className="text-foreground">/career-ops</code> onboarding) to create one.
+          </>
+        }
+      />
     );
   }
 
@@ -245,7 +251,7 @@ export function ProfileView() {
       )}
 
       {sections.length === 0 && !sectionByTitle("") && (
-        <Empty>No modes/_profile.md prose content found (or the file is missing).</Empty>
+        <EmptyState size="sm" description="No modes/_profile.md prose content found (or the file is missing)." />
       )}
     </div>
   );
@@ -274,13 +280,8 @@ function Section({ icon: Icon, title, children }: { icon: React.ComponentType<{ 
 }
 
 function Loading({ label }: { label: string }) {
-  return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
-      <p className="flex items-center gap-2 text-sm text-faint"><Loader2 className="size-4 animate-spin" /> {label}</p>
-    </div>
-  );
+  // No container here — the sole call site (app/profile/page.tsx) already
+  // wraps <ProfileView> in the page shell; a second one would double the padding.
+  return <p className="flex items-center gap-2 text-sm text-faint"><Loader2 className="size-4 animate-spin" /> {label}</p>;
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-xl border border-dashed border-border bg-surface/30 px-4 py-6 text-center text-sm text-muted">{children}</p>;
-}

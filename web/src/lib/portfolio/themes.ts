@@ -2,6 +2,10 @@
 // same generated content works for an engineer, a designer, a PM, a marketer, etc.
 // The renderer injects these as CSS custom properties; the data carries the chosen
 // theme key. Adding a theme here makes it available everywhere (renderer + picker).
+// These are candidate-facing tokens for the GENERATED portfolio site, deliberately
+// separate from the dashboard's own web/src/app/globals.css tokens — not a duplicate,
+// the two audiences (a recruiter viewing the site vs. the candidate using the dashboard)
+// are allowed to look different and evolve independently.
 
 export type Theme = {
   key: string;

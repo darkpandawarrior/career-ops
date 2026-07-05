@@ -3,6 +3,7 @@
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import { CvIngest } from "@/components/cv/cv-ingest";
+import { PageShell } from "@/components/ui/page-shell";
 
 // The first-run takeover: when cv.md is missing, the CV-upload hero IS the home.
 // One input, value-coming framing (not a form), the same product chrome (HeroGlow
@@ -10,7 +11,7 @@ import { CvIngest } from "@/components/cv/cv-ingest";
 // → first score) flows from here.
 export function FirstRunHome() {
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10 md:py-16">
+    <PageShell maxWidth="3xl" py="10" className="md:py-16">
       <section className="dot-bg relative overflow-hidden rounded-2xl border border-border bg-surface/40 px-7 py-10 md:px-10 md:py-12">
         <HeroGlow />
         <div className="relative z-10">
@@ -30,6 +31,6 @@ export function FirstRunHome() {
           </div>
         </div>
       </section>
-    </div>
+    </PageShell>
   );
 }

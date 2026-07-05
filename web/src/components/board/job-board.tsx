@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
+import { PageShell, PageHeader } from "@/components/ui/page-shell";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useJobs } from "@/components/jobs/job-store";
 import type { ScoredJob } from "@/lib/jobs/types";
 import type { JobDashboard } from "@/lib/jobs/scoring";
@@ -168,41 +170,42 @@ export function JobBoard({
   const cfgInvalid = !data.searchConfig.valid;
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
-      {/* header */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">Job board</h1>
-          <p className="mt-1 text-sm text-muted">
+    <PageShell maxWidth="5xl">
+      <PageHeader
+        title="Job board"
+        description={
+          <>
             {data.diagnostics.note}
             {data.generatedAt && (
               <span className="text-faint"> · fed {new Date(data.generatedAt).toISOString().slice(0, 10)}</span>
             )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={runSearch}
-            disabled={searching}
-            className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-50"
-          >
-            {searching ? <Loader2 className="size-3.5 animate-spin" /> : <Radar className="size-3.5" />} Run search
-          </button>
-          <button
-            onClick={reScore}
-            disabled={busy}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
-          >
-            <RefreshCw className={cn("size-3.5", busy && "animate-spin")} /> Re-score
-          </button>
-          <a
-            href="/api/jobs/export"
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-          >
-            <Download className="size-3.5" /> Export CSV
-          </a>
-        </div>
-      </div>
+          </>
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={runSearch}
+              disabled={searching}
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:opacity-50"
+            >
+              {searching ? <Loader2 className="size-3.5 animate-spin" /> : <Radar className="size-3.5" />} Run search
+            </button>
+            <button
+              onClick={reScore}
+              disabled={busy}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground disabled:opacity-50"
+            >
+              <RefreshCw className={cn("size-3.5", busy && "animate-spin")} /> Re-score
+            </button>
+            <a
+              href="/api/jobs/export"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
+            >
+              <Download className="size-3.5" /> Export CSV
+            </a>
+          </div>
+        }
+      />
 
       {/* live staged search progress */}
       {(searching || searchLog.length > 0) && (
@@ -257,6 +260,7 @@ export function JobBoard({
             <button
               key={s.key}
               onClick={() => setSection(s.key)}
+              aria-pressed={section === s.key}
               className={cn(
                 "px-3 py-2 text-xs transition-colors",
                 section === s.key ? "bg-brand-soft text-brand" : "text-muted hover:bg-surface-hover",
@@ -273,6 +277,7 @@ export function JobBoard({
                 <button
                   key={t.min}
                   onClick={() => setMinScore(t.min)}
+                  aria-pressed={minScore === t.min}
                   className={cn(
                     "px-2.5 py-2 text-xs transition-colors",
                     minScore === t.min ? "bg-brand-soft text-brand" : "text-muted hover:bg-surface-hover",
@@ -286,6 +291,7 @@ export function JobBoard({
               <button
                 onClick={() => setHideRejected((v) => !v)}
                 title="Hide roles from companies that already rejected you"
+                aria-pressed={hideRejected}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md border px-2.5 py-2 text-xs transition-colors",
                   hideRejected ? "border-red-500/40 bg-red-500/10 text-red-500" : "border-border text-muted hover:bg-surface-hover",
@@ -297,6 +303,7 @@ export function JobBoard({
             <button
               onClick={() => setGroupByCompany((v) => !v)}
               title="Group roles under collapsible company headers"
+              aria-pressed={groupByCompany}
               className={cn(
                 "inline-flex items-center gap-1 rounded-md border px-2.5 py-2 text-xs transition-colors",
                 groupByCompany ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:bg-surface-hover",
@@ -310,11 +317,14 @@ export function JobBoard({
 
       {/* list */}
       {jobs.length === 0 ? (
-        <div className="mt-8 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center text-sm text-muted">
-          {data.jobs.length === 0
-            ? "No cached job feed yet. Run a scan from the CLI, or finish onboarding to drive scoring."
-            : "No roles match these filters."}
-        </div>
+        <EmptyState
+          className="mt-8"
+          description={
+            data.jobs.length === 0
+              ? "No cached job feed yet. Run a scan from the CLI, or finish onboarding to drive scoring."
+              : "No roles match these filters."
+          }
+        />
       ) : groupByCompany && !isSources ? (
         <div className="mt-5 space-y-3">
           {groupByCompanyName(jobs).map(([company, group]) => (
@@ -360,7 +370,7 @@ export function JobBoard({
           ))}
         </ul>
       )}
-    </div>
+    </PageShell>
   );
 }
 
@@ -459,9 +469,9 @@ function RefreshProgress({
 
 const DONUT = [
   { key: "excellent", label: "Excellent", color: "var(--color-brand)" },
-  { key: "strong", label: "Strong", color: "#10b981" },
-  { key: "possible", label: "Possible", color: "#f59e0b" },
-  { key: "low", label: "Low", color: "#a1a1aa" },
+  { key: "strong", label: "Strong", color: "var(--color-emerald-500)" },
+  { key: "possible", label: "Possible", color: "var(--color-amber-500)" },
+  { key: "low", label: "Low", color: "var(--color-zinc-400)" },
 ] as const;
 
 function ScoreDonut({ dist }: { dist: { excellent: number; strong: number; possible: number; low: number } }) {
@@ -694,22 +704,13 @@ function JobCard({
   );
 }
 
-const SKILL_TONES = {
-  good: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  warn: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  bad: "bg-red-500/15 text-red-700 dark:text-red-400",
-  muted: "bg-surface-hover text-muted",
-} as const;
-
-function SkillRow({ label, tone, skills }: { label: string; tone: keyof typeof SKILL_TONES; skills: string[] }) {
+function SkillRow({ label, tone, skills }: { label: string; tone: "good" | "warn" | "bad" | "muted"; skills: string[] }) {
   if (skills.length === 0) return null;
   return (
     <div className="flex flex-wrap items-baseline gap-1.5">
       <span className="text-[10px] uppercase tracking-wide text-faint">{label}</span>
       {skills.map((s) => (
-        <span key={s} className={cn("rounded-md px-1.5 py-0.5 text-[11px]", SKILL_TONES[tone])}>
-          {s}
-        </span>
+        <Badge key={s} tone={tone} className="text-[11px]">{s}</Badge>
       ))}
     </div>
   );

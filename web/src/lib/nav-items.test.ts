@@ -44,8 +44,9 @@ describe("NAV_ITEMS registry shape", () => {
         expect(item.chip.length).toBeGreaterThan(0);
       }
     }
-    // the board entry is the documented "New" chip
-    expect(NAV_ITEMS.find((i) => i.href === "/board")?.chip).toBe("New");
+    // Profile is the documented "New" chip (job board/apply queue lost theirs —
+    // no longer meaningfully newer than their unbadged siblings)
+    expect(NAV_ITEMS.find((i) => i.href === "/profile")?.chip).toBe("New");
   });
 });
 

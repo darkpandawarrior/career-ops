@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, BookOpen, Target, MessagesSquare, Trophy, Dumbbell, Building2, Clock, TrendingUp, TrendingDown, Wallet, Zap, HeartPulse, NotebookPen, History, UserRound, FileText, PlayCircle, Mail, Users, BarChart3 } from "lucide-react";
+import { Loader2, BookOpen, BookMarked, Target, MessagesSquare, Trophy, Dumbbell, Building2, Clock, TrendingUp, TrendingDown, Wallet, Zap, HeartPulse, NotebookPen, History, UserRound, FileText, PlayCircle, Mail, Send, CalendarClock, ClipboardCheck, ShieldAlert, MailSearch, Users, BarChart3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/cn";
+import { RunModeButton } from "@/components/ui/run-mode-button";
+import { PageShell, PageHeader } from "@/components/ui/page-shell";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { CoachState } from "@/lib/coach";
 import type { ProfileMeta } from "@/lib/profile-meta";
 
@@ -37,9 +40,8 @@ export function IntelView({ coach, profile }: { coach: CoachState | null; profil
   }, []);
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
-      <h1 className="font-display text-2xl tracking-tight text-landing">Intel</h1>
-      <p className="mt-1 text-sm text-muted">Interview coaching, storybank, and follow-up cadence.</p>
+    <PageShell maxWidth="4xl">
+      <PageHeader title="Intel" description="Interview coaching, storybank, and follow-up cadence." />
 
       {/* CLI-only modes with no dedicated UI — pre-seed the assistant instead of
           building a bespoke surface for each (same chat-dispatch model as the
@@ -48,6 +50,12 @@ export function IntelView({ coach, profile }: { coach: CoachState | null; profil
         <RunModeButton icon={PlayCircle} label="Run interview practice" message="Run interview/practice mode — start a live mock-interview practice loop with me now." />
         <RunModeButton icon={Mail} label="Scan inbox for updates" message="Run email-sweep mode — scan my inbox for rejection/interview/offer emails and match them to the tracker." />
         <RunModeButton icon={Users} label="Draft LinkedIn outreach" message="Run contacto mode — help me draft LinkedIn outreach for a role I'm targeting." />
+        <RunModeButton icon={BookMarked} label="Prep for an interview" message="Run interview-prep mode — I'll tell you the company and role, build me company-specific interview intelligence." />
+        <RunModeButton icon={Send} label="Draft application email" message="Run email mode — help me draft a formal application or follow-up email for a role I'm targeting." />
+        <RunModeButton icon={CalendarClock} label="Build interview prep plan" message="Run interview/plan mode — I'll tell you the company, role, and interview date, build me a time-blocked prep plan." />
+        <RunModeButton icon={ClipboardCheck} label="Debrief last interview" message="Run interview/debrief mode — walk me through debriefing my last interview and closing any gaps it surfaced." />
+        <RunModeButton icon={ShieldAlert} label="Check company red flags" message="Run interview/redflag mode — analyze my interview session notes for this company and flag any risks." />
+        <RunModeButton icon={MailSearch} label="Match an interview invite" message="Run invite-match mode — first ask me to paste the interview-invite email text, then match it to the right row in my tracker." />
       </div>
 
       {profile && <ProfileBanner profile={profile} />}
@@ -57,7 +65,7 @@ export function IntelView({ coach, profile }: { coach: CoachState | null; profil
         {cadence.loading ? (
           <Loading label="Computing cadence…" />
         ) : cadence.entries.length === 0 ? (
-          <Empty>No follow-ups due.</Empty>
+          <EmptyState size="sm" description="No follow-ups due." />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border">
             <table className="w-full text-left text-sm">
@@ -109,7 +117,7 @@ export function IntelView({ coach, profile }: { coach: CoachState | null; profil
       {/* Coach state */}
       {!coach ? (
         <Section icon={BookOpen} title="Interview coach">
-          <Empty>No coaching state found (interview-coach-skill not set up for this candidate).</Empty>
+          <EmptyState size="sm" description="No coaching state found (interview-coach-skill not set up for this candidate)." />
         </Section>
       ) : (
         <>
@@ -263,7 +271,7 @@ export function IntelView({ coach, profile }: { coach: CoachState | null; profil
       )}
 
       <CvSection />
-    </div>
+    </PageShell>
   );
 }
 
@@ -291,7 +299,7 @@ function CvSection() {
           {state.loading ? (
             <Loading label="Loading CV…" />
           ) : !state.content.trim() ? (
-            <Empty>No cv.md found for this candidate.</Empty>
+            <EmptyState size="sm" description="No cv.md found for this candidate." />
           ) : (
             <article className="report-prose rounded-2xl border border-border bg-surface/40 p-5">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{state.content}</ReactMarkdown>
@@ -365,20 +373,6 @@ function ProfileBanner({ profile }: { profile: ProfileMeta }) {
   );
 }
 
-/** Opens the assistant console and pre-seeds it with a mode request — reuses the
- *  existing "co-assistant" CustomEvent kickoff (see onboarding-banner.tsx) instead
- *  of building a bespoke UI for each CLI-only mode. */
-function RunModeButton({ icon: Icon, label, message }: { icon: React.ComponentType<{ className?: string }>; label: string; message: string }) {
-  return (
-    <button
-      onClick={() => window.dispatchEvent(new CustomEvent("co-assistant", { detail: { message } }))}
-      className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:bg-brand-soft hover:text-brand"
-    >
-      <Icon className="size-3.5" /> {label}
-    </button>
-  );
-}
-
 function Section({ icon: Icon, title, children }: { icon: React.ComponentType<{ className?: string }>; title: string; children: React.ReactNode }) {
   return (
     <section className="mt-8">
@@ -391,7 +385,7 @@ function Section({ icon: Icon, title, children }: { icon: React.ComponentType<{ 
 }
 
 function Bullets({ items, muted }: { items: string[]; muted?: boolean }) {
-  if (items.length === 0) return <Empty>—</Empty>;
+  if (items.length === 0) return <EmptyState size="sm" description="—" />;
   return (
     <ul className="space-y-1">
       {items.map((it, i) => (
@@ -405,8 +399,4 @@ function Bullets({ items, muted }: { items: string[]; muted?: boolean }) {
 
 function Loading({ label }: { label: string }) {
   return <p className="flex items-center gap-2 text-sm text-faint"><Loader2 className="size-4 animate-spin" /> {label}</p>;
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="rounded-xl border border-dashed border-border bg-surface/30 px-4 py-6 text-center text-sm text-muted">{children}</p>;
 }
