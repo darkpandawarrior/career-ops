@@ -4,8 +4,9 @@ import { engineRoot, engineScript } from "@/lib/career-ops";
 /**
  * Spawn the engine's onboarding bridge (onboarding-cli.mjs at the career-ops
  * root) — the same "spawn the real engine, never reimplement it" pattern as
- * /api/run. The CLI lives in the engine root (where dashboard-web/onboarding +
- * its deps live); we pass JSON on stdin and read one JSON object on stdout.
+ * /api/run. The CLI lives in the engine root (career-ops/onboarding-cli.mjs);
+ * its onboarding engine modules now live in web/src/lib/onboarding/ alongside
+ * this file.
  *
  * `extraArgs` carries the target data root for the write step (activate), so
  * onboarding writes into the ACTIVE profile (resolved by the caller via

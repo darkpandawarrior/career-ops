@@ -5,13 +5,13 @@ import path from 'node:path';
 
 import * as yaml from 'js-yaml';
 
-import ashbyProvider from '../../providers/ashby.mjs';
-import greenhouseProvider from '../../providers/greenhouse.mjs';
-import leverProvider from '../../providers/lever.mjs';
-import recruiteeProvider from '../../providers/recruitee.mjs';
-import smartRecruitersProvider from '../../providers/smartrecruiters.mjs';
-import workableProvider from '../../providers/workable.mjs';
-import workdayProvider from '../../providers/workday.mjs';
+import ashbyProvider from '../../../../providers/ashby.mjs';
+import greenhouseProvider from '../../../../providers/greenhouse.mjs';
+import leverProvider from '../../../../providers/lever.mjs';
+import recruiteeProvider from '../../../../providers/recruitee.mjs';
+import smartRecruitersProvider from '../../../../providers/smartrecruiters.mjs';
+import workableProvider from '../../../../providers/workable.mjs';
+import workdayProvider from '../../../../providers/workday.mjs';
 import { normalizeJob } from '../scoring/scorer.mjs';
 import { validateJobSearchConfig } from './config-schema.mjs';
 import { buildSearchPlan } from './query-builder.mjs';

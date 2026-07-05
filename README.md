@@ -44,18 +44,14 @@ HireSignal extends that foundation with a **local web dashboard** that helps a c
 
 > **The intent is simple: fewer random applications, more informed decisions.**
 
-### Two dashboards
+### The dashboard
 
-HireSignal ships **two** dashboards over the same local data and the same engine:
-
-| | `web/` — **the 2.0 dashboard** (recommended) | `dashboard-web/` — legacy |
-|---|---|---|
-| Stack | Next.js 16 · React 19 · TypeScript 6 · Tailwind 4 (SSR/App Router) | vanilla Node `http` + vanilla JS |
-| Multi-profile | ✅ `?profile=slug` registry + switcher | ✅ `?profile=slug` |
-| Scoring | in-process (pure functions, deterministic) | in-process |
-| Surface | Today command center · Board · Pipeline · Ops · Intel · Portals · Analytics · CV · Onboarding · ⌘K palette | Jobs · Tracker · Ops · Intel tabs |
-
-The `web/` app is the **fusion**: it takes the modern career-ops 2.0 web experience and ports HireSignal's superior features (multi-profile routing, the scoring engine as a library, resume onboarding, branding) onto it — then builds past the legacy dashboard. The legacy `dashboard-web/` remains for reference. **The rest of this README's "modern dashboard" notes describe `web/`.**
+HireSignal ships one dashboard over your local data and engine: `web/` — Next.js
+16 · React 19 · TypeScript 6 · Tailwind 4 (SSR/App Router), with multi-profile
+routing (`?profile=slug` registry + switcher), in-process scoring, and a full
+surface (Today command center · Board · Pipeline · Ops · Intel · Portals ·
+Analytics · CV · Onboarding · ⌘K palette). **This README's "modern dashboard"
+notes describe `web/`.**
 
 ---
 
@@ -174,14 +170,7 @@ CAREER_OPS_ROOT=/path/to/your/career-ops npm run dev
 `npm run typecheck` and `npm run build` validate the app. A throwaway build dir is
 available via `BUILD_DIST=.next-prod npm run build` (won't clobber a live dev `.next`).
 
-### The legacy dashboard (`dashboard-web/`)
-
-```bash
-npm install
-npm run dashboard:web       # → http://127.0.0.1:4173
-```
-
-Either dashboard guides you through: upload a resume PDF → review the extracted
+The dashboard guides you through: upload a resume PDF → review the extracted
 evidence → activate a local profile → run a first job search → review ranked
 opportunities.
 
@@ -195,11 +184,9 @@ cd web && npm run dev       # Next.js dev server (http://localhost:3000)
 cd web && npm run build     # production build  ·  npm start to serve
 cd web && npm run typecheck # tsc --noEmit
 
-# engine / legacy (from the repo root)
+# engine (from the repo root)
 npm run doctor              # Check required career-ops setup files
-npm run dashboard:web       # Start the legacy web dashboard (port 4173)
-npm run dashboard:check     # Run dashboard tests
-npm run dashboard:audit     # Check private-data boundaries
+npm run audit:private-data  # Check private-data boundaries
 npm run scan                # Run the zero-token career-ops scanner
 npm run scan:full           # Reverse-discover jobs from public ATS APIs
 npm run tracker             # Open the career-ops tracker
@@ -238,7 +225,7 @@ query-builder.mjs ◀───────────────────�
               └─▶ scorer.mjs  (skills × experience × availability)
                     └─▶ data/job-dashboard.json
                           └─▶ dashboard review
-                                └─▶ resume-tailor.mjs
+                                └─▶ generate-pdf.mjs  (/career-ops pdf mode)
                                       └─▶ output/tailored-resumes/
 ```
 
@@ -249,15 +236,14 @@ Private candidate data stays in the local user layer throughout. System-layer co
 ## Project Structure
 
 ```text
-web/                      The 2.0 dashboard (Next.js 16 / React 19 / TS 6 / Tailwind 4)
+web/                      The dashboard (Next.js 16 / React 19 / TS 6 / Tailwind 4)
   src/app/                App Router pages + API routes (/api/jobs, /api/onboarding, …)
   src/components/         board · home · ops · intel · onboarding · ui · command palette
   src/lib/                profile-registry · career-ops readers · jobs/scoring · coach …
+    onboarding/           onboarding engine (profile-inference, profile-writer, resume-*, pdf-layout)
+    scoring/  search/     canonical scorer + search config/query-builder/job-search-runner
   middleware? → src/proxy.ts   ?profile=slug → x-co-profile (Next 16 proxy convention)
   docs/hiresignal-fusion.md    the migration log
-
-dashboard-web/            Legacy dashboard (vanilla Node http + JS)
-  public/  onboarding/  scoring/  search/  test/
 
 onboarding-cli.mjs        Bridge: resume infer / extract (pdf) / activate
 job-search-cli.mjs        Bridge: real ATS/feed crawl → scored job-dashboard.json
@@ -376,8 +362,8 @@ git diff --name-status dev..upstream-review
 # Port only useful runtime changes
 git checkout dev
 git checkout upstream-review -- scan.mjs scan-ats-full.mjs providers modes templates
-npm run dashboard:check
-npm run dashboard:audit
+cd web && npm run test:engine && cd ..
+npm run audit:private-data
 ```
 
 Prefer scanner, provider, liveness, mode, template, parser, and safety fixes. Avoid reintroducing: GitHub workflows, Release Please config, Docker/Nix packaging, demo assets, examples, scaffolder files, non-Codex CLI adapters.
@@ -394,7 +380,7 @@ HireSignal is local-first. Nothing leaves the machine.
 - Dashboard code must not commit private candidate data
 
 ```bash
-npm run dashboard:audit   # verify data boundaries are intact
+npm run audit:private-data   # verify data boundaries are intact
 ```
 
 ---

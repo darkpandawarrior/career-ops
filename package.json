@@ -38,9 +38,7 @@
     "archive": "node archive-posting.mjs",
     "prepare:application": "node prepare-application.mjs",
     "trust:test": "node test-trust-validator.mjs",
-    "dashboard:web": "node dashboard-web/server.mjs",
-    "dashboard:check": "node --test dashboard-web/test/*.test.mjs",
-    "dashboard:audit": "node dashboard-web/private-data-audit.mjs",
+    "audit:private-data": "node private-data-audit.mjs",
     "postinstall": "npx playwright install chromium --with-deps || echo 'Playwright optional — only needed for browser-based portal scanning. Run: npx playwright install chromium'"
   },
   "keywords": ["ai", "job-search", "claude-code", "opencode", "career", "hiresignal", "career-ops", "careerops", "automation"],
@@ -50,7 +48,6 @@
   "license": "MIT",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "busboy": "^1.6.0",
     "dotenv": "^17.0.0",
     "js-yaml": "^5.1.0",
     "pdfjs-dist": "^6.0.227",

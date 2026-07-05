@@ -14,7 +14,7 @@ import {
   rollbackProfileReplacement,
   validateGeneratedFiles,
 } from '../onboarding/profile-writer.mjs';
-import { validatePortalsConfig } from '../../validate-portals.mjs';
+import { validatePortalsConfig } from '../../../../validate-portals.mjs';
 
 const DRAFT_ID = '12345678-1234-4234-8234-123456789012';
 

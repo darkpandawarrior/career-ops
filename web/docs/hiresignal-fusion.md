@@ -1,8 +1,9 @@
 # HireSignal "2.0 Fusion" — migration log
 
-Porting HireSignal's superior features (multi-profile routing, scoring engine,
+Ported HireSignal's superior features (multi-profile routing, scoring engine,
 onboarding) onto the modern career-ops 2.0 Next.js app (`web/`), replacing the
-legacy vanilla-Node dashboard (`dashboard-web/`).
+legacy vanilla-Node dashboard (`dashboard-web/`, since deleted — `web/` is now
+the only dashboard).
 
 Tracking the plan at
 `AgentHarness/plans/hiresignal/2026-06-29-2.0-rc-eval-migration.md`.
@@ -30,7 +31,7 @@ or an absent/invalid/unknown slug, falls back to the existing single-profile
 **Mechanism**
 
 - `profiles.yml` at the data root maps `slug → { display_name, root, color }`
-  (root relative to `careerOpsRoot()`), mirroring the legacy
+  (root relative to `careerOpsRoot()`), mirroring the now-retired legacy
   `dashboard-web/server.mjs` registry.
 - `web/middleware.ts` reads `?profile`, sanitizes the slug (`^[a-z0-9_-]+$`), and
   forwards it as the `x-co-profile` request header (stripping any client-supplied
@@ -55,11 +56,13 @@ Phase 0 would risk data corruption.
 The 2.0 app delegated scoring to the CLI. This restores **deterministic,
 in-process** scoring by importing HireSignal's pure scoring functions directly.
 
-- **Vendored byte-identical** from `dashboard-web` (see
-  `web/src/lib/scoring/VENDORED.md`): `scoring/{scorer,compensation,eligibility,
-  experience}.mjs`, `search/{config-schema,query-builder,source-registry}.mjs`.
-  Kept verbatim so scoring never drifts from the CLI/legacy dashboard. (Copied,
-  not cross-imported, because Next's production file tracer scopes to `web/`.)
+- **Vendored byte-identical** from the (now-retired) `dashboard-web`:
+  `scoring/{scorer,compensation,eligibility,experience}.mjs`,
+  `search/{config-schema,query-builder,source-registry}.mjs`. Once
+  `dashboard-web/` was deleted, these became the sole canonical copies — the
+  root CLI scripts (`job-search-cli.mjs`, `onboarding-cli.mjs`) import them
+  directly from here. (Copied, not cross-imported, because Next's production
+  file tracer scopes to `web/`.)
 - **Typed boundary:** adjacent `*.d.mts` declarations + `web/src/lib/jobs/types.ts`
   let `tsc` check the JS boundary while SWC bundles the real `.mjs`.
 - **Facade** `web/src/lib/jobs/scoring.ts` — `scoreJobs`, `scoreOne`,
@@ -72,8 +75,9 @@ in-process** scoring by importing HireSignal's pure scoring functions directly.
 **Verification:** `npm run typecheck` + `npm run build` pass. Against a temp
 two-profile root: the default Android config scores an Android role 8/Strong;
 `alice`'s iOS config gates the same role (excluded Kotlin). Search-plan emits 108
-queries. Output is deterministic. A parity test confirms the vendored
-`normalizeJob` is byte-identical to the legacy one for the same inputs.
+queries. Output is deterministic. A parity test confirmed `normalizeJob` was
+byte-identical to the legacy `dashboard-web` copy for the same inputs (before
+that copy was deleted).
 
 ## Phase 3 — Scored job board
 
@@ -129,7 +133,8 @@ spawn bridge (the `/api/run` pattern — never reimplemented).
 ## Full legacy migration (Ops, Intel, job search, control)
 
 Beyond Phases 0–5, the remaining legacy dashboard surfaces were ported so the 2.0
-app is a superset of `dashboard-web`, and turned into a single control center:
+app became a superset of `dashboard-web` (since deleted), turned into a single
+control center:
 
 - **Ops** (`/ops`) — scan-history table (`scan-history.tsv`), the operations
   console (scan / scan+verify / liveness / pipeline-health, spawning the real

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:engine": "node --test src/lib/onboarding/*.test.mjs src/lib/search/*.test.mjs src/lib/scoring/*.test.mjs"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.76",
@@ -20,6 +21,7 @@
     "js-yaml": "^4.2.0",
     "lucide-react": "^1.23.0",
     "next": "16.2.10",
+    "pdfjs-dist": "^6.0.227",
     "playwright-core": "^1.61.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",

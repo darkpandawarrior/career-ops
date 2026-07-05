@@ -38,14 +38,14 @@ The role-adaptive data model (archetypes, role-neutral sections) lives in
 | `company.ts` | Pure company name → domain / monogram logo helpers |
 | `commands.ts` / `nav-items.ts` / `portals-meta.ts` / `profile-meta.ts` | ⌘K command catalog, primary nav source-of-truth, `portals.yml` / `config/profile.yml` read-only meta |
 | `cn.ts` / `fonts.ts` | Tailwind class joiner; `next/font` definitions |
-| `scoring/` | Vendored A–G scorer (`.mjs`, byte-identical to `dashboard-web/`; see `VENDORED.md`) — compensation / eligibility / experience |
-| `search/` | Vendored config schema, query builder, ATS `SOURCE_REGISTRY` |
+| `scoring/` | Canonical A–G scorer (`.mjs`) — compensation / eligibility / experience. Single source of truth; the root CLI imports it directly from here. |
+| `search/` | Canonical search config schema, query builder, ATS `SOURCE_REGISTRY`, and the job-search runner. Single source of truth; the root CLI imports it directly from here. |
 | `jobs/` | TS types + scoring glue over the vendored `.mjs` engine |
 | `core/` | Server-only Explorer plumbing: ATS scan, portals, pipeline writes, discovery, atomic `safe-write` |
 | `report/` | In-app bug reporter: error ring buffer + PII-scrubbing GitHub-issue payload |
 | `cv/` | Client-safe, zero-token CV readiness signal (advisory, never blocks) |
 | `apply/` | Agentic auto-apply: Playwright session, field extraction, the observe→act drive loop, diagnostics |
-| `onboarding/` | Spawns the engine's onboarding bridge (`onboarding-cli.mjs`) and reads back one JSON object |
+| `onboarding/` | `run.ts`/`catalog.ts` spawn the engine's onboarding bridge (`onboarding-cli.mjs`) and read back one JSON object; the rest of this folder (`profile-inference.mjs`, `profile-writer.mjs`, `resume-extractor.mjs`, `resume-normalizer.mjs`, `pdf-layout.mjs`) is the onboarding engine itself, imported directly by `onboarding-cli.mjs` |
 | `portfolio/` | Portfolio-site generator (schema → render → scaffold → zip) |
 
 ## Conventions
@@ -55,9 +55,11 @@ The role-adaptive data model (archetypes, role-neutral sections) lives in
 - **Pure vs node-only is deliberate.** Files with no `node:` imports (`format`,
   `company`, `explore*`, `cv/quality`) are client-safe and shared both ways; fs-touching
   logic stays in `career-ops.ts` / `core/`.
-- **The engine is spawned, never reimplemented.** `core/`, `onboarding/`, and the
-  CLI bridges shell out to the canonical `.mjs` scripts; the scorer under `scoring/`
-  is a vendored verbatim copy (do not hand-edit — see `scoring/VENDORED.md`).
+- **`scoring/` and `search/` are the canonical engine, not a copy.** The root CLI
+  scripts (`job-search-cli.mjs`, `onboarding-cli.mjs`) import them directly from
+  here, and so does the onboarding engine under `onboarding/`. `core/` and the
+  onboarding *bridge* (`run.ts`) still spawn `onboarding-cli.mjs` / other root
+  `.mjs` scripts as subprocesses rather than reimplementing their orchestration.
 - **All user-data writes are atomic** (`core/safe-write.ts`) and reject table-breaking
   chars; AI/untrusted output is coerced and escaped before it lands.
 - Subdirectories `cv/`, `jobs/`, `core/`, and `portfolio/` carry their own READMEs.

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // job-search-cli.mjs — headless bridge the web "Refresh jobs" action spawns.
-// Runs the REAL job-search engine (dashboard-web/search/job-search-runner.mjs
+// Runs the REAL job-search engine (web/src/lib/search/job-search-runner.mjs
 // refreshJobSearch): scans tracked portals, fetches ATS + remote feeds, runs the
 // configured search queries, scores everything, and writes data/job-dashboard.json
 // into the target root. Emits NDJSON progress on stdout so the web can stream it.
@@ -12,7 +12,7 @@
 //
 // Child scan/feed logs are redirected to stderr so stdout stays clean NDJSON.
 
-import { refreshJobSearch } from "./dashboard-web/search/job-search-runner.mjs";
+import { refreshJobSearch } from "./web/src/lib/search/job-search-runner.mjs";
 
 const root = process.argv[2] || process.env.CAREER_OPS_ROOT || process.cwd();
 const emit = (o) => process.stdout.write(JSON.stringify(o) + "\n");
