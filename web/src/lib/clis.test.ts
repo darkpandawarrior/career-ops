@@ -55,11 +55,17 @@ describe("KNOWN registry", () => {
     }
   });
 
-  it("args(prompt) appends the prompt as the final argv element", () => {
+  it("args(prompt) appends the prompt as the final argv element, except for stdin-fed CLIs", () => {
     for (const c of KNOWN) {
       const argv = c.args("do the thing");
       expect(Array.isArray(argv)).toBe(true);
-      expect(argv[argv.length - 1]).toBe("do the thing");
+      if (c.promptViaStdin) {
+        // The prompt is piped to child.stdin instead (see api/cv/ingest and
+        // api/portfolio/generate) — argv never carries it for this CLI.
+        expect(argv).not.toContain("do the thing");
+      } else {
+        expect(argv[argv.length - 1]).toBe("do the thing");
+      }
     }
   });
 

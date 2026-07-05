@@ -6,18 +6,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *     `<cwd>/../VERSION` then `<cwd>/VERSION` (first readable non-empty wins).
  *   - channel: derived from a pre-release suffix (-rc/-beta/-alpha/-next),
  *     else "stable".
- *   - sha: `git rev-parse --short HEAD` via execSync, "" on failure.
+ *   - sha: read from a build-time env var (VERCEL_GIT_COMMIT_SHA, then
+ *     NEXT_PUBLIC_GIT_SHA, then GIT_COMMIT_SHA), truncated to 7 chars, "" if
+ *     none are set. Deliberately NOT `execSync("git ...")` — that shelled out
+ *     during Next's build-time trace phase (see d2d6f4b).
  *
- * Both fs.readFileSync and child_process.execSync are mocked so nothing touches
- * the real filesystem or spawns git — fully deterministic and hermetic.
+ * fs.readFileSync is mocked so nothing touches the real filesystem; the env
+ * vars are saved/restored per test so nothing leaks between them.
  */
 
-// Hoisted holder so the mock factories can reference shared spies (no TDZ).
+// Hoisted holder so the mock factory can reference the shared spy (no TDZ).
 const h = vi.hoisted(() => ({
   // Map of absolute VERSION path -> contents (or a sentinel to throw).
   files: new Map<string, string>(),
   readFileSyncMock: vi.fn(),
-  execSyncMock: vi.fn(),
 }));
 
 h.readFileSyncMock.mockImplementation((p: string) => {
@@ -34,12 +36,6 @@ vi.mock("node:fs", async (importOriginal) => {
   return { ...actual, default: { ...actual, readFileSync }, readFileSync };
 });
 
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  const execSync = (...args: unknown[]) => h.execSyncMock(...args);
-  return { ...actual, default: { ...actual, execSync }, execSync };
-});
-
 import path from "node:path";
 import { GET } from "./route";
 
@@ -52,28 +48,35 @@ function setVersionFile(which: "parent" | "local", contents: string) {
   h.files.set(which === "parent" ? PARENT : LOCAL, contents);
 }
 
+const SHA_VARS = ["VERCEL_GIT_COMMIT_SHA", "NEXT_PUBLIC_GIT_SHA", "GIT_COMMIT_SHA"] as const;
+let savedEnv: Record<string, string | undefined>;
+
 beforeEach(() => {
   h.files.clear();
   h.readFileSyncMock.mockClear();
-  h.execSyncMock.mockClear();
-  // Default: git returns a clean short sha (overridable per test).
-  h.execSyncMock.mockReturnValue(Buffer.from("abc1234\n"));
+  savedEnv = Object.fromEntries(SHA_VARS.map((k) => [k, process.env[k]]));
+  for (const k of SHA_VARS) delete process.env[k];
 });
 
 afterEach(() => {
+  for (const k of SHA_VARS) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedEnv[k];
+  }
   vi.clearAllMocks();
 });
 
 describe("GET /api/version", () => {
   it("reads version from the PARENT VERSION file and reports the git short sha", async () => {
     setVersionFile("parent", "1.2.3\n");
+    process.env.VERCEL_GIT_COMMIT_SHA = "abc1234extra";
     const body = await (await GET()).json();
     expect(body).toEqual({ version: "1.2.3", channel: "stable", sha: "abc1234" });
   });
 
-  it("trims the sha output (whitespace/newline stripped)", async () => {
+  it("truncates the sha to 7 characters", async () => {
     setVersionFile("parent", "1.0.0");
-    h.execSyncMock.mockReturnValue(Buffer.from("  deadbee \n"));
+    process.env.VERCEL_GIT_COMMIT_SHA = "deadbeefcafe";
     const body = await (await GET()).json();
     expect(body.sha).toBe("deadbee");
   });
@@ -157,38 +160,41 @@ describe("GET /api/version", () => {
     expect(body.channel).toBe("stable");
   });
 
-  it("returns sha \"\" when git fails (execSync throws → catch fallback)", async () => {
+  it("returns sha \"\" when no build-time sha env var is set", async () => {
     setVersionFile("parent", "1.0.0");
-    h.execSyncMock.mockImplementation(() => {
-      throw new Error("git not a repository");
-    });
     const body = await (await GET()).json();
     expect(body).toEqual({ version: "1.0.0", channel: "stable", sha: "" });
   });
 
-  it("invokes git rev-parse --short HEAD with cwd and stdio config", async () => {
+  it("VERCEL_GIT_COMMIT_SHA takes priority over the other two", async () => {
     setVersionFile("parent", "1.0.0");
-    await GET();
-    expect(h.execSyncMock).toHaveBeenCalledTimes(1);
-    const [cmd, opts] = h.execSyncMock.mock.calls[0] as [string, Record<string, unknown>];
-    expect(cmd).toBe("git rev-parse --short HEAD");
-    expect(opts.cwd).toBe(process.cwd());
-    expect(opts.stdio).toEqual(["ignore", "pipe", "ignore"]);
+    process.env.VERCEL_GIT_COMMIT_SHA = "vercel1";
+    process.env.NEXT_PUBLIC_GIT_SHA = "nextpub";
+    process.env.GIT_COMMIT_SHA = "gitcomm";
+    const body = await (await GET()).json();
+    expect(body.sha).toBe("vercel1");
   });
 
-  it("still reports the sha even when there is no VERSION file (independent paths)", async () => {
-    // version "" but git still queried and returned.
-    h.execSyncMock.mockReturnValue(Buffer.from("face123\n"));
+  it("falls back to NEXT_PUBLIC_GIT_SHA when VERCEL_GIT_COMMIT_SHA is unset", async () => {
+    setVersionFile("parent", "1.0.0");
+    process.env.NEXT_PUBLIC_GIT_SHA = "nextpub";
+    process.env.GIT_COMMIT_SHA = "gitcomm";
     const body = await (await GET()).json();
-    expect(body.version).toBe("");
+    expect(body.sha).toBe("nextpub");
+  });
+
+  it("falls back to GIT_COMMIT_SHA when neither of the other two is set", async () => {
+    setVersionFile("parent", "1.0.0");
+    process.env.GIT_COMMIT_SHA = "face123extra";
+    const body = await (await GET()).json();
     expect(body.sha).toBe("face123");
   });
 
-  it("handles a git sha returned as a plain string (not a Buffer)", async () => {
-    setVersionFile("parent", "1.0.0");
-    // execSync may return a string when encoding is set; route calls .toString().
-    h.execSyncMock.mockReturnValue("stringsha\n" as unknown as Buffer);
+  it("still reports the sha even when there is no VERSION file (independent paths)", async () => {
+    // version "" but the sha env var is still read independently.
+    process.env.VERCEL_GIT_COMMIT_SHA = "face123extra";
     const body = await (await GET()).json();
-    expect(body.sha).toBe("stringsha");
+    expect(body.version).toBe("");
+    expect(body.sha).toBe("face123");
   });
 });
