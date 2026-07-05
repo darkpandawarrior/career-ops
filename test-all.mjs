@@ -12,7 +12,7 @@
  */
 
 import { execSync, execFileSync, spawn } from 'child_process';
-import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, symlinkSync } from 'fs';
 import { join, dirname, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -4136,6 +4136,468 @@ try {
 
 } catch (e) {
   fail(`ibm provider tests crashed: ${e.message}`);
+}
+
+console.log('\n26. Provider — beesite');
+
+try {
+  const beesite = (await import(pathToFileURL(join(ROOT, 'providers/beesite.mjs')).href)).default;
+  const { resolveConfig, buildSearchUrl, parseBeesiteDate, parseSearchResult } = await import(pathToFileURL(join(ROOT, 'providers/beesite.mjs')).href);
+
+  if (beesite.id === 'beesite') pass('beesite.id is "beesite"');
+  else fail(`beesite.id is ${JSON.stringify(beesite.id)}`);
+
+  const cfg = resolveConfig({
+    name: 'MB',
+    api: 'https://mercedes-benz-beesite-production-gjb.app.beesite.de',
+    beesite: { languageCode: 'DE', searchCriteria: [{ CriterionName: 'PositionLocation.Country', CriterionValue: [329] }] },
+  });
+  if (cfg && cfg.searchApi === 'https://mercedes-benz-beesite-production-gjb.app.beesite.de/search' && cfg.languageCode === 'DE' && cfg.searchCriteria.length === 1) {
+    pass('beesite.resolveConfig() parses host and passes the beesite config block through');
+  } else {
+    fail(`beesite.resolveConfig() wrong: ${JSON.stringify(cfg)}`);
+  }
+
+  if (beesite.detect({ careers_url: 'https://evil.com/x.beesite.de' }) === null && beesite.detect({ careers_url: 'https://beesite.de.evil.com/x' }) === null) {
+    pass('beesite.detect() rejects path- and suffix-spoofed hosts');
+  } else {
+    fail('beesite.detect() should reject spoofed hosts');
+  }
+
+  // buildSearchUrl() itself just passes firstItem through verbatim — the 1-based
+  // convention (page * PAGE_SIZE + 1) is the caller's responsibility (see fetch()).
+  const url = buildSearchUrl({ searchApi: 'https://x.app.beesite.de/search', languageCode: 'EN', searchCriteria: [] }, 1);
+  if (url.startsWith('https://x.app.beesite.de/search?data=') && decodeURIComponent(url.split('data=')[1]).includes('"FirstItem":1')) {
+    pass('beesite.buildSearchUrl() encodes the given FirstItem');
+  } else {
+    fail(`beesite.buildSearchUrl() wrong: ${url.slice(0, 140)}`);
+  }
+
+  if (parseBeesiteDate('2026-07-04') === Date.UTC(2026, 6, 4) && parseBeesiteDate('junk') === undefined) {
+    pass('beesite.parseBeesiteDate() reads YYYY-MM-DD, rejects junk');
+  } else {
+    fail('beesite.parseBeesiteDate() wrong');
+  }
+
+  const { total, rows } = parseSearchResult({
+    SearchResult: {
+      SearchResultCountAll: 2,
+      SearchResultItems: [
+        { MatchedObjectId: '1', MatchedObjectDescriptor: { PositionID: 'x1', PositionTitle: 'Engineer', PositionURI: 'https://jobs.mercedes-benz.com/1', PositionLocation: [{ CityName: 'Bremen' }], PublicationStartDate: '2026-07-01' } },
+        { MatchedObjectId: '2', MatchedObjectDescriptor: { PositionID: 'x2', PositionTitle: 'No URL' } },
+      ],
+    },
+  });
+  if (total === 2 && rows.length === 1 && rows[0].location === 'Bremen') {
+    pass('beesite.parseSearchResult() maps items, joins cities, drops non-absolute URIs');
+  } else {
+    fail(`beesite.parseSearchResult() wrong: total=${total} rows=${JSON.stringify(rows)}`);
+  }
+
+  const beeCtx = { fetchJson: async () => ({ SearchResult: { SearchResultCountAll: 1, SearchResultItems: [{ MatchedObjectId: '9', MatchedObjectDescriptor: { PositionID: '9', PositionTitle: 'Dev', PositionURI: 'https://jobs.mercedes-benz.com/9', PublicationStartDate: '2026-07-01' } }] } }), sleep: async () => {} };
+  const beeJobs = await beesite.fetch({ name: 'MB', api: 'https://x.app.beesite.de' }, beeCtx);
+  if (beeJobs.length === 1 && beeJobs[0].company === 'MB') pass('beesite.fetch() stops after a short page and tags company from entry.name');
+  else fail(`beesite.fetch() returned ${JSON.stringify(beeJobs)}`);
+} catch (e) {
+  fail(`beesite provider tests crashed: ${e.message}`);
+}
+
+console.log('\n27. Provider — softgarden');
+
+try {
+  const softgarden = (await import(pathToFileURL(join(ROOT, 'providers/softgarden.mjs')).href)).default;
+  const { resolveWidgetUrl, parseSoftgardenDate, parseWidget } = await import(pathToFileURL(join(ROOT, 'providers/softgarden.mjs')).href);
+
+  if (softgarden.id === 'softgarden') pass('softgarden.id is "softgarden"');
+  else fail(`softgarden.id is ${JSON.stringify(softgarden.id)}`);
+
+  if (resolveWidgetUrl({ api: 'https://renk-group.softgarden.io/de/widgets/jobs' }) === 'https://renk-group.softgarden.io/de/widgets/jobs') {
+    pass('softgarden.resolveWidgetUrl() passes through an explicit widget URL');
+  } else {
+    fail('softgarden.resolveWidgetUrl() should pass through an explicit /widgets/jobs URL');
+  }
+
+  if (resolveWidgetUrl({ api: 'https://renk-group.softgarden.io/careers' }) === 'https://renk-group.softgarden.io/de/widgets/jobs') {
+    pass('softgarden.resolveWidgetUrl() defaults to the German widget for a bare tenant URL');
+  } else {
+    fail('softgarden.resolveWidgetUrl() should default to /de/widgets/jobs');
+  }
+
+  if (resolveWidgetUrl({ api: 'https://evil.com/x.softgarden.io' }) === null && resolveWidgetUrl({ api: 'https://softgarden.io.evil.com/x' }) === null) {
+    pass('softgarden.resolveWidgetUrl() rejects path- and suffix-spoofed hosts');
+  } else {
+    fail('softgarden.resolveWidgetUrl() should reject spoofed hosts');
+  }
+
+  if (parseSoftgardenDate('04.07.26') === Date.UTC(2026, 6, 4) && parseSoftgardenDate('7/4/26') === Date.UTC(2026, 6, 4) && parseSoftgardenDate('junk') === undefined) {
+    pass('softgarden.parseSoftgardenDate() reads dotted (D.M.Y) and slashed (M/D/Y) locales, rejects junk');
+  } else {
+    fail('softgarden.parseSoftgardenDate() wrong');
+  }
+
+  const html = `<div class="matchElement" id="job_id_123"><div class="matchValue date">04.07.26</div><div class="matchValue title"><a href="../../job/123/senior-dev?l=de">Senior Dev &amp; Lead</a></div><div class="matchValue ProjectGeoLocationCity"><span class="location-view-item">Munich</span></div></div>`;
+  const rows = parseWidget(html, 'https://renk-group.softgarden.io/de/widgets/jobs');
+  if (rows.length === 1 && rows[0].title === 'Senior Dev & Lead' && rows[0].url === 'https://renk-group.softgarden.io/job/123/senior-dev?l=de' && rows[0].location === 'Munich') {
+    pass('softgarden.parseWidget() extracts title (entity-decoded), resolves relative href, and reads location');
+  } else {
+    fail(`softgarden.parseWidget() wrong: ${JSON.stringify(rows)}`);
+  }
+
+  const sgCtx = { fetchText: async () => html };
+  const sgJobs = await softgarden.fetch({ name: 'RENK', api: 'https://renk-group.softgarden.io/de/widgets/jobs' }, sgCtx);
+  if (sgJobs.length === 1 && sgJobs[0].company === 'RENK') pass('softgarden.fetch() parses the widget page and tags company from entry.name');
+  else fail(`softgarden.fetch() returned ${JSON.stringify(sgJobs)}`);
+} catch (e) {
+  fail(`softgarden provider tests crashed: ${e.message}`);
+}
+
+console.log('\n28. Provider — avature (career-site SearchJobs parser)');
+
+try {
+  const avature = (await import(pathToFileURL(join(ROOT, 'providers/avature.mjs')).href)).default;
+  const { parseArticles } = await import(pathToFileURL(join(ROOT, 'providers/avature.mjs')).href);
+
+  if (avature.id === 'avature') pass('avature.id is "avature"');
+  else fail(`avature.id is ${JSON.stringify(avature.id)}`);
+
+  if (avature.detect({ name: 'X', careers_url: 'https://acme.avature.net/careers/SearchJobs' })) pass('avature.detect() claims a *.avature.net URL');
+  else fail('avature.detect() should claim *.avature.net');
+  if (avature.detect({ name: 'X', careers_url: 'https://evil.example/x.avature.net/y' }) === null) pass('avature.detect() rejects a path-spoofed URL');
+  else fail('avature.detect() must reject path-spoofed URLs');
+
+  // parseArticles — a compact fragment: one article with a locale-prefixed
+  // JobDetail path + a posted date, one with no JobDetail link (dropped).
+  const origin = 'https://acme.avature.net';
+  const fragment = `
+    <article class="article article--result" id="article--1">
+      <div class="article__header"><div class="article__header__text">
+        <h3 class="title"><a class="link" href="https://acme.avature.net/careers/JobDetail/Senior-PLM-Engineer-17304/17304?businessTitle=PLM">Senior PLM Engineer &amp; Architect</a></h3>
+        <div class="article__header__text__subtitle"><span class="list-item-jobId">Job ID 17304</span><span class="list-item-posted">Posted 02-May-2026</span></div>
+      </div></div>
+    </article>
+    <article class="article article--result" id="article--2">
+      <h3 class="title"><a class="link" href="/en_US/searchjobs/JobDetail/Data-Engineer-900/900">Data Engineer</a></h3>
+      <span class="list-item-location">Munich, Germany</span>
+    </article>
+    <article class="article article--result" id="article--3">
+      <h3 class="title"><span>No link here</span></h3>
+    </article>`;
+  const arts = parseArticles(fragment, origin);
+
+  if (arts.length === 2) pass('parseArticles returns 2 articles (link-less one dropped)');
+  else fail(`parseArticles returned ${arts.length}, expected 2`);
+  const a1 = arts.find((a) => a.id === '17304');
+  if (a1 && a1.title === 'Senior PLM Engineer & Architect') pass('parseArticles decodes the title entity');
+  else fail(`parseArticles title wrong: ${JSON.stringify(a1 && a1.title)}`);
+  if (a1 && a1.url === 'https://acme.avature.net/careers/JobDetail/Senior-PLM-Engineer-17304/17304?businessTitle=PLM') pass('parseArticles keeps the absolute JobDetail URL');
+  else fail(`parseArticles url wrong: ${JSON.stringify(a1 && a1.url)}`);
+  if (a1 && a1.postedAt === Date.UTC(2026, 4, 2)) pass('parseArticles parses "Posted 02-May-2026"');
+  else fail(`parseArticles postedAt wrong: ${JSON.stringify(a1 && a1.postedAt)}`);
+  const a2 = arts.find((a) => a.id === '900');
+  if (a2 && a2.url === 'https://acme.avature.net/en_US/searchjobs/JobDetail/Data-Engineer-900/900') pass('parseArticles resolves a relative locale-prefixed JobDetail path');
+  else fail(`parseArticles relative url wrong: ${JSON.stringify(a2 && a2.url)}`);
+  if (a2 && a2.location === 'Munich, Germany') pass('parseArticles extracts a rendered location when present');
+  else fail(`parseArticles location wrong: ${JSON.stringify(a2 && a2.location)}`);
+  if (parseArticles('<div>no articles</div>', origin).length === 0) pass('parseArticles returns [] when no articles present');
+  else fail('parseArticles should return [] for markup with no articles');
+
+  // Tenant markup variants: Siemens appends a position index to the result
+  // class ("article--result 1"); Rohde & Schwarz renders the title anchor with
+  // no class="link". Both must still parse. (Regressions found on live tenants.)
+  const variants = `
+    <article class="article article--result 1" id="article--1">
+      <h3 class="title"><a class="link" href="https://acme.avature.net/en_US/externaljobs/JobDetail/Head-of-PLM/511918">Head of PLM</a></h3>
+    </article>
+    <article class="article article--result" id="article--2">
+      <h3 class="title"><a href="https://acme.avature.net/en_US/careers/JobDetail/Director-Platform/13672">Director Platform Engineering</a></h3>
+    </article>`;
+  const vArts = parseArticles(variants, origin);
+  const vSuffix = vArts.find((a) => a.id === '511918');
+  if (vSuffix && vSuffix.title === 'Head of PLM') pass('parseArticles handles the "article--result 1" class suffix (Siemens)');
+  else fail(`parseArticles missed the class-suffix variant: ${JSON.stringify(vArts.map((a) => a.id))}`);
+  const vNoClass = vArts.find((a) => a.id === '13672');
+  if (vNoClass && vNoClass.title === 'Director Platform Engineering') pass('parseArticles falls back to a JobDetail anchor without class="link" (Rohde & Schwarz)');
+  else fail(`parseArticles missed the no-class-link variant: ${JSON.stringify(vArts.map((a) => a.id))}`);
+
+  // Pagination key — default `jobOffset`, self-heals to `offset` for tenants
+  // that ignore it (Siemens). Mock fetchText with an article-less page so
+  // fetch() stops after one request and we can read the URL it built.
+  const captureFirstUrl = async (entry) => {
+    let firstUrl;
+    const ctx = { sleep: async () => {}, fetchText: async (url) => { if (firstUrl === undefined) firstUrl = url; return '<div>no articles</div>'; } };
+    await avature.fetch(entry, ctx);
+    return firstUrl;
+  };
+  const base = 'https://acme.avature.net/careers/SearchJobs';
+  if (await captureFirstUrl({ name: 'X', api: base }) === `${base}?jobOffset=0`) pass('avature.fetch() defaults pagination to ?jobOffset=N');
+  else fail('avature.fetch() should default to jobOffset');
+  if (await captureFirstUrl({ name: 'X', api: base, offset_param: 'offset' }) === `${base}?offset=0`) pass('avature.fetch() honours offset_param override (Siemens: ?offset=N)');
+  else fail('avature.fetch() should use offset_param when set');
+  if (await captureFirstUrl({ name: 'X', api: base, offset_param: '  ' }) === `${base}?jobOffset=0`) pass('avature.fetch() falls back to jobOffset for a blank offset_param');
+  else fail('avature.fetch() should ignore a blank offset_param');
+
+  // Self-heal — jobOffset→offset when the primary key is inert.
+  const originB = 'https://acme.avature.net';
+  const mkHtml = (ids) => ids.map((id) =>
+    `<article class="article article--result"><h3 class="title"><a class="link" href="${originB}/careers/JobDetail/Role-${id}/${id}">Role ${id}</a></h3></article>`).join('');
+  // Build a ctx whose fetchText answers from a {param: (pageIndex)=>ids} map.
+  const mkCtx = () => {
+    const calls = [];
+    let sleeps = 0;
+    const ctx = {
+      sleep: async () => { sleeps += 1; },
+      fetchText: async (url) => {
+        calls.push(url);
+        const u = new URL(url);
+        const jo = u.searchParams.get('jobOffset');
+        const of = u.searchParams.get('offset');
+        if (jo !== null) return mkHtml([1, 2, 3, 4, 5, 6]); // jobOffset inert: always page 0
+        if (of !== null) {
+          const n = Number(of) / 6;
+          if (n === 0) return mkHtml([1, 2, 3, 4, 5, 6]);
+          if (n === 1) return mkHtml([7, 8, 9, 10, 11, 12]); // offset advances
+          if (n === 2) return mkHtml([13, 14]); // partial → last page
+          return mkHtml([]);
+        }
+        return '<div>no articles</div>';
+      },
+    };
+    return { ctx, calls, sleeps: () => sleeps };
+  };
+  const heal = mkCtx();
+  const healed = await avature.fetch({ name: 'X', api: base }, heal.ctx);
+  if (healed.length === 14) pass('avature.fetch() self-heals jobOffset→offset and walks the full board (14 jobs)');
+  else fail(`avature.fetch() self-heal wrong count: ${healed.length} (expected 14)`);
+  if (heal.calls.some((u) => /[?&]offset=/.test(u))) pass('avature.fetch() self-heal retries with ?offset=N');
+  else fail('avature.fetch() self-heal should retry with offset');
+  if (heal.sleeps() > 0) pass('avature.fetch() throttles between pages (sleep called)');
+  else fail('avature.fetch() should sleep between pages');
+
+  // No self-heal when jobOffset works: offset= must never be requested.
+  const workingCtx = {
+    calls: [],
+    sleep: async () => {},
+    fetchText: async function (url) {
+      this.calls.push(url);
+      const n = Number(new URL(url).searchParams.get('jobOffset')) / 6;
+      if (n === 0) return mkHtml([1, 2, 3, 4, 5, 6]);
+      if (n === 1) return mkHtml([7, 8, 9, 10, 11, 12]);
+      return mkHtml([13, 14]); // last (partial)
+    },
+  };
+  const worked = await avature.fetch({ name: 'X', api: base }, workingCtx);
+  if (worked.length === 14 && workingCtx.calls.every((u) => /[?&]jobOffset=/.test(u))) pass('avature.fetch() does not self-heal when jobOffset already advances');
+  else fail(`avature.fetch() spurious self-heal: ${worked.length} jobs, calls ${JSON.stringify(workingCtx.calls.map((u) => u.split('?')[1]))}`);
+
+  // Self-heal must fire even when the inert primary key returns an EMPTY page 1
+  // (not a repeat of page 0) — the empty-page break must not pre-empt the heal.
+  const emptyP1Ctx = {
+    calls: [],
+    sleep: async () => {},
+    fetchText: async function (url) {
+      this.calls.push(url);
+      const u = new URL(url);
+      const jo = u.searchParams.get('jobOffset');
+      const of = u.searchParams.get('offset');
+      if (jo !== null) return Number(jo) === 0 ? mkHtml([1, 2, 3, 4, 5, 6]) : mkHtml([]); // page 1+ empty
+      if (of !== null) {
+        const n = Number(of) / 6;
+        if (n === 1) return mkHtml([7, 8, 9, 10, 11, 12]);
+        if (n === 2) return mkHtml([13, 14]);
+        return mkHtml([]);
+      }
+      return '<div>no articles</div>';
+    },
+  };
+  const emptyHealed = await avature.fetch({ name: 'X', api: base }, emptyP1Ctx);
+  if (emptyHealed.length === 14 && emptyP1Ctx.calls.some((u) => /[?&]offset=/.test(u))) pass('avature.fetch() self-heals when the inert key returns an empty page 1');
+  else fail(`avature.fetch() failed to heal empty page 1: ${emptyHealed.length} jobs`);
+} catch (e) {
+  fail(`avature provider tests crashed: ${e.message}`);
+}
+
+console.log('\n29. Provider — successfactors (RMK tile scraper + CSB fallback)');
+
+try {
+  const successfactors = (await import(pathToFileURL(join(ROOT, 'providers/successfactors.mjs')).href)).default;
+  const { parseTiles, extractLocales, parseCsbDate, cleanCsbLocation, parseCsbJobs } =
+    await import(pathToFileURL(join(ROOT, 'providers/successfactors.mjs')).href);
+
+  if (successfactors.id === 'successfactors') pass('successfactors.id is "successfactors"');
+  else fail(`successfactors.id is ${JSON.stringify(successfactors.id)}`);
+
+  if (successfactors.detect({ careers_url: 'https://career5.successfactors.eu/career' })) pass('successfactors.detect() claims a *.successfactors.eu URL');
+  else fail('successfactors.detect() should claim successfactors.eu');
+  if (successfactors.detect({ careers_url: 'https://jobs.zf.com/search/' }) === null) pass('successfactors.detect() does not auto-claim a branded RMK host with no successfactors/jobs2web string');
+  else fail('successfactors.detect() must require an explicit provider: for branded RMK hosts');
+
+  // RMK tile parsing
+  const tileHtml = `<li class="job-tile job-id-1001"><a class="jobTitle-link" data-url="/job/Munich-Senior-Engineer-REQ1/1001/">Senior Engineer &amp; Lead</a></li>` +
+    `<li class="job-tile job-id-1002"><a class="jobTitle-link" data-url="https://jobs.zf.com/job/Berlin-Analyst-2/1002/">Analyst</a><div id="x-section-city-value">Berlin</div></li>`;
+  const tiles = parseTiles(tileHtml, 'https://jobs.zf.com');
+  if (tiles.length === 2) pass('parseTiles returns 2 tiles');
+  else fail(`parseTiles returned ${tiles.length}, expected 2`);
+  const t1 = tiles.find((t) => t.id === '1001');
+  if (t1 && t1.title === 'Senior Engineer & Lead' && t1.url === 'https://jobs.zf.com/job/Munich-Senior-Engineer-REQ1/1001/') {
+    pass('parseTiles decodes the title entity and resolves a relative data-url');
+  } else {
+    fail(`parseTiles tile 1 wrong: ${JSON.stringify(t1)}`);
+  }
+  const t2 = tiles.find((t) => t.id === '1002');
+  if (t2 && t2.location === 'Berlin') pass('parseTiles reads an explicit city field when rendered');
+  else fail(`parseTiles tile 2 location wrong: ${JSON.stringify(t2)}`);
+
+  // CSB helpers
+  if (parseCsbDate('6/18/26') === Date.UTC(2026, 5, 18) && parseCsbDate('20.11.23') === Date.UTC(2023, 10, 20) && parseCsbDate('junk') === undefined) {
+    pass('parseCsbDate reads US slash (M/D/Y) and EU dot (D.M.Y) formats, rejects junk');
+  } else {
+    fail('parseCsbDate wrong');
+  }
+  if (cleanCsbLocation(['Karlovy Vary, CZE, 36004<br/>', 'Karlovy Vary, CZE, 36004<br/>', 'Prague, CZE']) === 'Karlovy Vary, CZE, 36004 / Prague, CZE') {
+    pass('cleanCsbLocation strips markup, dedupes, and joins multiple locations');
+  } else {
+    fail('cleanCsbLocation wrong');
+  }
+  const csbRows = parseCsbJobs(
+    { jobSearchResult: [{ response: { id: 55, unifiedStandardTitle: 'Data Engineer', unifiedUrlTitle: 'data-engineer', jobLocationShort: ['Munich, DEU'], unifiedStandardStart: '6/18/26' } }] },
+    { origin: 'https://careers.example.com' },
+    'en_US',
+  );
+  if (csbRows.length === 1 && csbRows[0].url === 'https://careers.example.com/job/data-engineer/55-en_US' && csbRows[0].postedAt === Date.UTC(2026, 5, 18)) {
+    pass('parseCsbJobs maps id/title/url/postedAt from the jobs API response');
+  } else {
+    fail(`parseCsbJobs wrong: ${JSON.stringify(csbRows)}`);
+  }
+  const locales = extractLocales('<a href="/search/?q=&startrow=0&amp;locale=de_DE">DE</a><a href="/search/?locale=en_US">EN</a>');
+  if (locales[0] === 'de_DE' && locales.includes('en_US')) pass('extractLocales discovers and priority-orders tenant locales');
+  else fail(`extractLocales wrong: ${JSON.stringify(locales)}`);
+
+  // fetch() strategy selection
+  const rmkCtx = { fetchText: async () => tileHtml };
+  const rmkJobs = await successfactors.fetch({ name: 'ZF', api: 'https://jobs.zf.com' }, rmkCtx);
+  if (rmkJobs.length === 2) pass('successfactors.fetch() uses RMK when the tile scraper returns postings');
+  else fail(`successfactors.fetch() RMK path returned ${rmkJobs.length} jobs, expected 2`);
+
+  // A blank RMK page (0 tiles) must fall through to CSB automatically.
+  const fallbackCtx = {
+    fetchText: async () => '',
+    fetchJson: async () => ({ jobSearchResult: [{ response: { id: 9, unifiedStandardTitle: 'CSB Role', unifiedUrlTitle: 'csb-role', unifiedStandardStart: '1/1/26' } }], totalJobs: 1 }),
+  };
+  const fallbackJobs = await successfactors.fetch({ name: 'Tenant', api: 'https://careers.example.com' }, fallbackCtx);
+  if (fallbackJobs.length === 1 && fallbackJobs[0].title === 'CSB Role') pass('successfactors.fetch() auto-falls back to CSB when RMK yields zero postings');
+  else fail(`successfactors.fetch() RMK-empty fallback wrong: ${JSON.stringify(fallbackJobs)}`);
+
+  let rmkCalled = false;
+  const csbForcedCtx = {
+    fetchText: async () => { rmkCalled = true; return ''; }, // only the /search/ locale-discovery call should hit fetchText
+    fetchJson: async () => ({ jobSearchResult: [{ response: { id: 7, unifiedStandardTitle: 'Forced CSB', unifiedUrlTitle: 'x' } }], totalJobs: 1 }),
+  };
+  const forced = await successfactors.fetch({ name: 'Tenant', api: 'https://careers.example.com', sfVariant: 'csb' }, csbForcedCtx);
+  if (forced.length === 1 && forced[0].title === 'Forced CSB') pass('successfactors.fetch() honors an explicit sfVariant: "csb" override, skipping the RMK tile probe');
+  else fail(`successfactors.fetch() explicit CSB override wrong: ${JSON.stringify(forced)}`);
+
+  // ctx.maxPages bounds pages-per-locale even when totalJobs implies more pages
+  // exist. Pin locale discovery to a single locale so the count isolates the
+  // per-locale page cap from the (separate) multi-locale loop.
+  let csbCalls = 0;
+  const boundedCtx = {
+    fetchText: async () => '<a href="/search/?locale=de_DE">DE</a>',
+    fetchJson: async () => { csbCalls++; return { jobSearchResult: [{ response: { id: String(csbCalls), unifiedStandardTitle: `Role ${csbCalls}`, unifiedUrlTitle: 'x' } }], totalJobs: 999 }; },
+    maxPages: 1,
+  };
+  await successfactors.fetch({ name: 'Tenant', api: 'https://careers.example.com', sfVariant: 'csb' }, boundedCtx);
+  if (csbCalls === 1) pass('successfactors.fetch() CSB path honors ctx.maxPages (bounded health-probe budget)');
+  else fail(`successfactors.fetch() CSB path made ${csbCalls} calls under ctx.maxPages:1 with 1 locale, expected 1`);
+} catch (e) {
+  fail(`successfactors provider tests crashed: ${e.message}`);
+}
+
+console.log('\n30. Plugin manifest path containment (symlink traversal)');
+
+try {
+  const { validateManifest } = await import(pathToFileURL(join(ROOT, 'plugins/_engine.mjs')).href);
+
+  const base = { id: 'x', apiVersion: 1, description: 'one line', hooks: ['ingest'], requiredEnv: [], allowedHosts: [], humanInTheLoop: true };
+  const tmp = mkdtempSync(join(tmpdir(), 'co-plugin-manifest-'));
+  const pluginDir = join(tmp, 'x');
+  mkdirSync(pluginDir, { recursive: true });
+  const vm = (m) => validateManifest(m, pluginDir, 'x');
+
+  writeFileSync(join(pluginDir, 'index.mjs'), 'export default {};');
+  if (vm(base) !== null) pass('a well-formed manifest with a real entry file is accepted');
+  else fail('a well-formed manifest should be accepted');
+
+  // Literal ../ traversal (no symlink involved) — already guarded pre-existing.
+  if (vm({ ...base, entry: '../../scan.mjs' }) === null) pass('entry escaping the plugin directory via literal .. is rejected');
+  else fail('literal .. entry traversal should be rejected');
+
+  // Symlink traversal — a symlink INSIDE the plugin dir pointing to a real file
+  // OUTSIDE it. A naive startsWith() on the unresolved path would accept this
+  // (the symlink's own path textually starts with the plugin dir); isContainedIn
+  // must resolve both sides with realpathSync first and reject it.
+  writeFileSync(join(tmp, 'outside.mjs'), 'export default {};');
+  writeFileSync(join(tmp, 'outside.md'), '# outside\n');
+  mkdirSync(join(tmp, 'outside-dir'), { recursive: true });
+  try {
+    symlinkSync(join(tmp, 'outside.mjs'), join(pluginDir, 'linked-entry.mjs'));
+    symlinkSync(join(tmp, 'outside.md'), join(pluginDir, 'linked-skill.md'));
+    symlinkSync(join(tmp, 'outside-dir'), join(pluginDir, 'linked-dir'), 'dir');
+
+    if (vm({ ...base, entry: 'linked-entry.mjs' }) === null) pass('an entry symlink escaping the plugin directory is rejected');
+    else fail('entry symlink traversal should be rejected');
+
+    if (vm({ ...base, skill: 'linked-skill.md' }) === null) pass('a skill symlink escaping the plugin directory is rejected');
+    else fail('skill symlink traversal should be rejected');
+
+    if (vm({ ...base, entry: 'linked-dir/missing-entry.mjs' }) === null) pass('a missing entry under an escaping symlink directory is rejected');
+    else fail('a missing entry under symlink traversal should be rejected');
+  } catch (e) {
+    warn(`symlink traversal test skipped (platform/filesystem does not support symlinks): ${e.message}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`plugin manifest path-containment tests crashed: ${e.message}`);
+}
+
+console.log('\n31. scan.mjs --doctor (read-only health sweep)');
+
+try {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-scan-doctor-'));
+
+  // No portals file at all — must no-op gracefully (fresh setup / CI), same
+  // contract as verify-portals.mjs's own found:false branch.
+  const missingPortals = join(tmp, 'missing-portals.yml');
+  const missingOut = run(NODE, ['scan.mjs', '--doctor'], {
+    env: { ...process.env, CAREER_OPS_PORTALS: missingPortals },
+  });
+  if (missingOut && missingOut.includes('no portals file at') && missingOut.includes('nothing to verify')) {
+    pass('scan --doctor no-ops gracefully when portals.yml is missing');
+  } else {
+    fail(`scan --doctor missing-file output wrong: ${JSON.stringify(missingOut)}`);
+  }
+
+  // Empty tracked_companies — exercises the real CLI wiring (flag parsing,
+  // provider loading, verifyPortalsFile call, report formatting) with zero
+  // network calls, since there's nothing to probe.
+  const emptyPortals = join(tmp, 'portals.yml');
+  writeFileSync(emptyPortals, 'tracked_companies: []\n');
+  const emptyOut = run(NODE, ['scan.mjs', '--doctor'], {
+    env: { ...process.env, CAREER_OPS_PORTALS: emptyPortals },
+  });
+  if (
+    emptyOut &&
+    emptyOut.includes('scan --doctor:') &&
+    emptyOut.includes('0 live, 0 live-but-empty, 0 unresolved, 0 no-provider (skipped)')
+  ) {
+    pass('scan --doctor runs the CLI-wired health sweep and reports zero tracked companies');
+  } else {
+    fail(`scan --doctor empty-companies output wrong: ${JSON.stringify(emptyOut)}`);
+  }
+
+  rmSync(tmp, { recursive: true, force: true });
+} catch (e) {
+  fail(`scan --doctor tests crashed: ${e.message}`);
 }
 
 // ── SUMMARY ─────────────────────────────────────────────────────
