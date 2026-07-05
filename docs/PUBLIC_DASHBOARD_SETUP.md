@@ -14,20 +14,14 @@ npm install
 ## Start the local dashboard
 
 ```powershell
-npm run dashboard:web
+cd web
+npm install
+npm run dev
 ```
 
-Open `http://127.0.0.1:4173`.
-
-To preview the scoring dashboard with fictional data:
-
-```powershell
-$env:CAREER_DASHBOARD_DEMO='1'
-npm run dashboard:web
-```
-
-Demo mode reads only committed fictional fixtures and never creates a private
-profile.
+Open `http://localhost:3000`. To point the app at a different local career-ops
+checkout, set `CAREER_OPS_ROOT` before starting it (otherwise it reads the
+parent checkout).
 
 A clean clone opens PDF resume onboarding. The resume is extracted locally,
 reviewed in an editable wizard, and activated only after explicit confirmation.

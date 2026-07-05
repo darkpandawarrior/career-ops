@@ -32,8 +32,7 @@ profiles:
 - `profiles/`, `sync/`, and `profiles.yml` are **gitignored** — they hold private
   candidate data and must never be committed.
 
-Both the legacy dashboard (`dashboard-web/server.mjs`) and the 2.0 web app
-(`web/src/lib/profile-registry.ts`) read this exact shape.
+The web app (`web/src/lib/profile-registry.ts`) reads this exact shape.
 
 ---
 

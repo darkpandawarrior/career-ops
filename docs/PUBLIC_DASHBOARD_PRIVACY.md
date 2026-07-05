@@ -4,8 +4,7 @@ Career-Ops Dashboard is designed to process career data locally.
 
 - The public repository must contain only system code and fictional examples.
 - Resume and profile files are ignored by Git.
-- The local web server binds to `127.0.0.1` unless the user deliberately changes
-  `CAREER_DASHBOARD_HOST`.
+- The local web server must not be exposed directly to the public internet.
 - The dashboard must never submit a job application automatically.
 - Resume replacement must require review and explicit confirmation.
 - Uploaded files must never be executed.
@@ -17,7 +16,7 @@ Career-Ops Dashboard is designed to process career data locally.
 Before publishing changes:
 
 ```powershell
-npm run dashboard:audit
+npm run audit:private-data
 git status --short
 git diff --check
 ```

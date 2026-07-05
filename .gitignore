@@ -115,7 +115,6 @@ career-dashboard.exe
 # electron-builder output (packaged .app/.dmg/.exe, hundreds of MB)
 desktop/dist/
 data/job-dashboard.json
-data/dashboard-web.*.log
 data/profile-archives/
 data/onboarding-drafts/
 package-lock.json
