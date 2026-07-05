@@ -1,0 +1,75 @@
+titles:
+  strong:
+    - Senior Backend Engineer
+    - Backend Engineer
+  adjacent:
+    - Software Engineer
+    - Platform Engineer
+  exclude:
+    - Frontend Engineer
+
+skills:
+  demonstrated:
+    - Java
+    - Spring Boot
+    - PostgreSQL
+  confirmed_unlisted:
+    - Docker
+  supporting:
+    - Kafka
+    - AWS
+  learning:
+    - Kubernetes
+  recommended_gaps:
+    - Terraform
+  excluded:
+    - React
+
+seniority:
+  minimum_years: 4
+  maximum_years: 8
+  preferred_levels:
+    - Senior
+
+location:
+  home_country: India
+  preferred_locations:
+    - India
+    - Remote
+  search_scopes:
+    - local
+    - remote
+  international_locations: []
+  remote_eligibility_required: true
+  remote_regions:
+    - Worldwide
+    - Global
+    - APAC
+  relocation: open
+  visa_sponsorship_required: false
+
+compensation:
+  home_country:
+    currency: INR
+    minimum_annual: 2500000
+  remote:
+    currency: null
+    minimum_annual: null
+  international:
+    currency: null
+    minimum_annual: null
+
+preferences:
+  domains:
+    - fintech
+  company_types:
+    - product
+  negative_keywords:
+    - agency
+
+weights:
+  title: 30
+  skills: 35
+  experience: 10
+  location: 15
+  preferences: 10
