@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // onboarding-cli.mjs — headless bridge the web onboarding flow spawns (like the
 // /api/run pattern). It runs the REAL resume-inference + profile-generation
-// engine from dashboard-web/onboarding so the web and CLI share one source of
+// engine from web/src/lib/onboarding so the web and CLI share one source of
 // truth (no reimplementation). Text-in / JSON-out, two steps:
 //
 //   node onboarding-cli.mjs infer            < {"text": "...resume text..."}
@@ -18,10 +18,10 @@ import { mkdir, readFile, rename, writeFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { structureResume } from "./dashboard-web/onboarding/resume-normalizer.mjs";
-import { inferProfile, validateReviewDraft } from "./dashboard-web/onboarding/profile-inference.mjs";
-import { generateUserFiles, validateGeneratedFiles } from "./dashboard-web/onboarding/profile-writer.mjs";
-import { extractFile } from "./dashboard-web/onboarding/resume-extractor.mjs";
+import { structureResume } from "./web/src/lib/onboarding/resume-normalizer.mjs";
+import { inferProfile, validateReviewDraft } from "./web/src/lib/onboarding/profile-inference.mjs";
+import { generateUserFiles, validateGeneratedFiles } from "./web/src/lib/onboarding/profile-writer.mjs";
+import { extractFile } from "./web/src/lib/onboarding/resume-extractor.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
