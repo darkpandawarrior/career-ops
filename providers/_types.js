@@ -61,6 +61,12 @@
  * @property {string}             [api]            JSON API URL; used directly by greenhouse/ashby providers.
  * @property {string}             [provider]       Explicit provider id — bypasses detect().
  * @property {('http')}           [transport]      Default: 'http'. Reserved for future transports.
+ * @property {number}             [max_pages]      Provider-specific pagination cap (avature, workday).
+ * @property {string}             [offset_param]   avature only: pins the pagination query key and disables the
+ *                                                 provider's jobOffset→offset self-heal. Rarely needed — an
+ *                                                 escape hatch for a tenant the auto-switch can't resolve.
+ * @property {string}             [sfVariant]      successfactors only: `'csb'` forces the Career Site Builder
+ *                                                 JSON-API strategy directly, skipping the RMK tile probe.
  */
 
 /**
@@ -92,6 +98,10 @@
  * @property {(url: string, opts?: FetchOptions) => Promise<string>}  fetchText
  * @property {(url: string, opts?: FetchOptions) => Promise<unknown>} fetchJson
  * @property {(url: string, opts?: FetchOptions) => Promise<Response>} fetchResponse  Raw Response (timeout + non-2xx guard applied); for providers needing response headers.
+ * @property {(ms: number) => Promise<void>} [sleep] Optional cross-provider pacing hook used by
+ *                              paginating providers (avature, workday) to throttle between page
+ *                              requests. May be absent — providers fall back to a native
+ *                              `setTimeout`-based delay.
  */
 
 /**
