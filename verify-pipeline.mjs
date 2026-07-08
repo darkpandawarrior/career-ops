@@ -12,7 +12,10 @@
  * 7. states.yml canonical IDs for cross-system consistency
  * 8. Stale report-number reservation sentinels are garbage-collected
  * 9. No duplicate reports (two files claiming the same report number)
- * 10. No orphan reports (a report file with no referencing tracker row)
+ * 10. No orphan reports (a report file with no referencing tracker row, link-text only)
+ * 11. No duplicate reports for the same company+role (#1425)
+ * 12. Every report file is referenced by num/link-text/filename-prefix (3-way, #1425)
+ * 13. Via channel consistency — confidentiality markers + cross-channel dup warning (#1596)
  *
  * Run: node career-ops/verify-pipeline.mjs
  */
@@ -31,7 +34,8 @@ const APPS_FILE = process.env.CAREER_OPS_TRACKER
     ? join(DATA_ROOT, 'data/applications.md')
     : join(DATA_ROOT, 'applications.md');
 const ADDITIONS_DIR = join(CAREER_OPS, 'batch/tracker-additions');
-const REPORTS_DIR = join(CAREER_OPS, 'reports');
+// CAREER_OPS_REPORTS overrides the reports dir (used by tests, mirrors CAREER_OPS_TRACKER).
+const REPORTS_DIR = process.env.CAREER_OPS_REPORTS || join(DATA_ROOT, 'reports');
 const STATES_FILE = existsSync(join(CAREER_OPS, 'templates/states.yml'))
   ? join(CAREER_OPS, 'templates/states.yml')
   : join(CAREER_OPS, 'states.yml');
@@ -96,6 +100,7 @@ for (const line of lines) {
     company: parts[COLMAP.company],
     role: parts[COLMAP.role],
     location: COLMAP.location != null ? parts[COLMAP.location] : '',
+    via: COLMAP.via != null ? parts[COLMAP.via] : '',
     score: parts[COLMAP.score],
     status: parts[COLMAP.status],
     pdf: parts[COLMAP.pdf],
@@ -282,6 +287,138 @@ if (existsSync(REPORTS_DIR)) {
   }
 }
 if (orphanReports === 0) ok('No orphan reports');
+
+// --- Check 11: Duplicate reports for the same company+role (#1425) ---
+// Two concurrent evaluators can each write a report for the same role.
+// merge-tracker dedups the TRACKER, but nothing watched reports/ itself.
+// Warning-level, not error: duplicates can be legitimate (re-evaluation
+// after a JD change). Distinct from Check 9 (same NNN reserved twice) — this
+// is two DIFFERENT numbers covering the same actual role.
+const REPORT_FILE_RE = /^(\d+)-(.+)-\d{4}-\d{2}-\d{2}\.md$/;
+const normalizeKey = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+// Role comes from the report body: the Machine Summary YAML fence when
+// present (field names are exact by contract), else the title line
+// "# Evaluación: {Company} — {Role}". Reports where neither parses are
+// skipped rather than grouped by company alone, which would false-positive
+// on two different roles at the same company.
+function extractRole(reportContent) {
+  const fence = reportContent.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+  if (fence) {
+    const m = fence[1].match(/^role:\s*["']?(.+?)["']?\s*$/m);
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  const title = reportContent.split('\n').find(l => l.startsWith('# '));
+  if (title) {
+    const parts = title.split(/[—–]/);
+    if (parts.length >= 2 && parts[parts.length - 1].trim()) return parts[parts.length - 1].trim();
+  }
+  return null;
+}
+
+const reportFiles = existsSync(REPORTS_DIR)
+  ? readdirSync(REPORTS_DIR).filter(f => REPORT_FILE_RE.test(f))
+  : [];
+
+let dupRoleReports = 0;
+const reportsByRole = new Map();
+for (const name of reportFiles) {
+  const companySlug = name.match(REPORT_FILE_RE)[2];
+  let role = null;
+  try {
+    role = extractRole(readFileSync(join(REPORTS_DIR, name), 'utf-8'));
+  } catch {
+    // Unreadable report — the orphan check above still sees it.
+  }
+  if (!role) continue;
+  const key = normalizeKey(companySlug) + '::' + normalizeKey(role);
+  if (!reportsByRole.has(key)) reportsByRole.set(key, []);
+  reportsByRole.get(key).push(name);
+}
+for (const group of reportsByRole.values()) {
+  if (group.length > 1) {
+    warn(`Duplicate reports for same company+role: ${group.join(', ')}`);
+    dupRoleReports++;
+  }
+}
+if (dupRoleReports === 0) ok('No duplicate reports for the same company+role');
+
+// --- Check 12: 3-way orphan-report resolution (#1425) ---
+// Every reports/NNN-*.md should be referenced by a tracker row — by the row's
+// own number, the [NNN] link text, or the NNN- prefix of the linked filename.
+// A report none of them reference is usually the loser of a tracker dedup.
+// Broader than Check 10 (link-text only): this also credits a match via the
+// row's own # or the linked filename's NNN- prefix.
+const referencedNums3Way = new Set();
+for (const e of entries) {
+  referencedNums3Way.add(e.num);
+  const linkText = e.report.match(/\[(\d+)\]/);
+  if (linkText) referencedNums3Way.add(parseInt(linkText[1], 10));
+  const linkTarget = e.report.match(/\]\(([^)]+)\)/);
+  if (linkTarget) {
+    const m = linkTarget[1].split('/').pop().match(/^(\d+)-/);
+    if (m) referencedNums3Way.add(parseInt(m[1], 10));
+  }
+}
+
+let orphanReports3Way = 0;
+for (const name of reportFiles) {
+  const num = parseInt(name.match(REPORT_FILE_RE)[1], 10);
+  if (!referencedNums3Way.has(num)) {
+    warn(`Orphan report — no tracker row references #${num}: reports/${name}`);
+    orphanReports3Way++;
+  }
+}
+if (orphanReports3Way === 0) ok('No orphan reports (3-way check)');
+
+// --- Check 13: Via channel consistency (#1596) ---
+// The Via column records the intermediary (agency/recruiter firm; `—` when the
+// application was direct). Unknown employers use the structural marker `?` in
+// Company — never a word like "Confidential", which is locale-dependent and can
+// collide with a real firm name.
+let viaIssues = 0;
+const CONFIDENTIAL_WORD_RE = /^(confidential|vertraulich|confidentiel|confidencial|riservato|gizli|機密|سري)$/i;
+for (const e of entries) {
+  const company = String(e.company || '').trim();
+  const via = String(e.via || '').trim();
+  if (company === '?') {
+    if (COLMAP.via == null) {
+      warn(`#${e.num}: unknown employer (?) but the tracker has no Via column — add it with: node merge-tracker.mjs --migrate-via`);
+      viaIssues++;
+    } else if (!via || via === '—') {
+      error(`#${e.num}: unknown employer (?) with no Via channel — record the agency/recruiter firm`);
+      viaIssues++;
+    }
+  }
+  if (CONFIDENTIAL_WORD_RE.test(company)) {
+    warn(`#${e.num}: company "${company}" looks like a confidentiality placeholder — use the structural marker ? (locale-invariant, can't collide with a real firm)`);
+    viaIssues++;
+  }
+}
+// Same company+role reached through different channels: both submissions are
+// real, so this is a warning to the human (double-submission risk), never an
+// auto-merge. Channel identity is normalized the same way merge-tracker.mjs
+// normalizes companies (strip non-alphanumerics, lowercase), so "Hays" and
+// "HAYS " read as one channel; the raw spelling is kept for the message.
+const normalizeChannel = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'direct';
+const channelsByRole = new Map();
+for (const e of entries) {
+  const company = String(e.company || '').trim();
+  if (!company || company === '?') continue;
+  const key = `${company.toLowerCase()}::${String(e.role || '').trim().toLowerCase()}`;
+  if (!channelsByRole.has(key)) channelsByRole.set(key, new Map());
+  const channels = channelsByRole.get(key);
+  const norm = normalizeChannel(e.via);
+  if (!channels.has(norm)) channels.set(norm, { raw: String(e.via || '').trim() || '—', num: e.num });
+}
+for (const [key, vias] of channelsByRole) {
+  if (vias.size > 1) {
+    const list = [...vias.values()];
+    warn(`Cross-channel duplicate — ${key.replace('::', ' / ')} reached via ${list.map(v => v.raw).join(' AND ')} (rows ${list.map(v => `#${v.num}`).join(', ')}) — double-submission risk, resolve by hand`);
+    viaIssues++;
+  }
+}
+if (viaIssues === 0) ok('Via channels consistent');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));

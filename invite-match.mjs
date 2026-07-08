@@ -285,11 +285,14 @@ export function matchInvite(signals, trackerRows) {
 
     let confidence = nameScore;
 
-    // A req/job ID appearing verbatim in the row's notes is a near-certain
-    // match — boost it above any name-only match (including another exact
-    // name match without the req ID). matchConfidence is a ranking score,
-    // not a probability, so it's intentionally allowed to exceed 1 here.
-    if (signals.reqId && row.notes && row.notes.includes(signals.reqId)) {
+    // A req/job ID appearing in the row's notes is a near-certain match —
+    // boost it above any name-only match (including another exact name
+    // match without the req ID). Compared case-insensitively: the invite
+    // and the notes may case the same ID differently ("jr12352" vs
+    // "JR12352"). matchConfidence is a ranking score, not a probability,
+    // so it's intentionally allowed to exceed 1 here.
+    if (signals.reqId && row.notes
+      && row.notes.toLowerCase().includes(signals.reqId.toLowerCase())) {
       confidence += 0.5;
     }
 

@@ -1254,8 +1254,91 @@ try {
     fail('content_filter should be case-insensitive');
   }
 
+  // content_filter.by_title_keyword (#1638): a stricter override scoped to
+  // only jobs whose title matched a specific title_filter.positive keyword.
+  const { matchedTitleKeywords } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const byKeywordCf = buildContentFilter({
+    positive: ['engineer'],
+    negative: [],
+    by_title_keyword: { 'ai engineer': { positive: ['pytorch', 'tensorflow'] } },
+  });
+  const titleFilterCfg = { positive: ['ai engineer', 'engineer'] };
+  const aiMatched = matchedTitleKeywords('Senior AI Engineer', titleFilterCfg);
+  if (byKeywordCf('Builds models in PyTorch', aiMatched) === true) {
+    pass('content_filter.by_title_keyword override passes on its own positive keyword');
+  } else {
+    fail('content_filter.by_title_keyword override should pass on its own positive keyword');
+  }
+  if (byKeywordCf('Uses only Excel macros', aiMatched) === false) {
+    pass('content_filter.by_title_keyword override rejects when its positive keyword is absent');
+  } else {
+    fail('content_filter.by_title_keyword override should reject without its positive keyword');
+  }
+  // A title match with NO override entry falls back to the global pair.
+  const backendMatched = matchedTitleKeywords('Backend Engineer', titleFilterCfg);
+  if (byKeywordCf('Generic engineering role', backendMatched) === true) {
+    pass('content_filter.by_title_keyword falls back to global pair for unmatched-override keywords');
+  } else {
+    fail('content_filter.by_title_keyword should fall back to the global pair without an override');
+  }
+
+  // formatPipelineOffer: optional labeled `| note: {text}` segment (#1483).
+  const notedOffer = { url: 'https://jobs.example.com/9', company: 'Acme', title: 'Engineer', note: 'curated list' };
+  const notedRow = formatPipelineOffer(notedOffer);
+  if (notedRow.endsWith('| note: curated list')) {
+    pass('formatPipelineOffer appends a labeled note segment when offer.note is set');
+  } else {
+    fail(`formatPipelineOffer should append "| note: ..." — got: ${notedRow}`);
+  }
+  const unnotedOffer = { url: 'https://jobs.example.com/10', company: 'Acme', title: 'Engineer' };
+  if (!formatPipelineOffer(unnotedOffer).includes('note:')) {
+    pass('formatPipelineOffer omits the note segment when offer.note is absent (byte-identical output)');
+  } else {
+    fail('formatPipelineOffer should omit the note segment without offer.note');
+  }
+
 } catch (e) {
   fail(`always_allow tests crashed: ${e.message}`);
+}
+
+// ── SCAN-RUNS PERSISTENCE (#1604) ────────────────────────────────
+console.log('\nscan.mjs — scan-runs.tsv persistence (#1604)');
+try {
+  const { appendScanRunSummary, SCAN_RUNS_HEADER } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const runsTmp = mkdtempSync(join(tmpdir(), 'career-ops-scan-runs-'));
+  try {
+    const runsFile = join(runsTmp, 'scan-runs.tsv');
+    appendScanRunSummary({
+      timestamp: '2026-07-08T00:00:00.000Z', companies: 10, boards: 2, found: 50,
+      filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredSalary: 0,
+      filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29, errors: 0,
+    }, runsFile);
+    const content = readFileSync(runsFile, 'utf-8');
+    const lines = content.trim().split('\n');
+    if (lines[0] + '\n' === SCAN_RUNS_HEADER) {
+      pass('appendScanRunSummary writes the canonical header on first write');
+    } else {
+      fail(`appendScanRunSummary header mismatch — got: ${lines[0]}`);
+    }
+    const cols = lines[1].split('\t');
+    if (cols.length === 14 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed' && cols[12] === '29') {
+      pass('appendScanRunSummary writes one tab-delimited row with the run counters');
+    } else {
+      fail(`appendScanRunSummary row shape wrong: ${JSON.stringify(cols)}`);
+    }
+    // Second call appends without rewriting the header.
+    appendScanRunSummary({ timestamp: '2026-07-09T00:00:00.000Z', companies: 10, boards: 2, found: 40, filteredTitle: 0, filteredTier: 0, filteredLocation: 0, filteredSalary: 0, filteredContent: 0, filteredCooldown: 0, dupes: 0, newAdded: 40, errors: 0 }, runsFile);
+    const afterSecond = readFileSync(runsFile, 'utf-8').trim().split('\n');
+    if (afterSecond.length === 3) {
+      pass('appendScanRunSummary appends a second row without duplicating the header');
+    } else {
+      fail(`appendScanRunSummary should have 3 lines (header + 2 rows), got ${afterSecond.length}`);
+    }
+  } finally {
+    rmSync(runsTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`scan-runs persistence tests crashed: ${e.message}`);
 }
 // ── 12. FOLLOW-UP CADENCE LOGIC ─────────────────────────────────
 
@@ -1826,6 +1909,51 @@ try {
   }
 } catch (e) {
   fail(`merge-tracker fuzzy dedup tests crashed: ${e.message}`);
+}
+
+// ── MERGE-TRACKER REQ-ID GUARD (#1524/#1427) ──────────────────────
+// A same-title posting at the same company can still be a genuinely distinct
+// req when the Notes column carries a req/job number — broaden the guard's
+// regex beyond bare numeric IDs to catch `R_…`, `JR…`, hyphenated `REQ-…`,
+// and `Posting ID …` forms actually seen in the wild.
+console.log('\n🧪 Testing merge-tracker req-ID guard (#1524/#1427)...');
+try {
+  const reqTmp = mkdtempSync(join(tmpdir(), 'career-ops-merge-reqid-'));
+  try {
+    mkdirSync(join(reqTmp, 'data'));
+    mkdirSync(join(reqTmp, 'reports'));
+    const additionsDir = join(reqTmp, 'additions');
+    mkdirSync(additionsDir);
+    const tracker = join(reqTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-01-04 | TD Bank | L&D Specialist | 4.0/5 | Evaluated | ❌ | [1](../reports/001-td-bank-2026-01-04.md) | Req R_1488728 |\n');
+    for (const n of ['001-td-bank-2026-01-04', '002-td-bank-2026-01-05']) {
+      writeFileSync(join(reqTmp, 'reports', `${n}.md`), '# fixture\n');
+    }
+    // Identical title, but a DIFFERENT underscore-prefixed req id — must NOT collapse (#1524's exact repro).
+    writeFileSync(join(additionsDir, '002-td-bank.tsv'),
+      '2\t2026-01-05\tTD Bank\tL&D Specialist\tEvaluated\t4.1/5\t❌\t[2](reports/002-td-bank-2026-01-05.md)\tReq R_1494379\n');
+
+    const reqResult = run(NODE, ['merge-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir } });
+    if (reqResult === null) {
+      fail('merge-tracker.mjs crashed during req-ID guard regression test');
+    } else {
+      const merged = readFileSync(tracker, 'utf-8');
+      const ldRows = merged.split('\n').filter(l => l.includes('L&D Specialist'));
+      if (ldRows.length === 2 && merged.includes('R_1488728') && merged.includes('R_1494379')) {
+        pass('distinct R_-prefixed req IDs at same title/company kept as separate rows (#1524)');
+      } else {
+        fail(`distinct req IDs were collapsed — expected 2 rows, got ${ldRows.length}: ${JSON.stringify(ldRows)}`);
+      }
+    }
+  } finally {
+    rmSync(reqTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`merge-tracker req-ID guard test crashed: ${e.message}`);
 }
 
 // ── MERGE-TRACKER REPORT-NUMBER COLLISION (#912) ─────────────────
@@ -2652,6 +2780,96 @@ try {
   }
 } catch (e) {
   fail(`plugin manifest path-containment tests crashed: ${e.message}`);
+}
+
+console.log('\n30b. Plugin registry split (#1401)');
+try {
+  const { loadRegistry, loadRegistryFiles, successorFor } = await import(pathToFileURL(join(ROOT, 'plugins/_registry.mjs')).href);
+  const { discoverPlugins, resolveSuccessorIds } = await import(pathToFileURL(join(ROOT, 'plugins/_engine.mjs')).href);
+  const { validateRegistry } = await import(pathToFileURL(join(ROOT, 'validate-plugin-registry.mjs')).href);
+
+  // Real registry: per-plugin files load, each filename matches its own id, shape is valid.
+  const realFiles = loadRegistryFiles(ROOT);
+  if (realFiles.length >= 8 && realFiles.every(({ file, entry }) => entry?.id && `${entry.id}.json` === file)) {
+    pass('loadRegistryFiles reads plugins-registry/*.json with filename === "<id>.json"');
+  } else {
+    fail(`loadRegistryFiles mismatch: ${JSON.stringify(realFiles.map(f => f.file))}`);
+  }
+  const realProblems = validateRegistry(ROOT);
+  if (realProblems.length === 0) {
+    pass('validateRegistry finds no problems in the real plugins-registry/');
+  } else {
+    fail(`validateRegistry found problems in the real registry: ${realProblems.join('; ')}`);
+  }
+
+  // Sandboxed fixture: a bundled "greeter" plugin + a registry entry declaring
+  // a supersedesBundled successor, to exercise resolveSuccessorIds/discoverPlugins
+  // end-to-end without touching the real plugins/ or plugins-registry/.
+  const fixTmp = mkdtempSync(join(tmpdir(), 'career-ops-plugin-registry-'));
+  try {
+    const bundledDir = join(fixTmp, 'plugins', 'greeter');
+    mkdirSync(bundledDir, { recursive: true });
+    writeFileSync(join(bundledDir, 'manifest.json'), JSON.stringify({
+      id: 'greeter', apiVersion: 1, description: 'bundled reference', hooks: ['export'],
+      requiredEnv: [], optionalEnv: [], allowedHosts: [], entry: 'index.mjs', humanInTheLoop: true,
+    }));
+    writeFileSync(join(bundledDir, 'index.mjs'), 'export default {};\n');
+
+    const localDir = join(fixTmp, 'plugins.local', 'greeter');
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(join(localDir, 'manifest.json'), JSON.stringify({
+      id: 'greeter', apiVersion: 1, description: 'community successor', hooks: ['export'],
+      requiredEnv: [], optionalEnv: [], allowedHosts: [], entry: 'index.mjs', humanInTheLoop: true,
+    }));
+    writeFileSync(join(localDir, 'index.mjs'), 'export default {};\n');
+
+    const registryDir = join(fixTmp, 'plugins-registry');
+    mkdirSync(registryDir, { recursive: true });
+    const sha = 'a'.repeat(40);
+    writeFileSync(join(registryDir, 'greeter.json'), JSON.stringify({
+      id: 'greeter', name: 'career-ops-plugin-greeter', version: '0.1.0', license: 'MIT',
+      description: 'community successor', repo: 'https://github.com/example/career-ops-plugin-greeter',
+      sha, hooks: ['export'], requiredEnv: [], allowedHosts: [], supersedesBundled: true,
+    }));
+
+    const lockDir = join(fixTmp, '.career-ops');
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(fixTmp, 'plugins.lock'), JSON.stringify({ plugins: { greeter: { sha } } }));
+
+    if (successorFor(fixTmp, 'greeter')?.sha === sha) {
+      pass('successorFor finds the registry entry declaring supersedesBundled for the bundled id');
+    } else {
+      fail('successorFor should find the greeter successor entry');
+    }
+
+    const overridden = resolveSuccessorIds(fixTmp);
+    if (overridden.has('greeter')) {
+      pass('resolveSuccessorIds approves the successor: installed + sha matches the pinned registry sha');
+    } else {
+      fail('resolveSuccessorIds should approve greeter (installed at the exact pinned sha)');
+    }
+
+    const manifests = discoverPlugins([join(fixTmp, 'plugins'), join(fixTmp, 'plugins.local')], overridden);
+    const greeter = manifests.find(m => m.id === 'greeter');
+    if (greeter?.description === 'community successor') {
+      pass('discoverPlugins lets an approved successor override the bundled reference');
+    } else {
+      fail(`discoverPlugins should have returned the local successor manifest, got: ${JSON.stringify(greeter)}`);
+    }
+
+    // Without an approved override, first-root-wins still holds (no regression).
+    const noOverride = discoverPlugins([join(fixTmp, 'plugins'), join(fixTmp, 'plugins.local')]);
+    const greeterDefault = noOverride.find(m => m.id === 'greeter');
+    if (greeterDefault?.description === 'bundled reference') {
+      pass('discoverPlugins defaults to bundled-wins when no overrideIds are passed');
+    } else {
+      fail('discoverPlugins default behavior (no overrideIds) regressed');
+    }
+  } finally {
+    rmSync(fixTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`plugin registry split tests crashed: ${e.message}`);
 }
 
 console.log('\n31. scan.mjs --doctor (read-only health sweep)');
