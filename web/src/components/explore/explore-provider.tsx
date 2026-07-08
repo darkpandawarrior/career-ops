@@ -24,6 +24,7 @@ export type Phase =
   | "results"
   | "empty-current"
   | "empty-loose"
+  | "degraded" // scan completed but searched nothing/partially (capped, stale dataset, dropped postings) — not "all caught up"
   | "failed"
   | "hunting" // AI search streaming
   | "blocked"; // AI search needs a CLI
@@ -49,6 +50,9 @@ type ExploreCtx = {
   sources: Partial<Record<AtsSource, SourceState>>;
   matchCount: number;
   companiesScanned: number;
+  companiesAvailable: number;
+  capHit: boolean;
+  droppedNoDate: number;
   status: string;
   partial: boolean;
   error: string;
@@ -84,6 +88,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [sources, setSources] = useState<Partial<Record<AtsSource, SourceState>>>({});
   const [matchCount, setMatchCount] = useState(0);
   const [companiesScanned, setCompaniesScanned] = useState(0);
+  // Authoritative scan-health signals (scanner --json mode, #1199): tell a capped /
+  // degraded scan from a genuinely empty one, and power a "scanned X of Y" banner.
+  const [companiesAvailable, setCompaniesAvailable] = useState(0);
+  const [capHit, setCapHit] = useState(false);
+  const [droppedNoDate, setDroppedNoDate] = useState(0);
   const [status, setStatus] = useState("");
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState("");
@@ -119,6 +128,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setOffers([]);
     setMatchCount(0);
     setCompaniesScanned(0);
+    setCompaniesAvailable(0);
+    setCapHit(false);
+    setDroppedNoDate(0);
     setPartial(false);
     setError("");
     setErrorCode("");
@@ -134,6 +146,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     const acc: DiscoveredOffer[] = [];
     let sawError = "";
     let sawErrorCode = "";
+    let companiesScannedAcc = 0; // 0 at the end = the directories never downloaded → degraded, not empty
+    let capHitAcc = false; // scan was capped (only a slice of the universe searched)
+    let datasetIssueAcc = false; // some ATS dataset was stale/empty/unreachable
+    let droppedNoDateAcc = 0; // postings dropped for lacking a publish date
     try {
       const r = await fetch("/api/explore", {
         method: "POST",
@@ -184,10 +200,23 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
                 acc.push(ev.offer);
                 setOffers((o) => [...o, ev.offer]);
                 break;
-              case "summary":
+              case "summary": {
+                companiesScannedAcc = ev.companiesScanned;
                 setCompaniesScanned(ev.companiesScanned);
-                if (ev.unreachable > 0) setPartial(true);
+                if (typeof ev.companiesAvailable === "number") setCompaniesAvailable(ev.companiesAvailable);
+                if (ev.capHit) {
+                  capHitAcc = true;
+                  setCapHit(true);
+                }
+                const datasetIssue = ev.datasetStatus ? Object.values(ev.datasetStatus).some((s) => s !== "ok") : false;
+                if (datasetIssue) datasetIssueAcc = true;
+                if (typeof ev.postingsDroppedNoDate === "number" && ev.postingsDroppedNoDate > 0) {
+                  droppedNoDateAcc = ev.postingsDroppedNoDate;
+                  setDroppedNoDate(ev.postingsDroppedNoDate);
+                }
+                if (ev.unreachable > 0 || datasetIssue) setPartial(true);
                 break;
+              }
               case "error":
                 sawError = ev.message;
                 break;
@@ -218,6 +247,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       setError(sawError);
       setErrorCode(sawErrorCode);
       setPhase("failed");
+    } else if (capHitAcc || datasetIssueAcc || droppedNoDateAcc > 0 || companiesScannedAcc === 0) {
+      // Maintainer's RULE (#1199): it is NOT "all caught up" if the scan was capped,
+      // a dataset was stale/unreachable, postings were dropped for missing a date, OR
+      // nothing was searched at all (legacy 0-companies fallback when --json is absent).
+      // Truly-empty is only when live datasets were fully searched and found nothing.
+      setPhase("degraded");
     } else {
       setPhase(isBroadSearch(f) ? "empty-current" : "empty-loose");
     }
@@ -261,6 +296,9 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setSources({});
     setMatchCount(0);
     setCompaniesScanned(0);
+    setCompaniesAvailable(0);
+    setCapHit(false);
+    setDroppedNoDate(0);
     setStatus("");
     setPartial(false);
     setError("");
@@ -385,11 +423,11 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, sources, matchCount, companiesScanned, status, partial, error, errorCode, added, adding,
+      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, errorCode, added, adding,
       discover, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, status, partial, error, errorCode, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, errorCode, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

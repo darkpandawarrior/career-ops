@@ -47,6 +47,7 @@ vi.mock("@/lib/clis", () => ({
 vi.mock("@/lib/career-ops", () => ({
   careerOpsRoot: () => "/fake/engine/root",
   readMemory: vi.fn(() => h.memory),
+  doctorState: vi.fn(() => ({ phase: "established", onboardingNeeded: false, missing: [], hasCv: true, hasData: true })),
 }));
 
 vi.mock("@/lib/profile-registry", () => ({
