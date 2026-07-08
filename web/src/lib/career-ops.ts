@@ -103,27 +103,73 @@ export type Application = {
   pdf: string;
   report: string;
   notes: string;
+  /** Recruiter/agency intermediary, when the tracker has an optional Via column. */
+  via?: string;
+};
+
+/** Header text (lowercased) → canonical field name. Mirrors tracker-parse.mjs's HEADER_ALIASES. */
+const HEADER_ALIASES: Record<string, string> = {
+  "#": "n", num: "n", date: "date", company: "company", empresa: "company",
+  via: "via", role: "role", puesto: "role", score: "score", status: "status",
+  pdf: "pdf", report: "report", notes: "notes",
 };
 
 /**
+ * Scan the table for a header row and build a field-name → cell-index map,
+ * the same way the engine's tracker-parse.mjs detectColumns() does — so an
+ * optional Via column (inserted after Company) is picked up without assuming
+ * a fixed position. Returns null when no header with the essential columns
+ * is found, so the caller falls back to the legacy fixed order.
+ */
+function detectColumns(lines: string[]): Record<string, number> | null {
+  for (const line of lines) {
+    const cells = line.split("|").slice(1, -1).map((c) => c.trim().toLowerCase());
+    if (!cells.includes("company") || !cells.includes("role")) continue;
+    const map: Record<string, number> = {};
+    cells.forEach((c, i) => {
+      if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i;
+    });
+    if (["n", "company", "role", "score", "status"].every((k) => map[k] != null)) return map;
+  }
+  return null;
+}
+
+/**
  * Parse data/applications.md — the tracker table (source of truth).
- * Column order: # | Date | Company | Role | Score | Status | PDF | Report | Notes
- * (note: score BEFORE status, per the core data contract).
+ * Column order: # | Date | Company | [Via] | Role | [Location] | Score | Status | PDF | Report | Notes
+ * (note: score BEFORE status, per the core data contract). Via and Location
+ * are optional columns detected by header name; absent a recognizable header
+ * row, falls back to the legacy fixed 9-column order.
  */
 export function readApplications(root: string = careerOpsRoot()): Application[] {
   const md = read("data/applications.md", root);
   if (!md) return [];
+  const lines = md.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("|"));
+  const colmap = detectColumns(lines);
+
   const rows: Application[] = [];
-  for (const raw of md.split("\n")) {
-    const line = raw.trim();
-    if (!line.startsWith("|")) continue;
+  for (const line of lines) {
     const cells = line.split("|").slice(1, -1).map((c) => c.trim());
-    // Tolerate both layouts: the current 9-col tracker and older variants
-    // where the Notes column is absent (8 cells). Score is always before Status.
-    if (cells.length < 8) continue;
-    if (cells[0] === "#" || /^:?-{2,}:?$/.test(cells[0])) continue; // header / separator
-    const [n, date, company, role, score, status, pdf, report, ...rest] = cells;
-    rows.push({ n, date, company, role, score, status, pdf, report, notes: rest.join(" | ") });
+    if (colmap) {
+      const maxIdx = Math.max(...Object.values(colmap));
+      if (cells.length <= maxIdx) continue;
+      const at = (k: string) => (colmap[k] != null ? (cells[colmap[k]] ?? "") : "");
+      const n = at("n");
+      if (!/^\d+$/.test(n)) continue; // header / separator row
+      rows.push({
+        n, date: at("date"), company: at("company"), role: at("role"),
+        score: at("score"), status: at("status"), pdf: at("pdf"), report: at("report"),
+        notes: at("notes"),
+        ...(colmap.via != null ? { via: at("via") } : {}),
+      });
+    } else {
+      // Tolerate both layouts: the current 9-col tracker and older variants
+      // where the Notes column is absent (8 cells). Score is always before Status.
+      if (cells.length < 8) continue;
+      if (cells[0] === "#" || /^:?-{2,}:?$/.test(cells[0])) continue; // header / separator
+      const [n, date, company, role, score, status, pdf, report, ...rest] = cells;
+      rows.push({ n, date, company, role, score, status, pdf, report, notes: rest.join(" | ") });
+    }
   }
   return rows;
 }

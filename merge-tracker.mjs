@@ -20,7 +20,7 @@ import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { LEGACY_COLMAP, detectColumns } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, detectColumns, normalizeVia } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
 
@@ -42,6 +42,7 @@ const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY = process.argv.includes('--verify');
 const MIGRATE = process.argv.includes('--migrate');
+const MIGRATE_VIA = process.argv.includes('--migrate-via');
 const MERGE_HOLD_MS = Number(process.env.CAREER_OPS_MERGE_HOLD_MS) || 0;
 const MERGE_READY_IPC = process.env.CAREER_OPS_MERGE_READY_IPC === '1';
 
@@ -258,12 +259,16 @@ function cell(v) {
 }
 
 // Build a tracker row string matching the detected layout (with or without the
-// optional Location column) so writes round-trip through the same schema.
+// optional Via and Location columns) so writes round-trip through the same
+// schema. Optional columns follow the documented positions: Via after Company
+// (#1596), Location after Role (#946).
 function buildRow(o) {
-  if (COLMAP.location != null) {
-    return `| ${o.num} | ${o.date} | ${cell(o.company)} | ${cell(o.role)} | ${cell(o.location) || '—'} | ${o.score} | ${o.status} | ${o.pdf} | ${o.report} | ${cell(o.notes)} |`;
-  }
-  return `| ${o.num} | ${o.date} | ${cell(o.company)} | ${cell(o.role)} | ${o.score} | ${o.status} | ${o.pdf} | ${o.report} | ${cell(o.notes)} |`;
+  const cells = [o.num, o.date, cell(o.company)];
+  if (COLMAP.via != null) cells.push(cell(o.via) || '—');
+  cells.push(cell(o.role));
+  if (COLMAP.location != null) cells.push(cell(o.location) || '—');
+  cells.push(o.score, o.status, o.pdf, o.report, cell(o.notes));
+  return `| ${cells.join(' | ')} |`;
 }
 
 /**
@@ -286,6 +291,7 @@ function parseAppLine(line) {
     num,
     date: parts[COLMAP.date],
     company: parts[COLMAP.company],
+    via: COLMAP.via != null ? parts[COLMAP.via] : '',
     role: parts[COLMAP.role],
     location: COLMAP.location != null ? parts[COLMAP.location] : '',
     score: parts[COLMAP.score],
@@ -294,6 +300,35 @@ function parseAppLine(line) {
     report: parts[COLMAP.report],
     notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
     raw: line,
+  };
+}
+
+/**
+ * Resolve the optional trailing TSV fields (index ≥ 9) into { via, location }.
+ *
+ * Via travels as a TAGGED field (`via=Hays`) rather than another positional
+ * slot: TSV writers are LLM agents following prompt instructions, and a writer
+ * that skips an empty padding field would silently shift a positional Via into
+ * the Location slot. A single untagged extra remains the legacy positional
+ * location (stale prompts stay valid forever). Anything ambiguous — two
+ * untagged extras, duplicate via= tags — returns null so the row is rejected
+ * loudly instead of merged with scrambled columns.
+ *
+ * @param {string[]} parts - All fields of the TSV/pipe row.
+ * @param {string} filename - Source filename used in warning messages.
+ * @returns {{via: string, location: string}|null}
+ */
+function parseTsvExtras(parts, filename) {
+  const extras = parts.slice(9).map(s => String(s).trim()).filter(s => s !== '');
+  const viaTags = extras.filter(s => /^via=/i.test(s));
+  const untagged = extras.filter(s => !/^via=/i.test(s));
+  if (viaTags.length > 1 || untagged.length > 1) {
+    console.warn(`⚠️  Skipping ${filename}: ambiguous extra fields [${extras.join(', ')}] — expected at most one "via=Firm" tag and one location`);
+    return null;
+  }
+  return {
+    via: viaTags.length ? viaTags[0].replace(/^via=/i, '').trim() : '',
+    location: untagged[0] || '',
   };
 }
 
@@ -323,7 +358,7 @@ function parseTsvContent(content, filename) {
       console.warn(`⚠️  Skipping malformed pipe-delimited ${filename}: ${parts.length} fields`);
       return null;
     }
-    // Format: num | date | company | role | score | status | pdf | report | notes [| location]
+    // Format: num | date | company | role | score | status | pdf | report | notes [| location] [| via=Firm]
     addition = {
       num: parseInt(parts[0]),
       date: parts[1],
@@ -334,8 +369,10 @@ function parseTsvContent(content, filename) {
       pdf: parts[6],
       report: parts[7],
       notes: parts[8] || '',
-      location: (parts[9] || '').trim(),
     };
+    const extras = parseTsvExtras(parts, filename);
+    if (!extras) return null;
+    Object.assign(addition, extras);
   } else {
     // Tab-separated
     parts = content.split('\t');
@@ -381,9 +418,12 @@ function parseTsvContent(content, filename) {
       pdf: parts[6],
       report: parts[7],
       notes: parts[8] || '',
-      // Optional trailing field: tab-separated TSVs may append a location.
-      location: (parts[9] || '').trim(),
     };
+    // Optional trailing fields: tab-separated TSVs may append a location
+    // and/or a tagged via=Firm value.
+    const extras = parseTsvExtras(parts, filename);
+    if (!extras) return null;
+    Object.assign(addition, extras);
   }
 
   if (isNaN(addition.num) || addition.num === 0) {
@@ -430,12 +470,49 @@ if (MIGRATE) {
   process.exit(0);
 }
 
+// Opt-in migration (#1596): insert a Via column (intermediary channel) after
+// Company. Header-aware readers auto-detect both layouts, so this is optional —
+// it exists for users who want the column added to an existing tracker.
+// Idempotent: a tracker that already has a Via column is left untouched.
+// Run with: node merge-tracker.mjs --migrate-via [--dry-run]
+if (MIGRATE_VIA) {
+  const lines = appContent.split('\n');
+  const colmap = detectColumns(lines) || LEGACY_COLMAP;
+  if (colmap.via != null) {
+    console.log('✅ Via column already present — nothing to migrate.');
+    process.exit(0);
+  }
+  const companyIdx = colmap.company;
+  let changed = 0;
+  const migrated = lines.map(line => {
+    if (!line.startsWith('|')) return line;
+    const parts = line.split('|').map(s => s.trim());
+    if (parts.length <= companyIdx) return line;
+    const isHeader = parts[colmap.num] === '#';
+    const isSeparator = /^[-: ]*$/.test(parts.join(''));
+    const insert = isHeader ? 'Via' : isSeparator ? '-----' : '—';
+    const cells = [...parts.slice(1, companyIdx + 1), insert, ...parts.slice(companyIdx + 1, parts.length - 1)];
+    changed++;
+    return isSeparator
+      ? `|${cells.map(c => c || '---').join('|')}|`
+      : `| ${cells.join(' | ')} |`;
+  });
+  if (DRY_RUN) {
+    console.log(`🔎 Migration (dry-run): Via column would be inserted after Company (${changed} table line(s) rewritten)`);
+  } else {
+    writeFileAtomic(APPS_FILE, migrated.join('\n'));
+    console.log(`✅ Migration: inserted Via column after Company (${changed} table line(s) rewritten). Direct applications are marked —.`);
+  }
+  process.exit(0);
+}
+
 const appLines = appContent.split('\n');
 // Detect the tracker's column layout via header names so parsing and writing
 // both work whether the table uses the original 9-column layout or a customized
 // one (e.g. with a Location column after Role). Falls back to the legacy layout.
 COLMAP = detectColumns(appLines) || LEGACY_COLMAP;
 if (COLMAP.location != null) console.log('🧭 Detected Location column.');
+if (COLMAP.via != null) console.log('🧭 Detected Via column.');
 const existingApps = [];
 let maxNum = 0;
 
@@ -490,6 +567,16 @@ for (const file of tsvFiles) {
   // so it resolves correctly when clicked from applications.md (see #760).
   addition.report = normalizeReportLink(addition.report);
 
+  // A via= tag can only be stored if the tracker has a Via column — warn
+  // instead of dropping the channel silently (#1596). Clear the value too:
+  // existing rows parse with via='' on this layout, so a set addition.via would
+  // make the cross-channel duplicate guard see a channel mismatch and add a
+  // second row instead of updating the same-agency re-blast.
+  if (addition.via && COLMAP.via == null) {
+    console.warn(`⚠️  ${file}: carries via=${addition.via} but the tracker has no Via column — value dropped. Add it with: node merge-tracker.mjs --migrate-via`);
+    addition.via = '';
+  }
+
   // Check for duplicate by:
   // 1. Exact report number match
   // 2. Company + role fuzzy match
@@ -528,6 +615,15 @@ for (const file of tsvFiles) {
     const additionReqNum = extractReqNumber(addition.notes);
     duplicate = existingApps.find(app => {
       if (normalizeCompany(app.company) !== normCompany) return false;
+      // Cross-channel guard (#1596): unknown-employer rows (`?`) all normalize
+      // to the same empty company key, but the same role via two DIFFERENT
+      // agencies is two real submissions — merging them silently is exactly
+      // the double-submission hazard the Via column exists to surface. Only
+      // the same channel (the agency re-blasting one listing) is a duplicate.
+      // Via comparison is Unicode-aware: normalizeCompany() would collapse
+      // distinct non-Latin agency names to the same empty key.
+      if ((String(addition.company).trim() === '?' || String(app.company).trim() === '?')
+          && normalizeVia(addition.via || '') !== normalizeVia(app.via || '')) return false;
       // A different req/job-ID in the notes means these are distinct postings
       // (e.g. two separate "Software Engineer" reqs) even if the fuzzy title
       // match would otherwise say they're the same opening — don't collapse them.
@@ -547,6 +643,7 @@ for (const file of tsvFiles) {
       if (lineIdx >= 0) {
         const updatedLine = buildRow({
           num: duplicate.num, date: addition.date, company: addition.company, role: addition.role,
+          via: addition.via || duplicate.via || '—',
           location: addition.location || duplicate.location || '—',
           score: addition.score, status: duplicate.status, pdf: duplicate.pdf,
           report: addition.report,
@@ -566,6 +663,7 @@ for (const file of tsvFiles) {
 
     const newLine = buildRow({
       num: entryNum, date: addition.date, company: addition.company, role: addition.role,
+      via: addition.via || '—',
       location: addition.location || '—',
       score: addition.score, status: addition.status, pdf: addition.pdf,
       report: addition.report, notes: addition.notes,

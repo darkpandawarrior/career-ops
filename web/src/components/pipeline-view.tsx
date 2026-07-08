@@ -246,6 +246,9 @@ export function PipelineView({
                     </td>
                     <td className="px-4 py-3 text-muted">
                       <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
+                      {r.via && r.via !== "—" && r.via !== "-" && (
+                        <span className="ml-1.5 rounded-full bg-surface px-1.5 py-0.5 text-[11px] text-faint">via {r.via}</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
@@ -271,7 +274,10 @@ export function PipelineView({
                   <CompanyLogo name={r.company} size={24} />
                   <Link href={`/pipeline/${r.n}`} className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-foreground">{r.company}</p>
-                    <p className="truncate text-[13px] text-muted">{r.role}</p>
+                    <p className="truncate text-[13px] text-muted">
+                      {r.role}
+                      {r.via && r.via !== "—" && r.via !== "-" && <span className="ml-1 text-faint">via {r.via}</span>}
+                    </p>
                   </Link>
                   <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
                 </div>
