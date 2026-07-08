@@ -211,6 +211,7 @@ top_strengths:
 risk_level: "{Low | Medium | High}"
 confidence: "{Low | Medium | High}"
 next_action: "{one concrete next step}"
+advertised_comp: "{the JD's own salary figure, verbatim, e.g. '80-90k EUR'}" # or null if the JD states none — never estimated, never researched
 ```
 
 Rules:
@@ -218,6 +219,7 @@ Rules:
 - `score` is numeric only, without `/5`.
 - `final_decision` must reflect the full evaluation, not only the CV match.
 - Do not invent missing data. If confidence is limited, set `confidence: "Low"` and explain the limitation in the human-readable sections.
+- `advertised_comp` is the JD's own figure verbatim, never a researched estimate — it seeds the advertised-compensation observation `node salary-gap.mjs` reads.
 
 ### Step 3 — Save Report .md
 
@@ -261,6 +263,7 @@ top_strengths:
 risk_level: "{Low | Medium | High}"
 confidence: "{Low | Medium | High}"
 next_action: "{one concrete next step}"
+advertised_comp: "{the JD's own salary figure, verbatim, e.g. '80-90k EUR'}" # or null if the JD states none — never estimated, never researched
 ```
 
 ## A) Role Summary

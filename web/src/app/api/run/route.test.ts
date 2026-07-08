@@ -327,6 +327,21 @@ describe("POST /api/run — non-claude raw passthrough", () => {
   });
 });
 
+describe("POST /api/run — cancel() safety (#1155)", () => {
+  it("does not throw when the child emits data/close after the client disconnects", async () => {
+    const res = await POST(makeReq({ kind: "research", input: "x", cliId: "claude" }));
+    const child = h.lastChild!; // start() already ran synchronously during POST
+    const reader = res.body!.getReader();
+    await reader.cancel(); // simulates a client disconnect → cancel()
+    // Late events after cancel() must not throw "Controller is already closed".
+    expect(() => {
+      child.stdout.emit("data", Buffer.from(delta("late text")));
+      child.emit("close", 0);
+    }).not.toThrow();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+});
+
 describe("POST /api/run — spawn wiring", () => {
   it("spawns claude with write-capable tools + the data root for an evaluate run", async () => {
     await run({ kind: "evaluate", input: "https://x.test/job", cliId: "claude" }, (child) => {

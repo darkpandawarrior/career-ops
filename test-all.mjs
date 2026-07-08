@@ -125,10 +125,8 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
-  // tracker-columns-tests.mjs: not yet ported (tracked as a follow-up —
-  // header-aware tracker parsing). skipIfMissing documents intent without
-  // failing while the suite doesn't exist yet.
-  { name: 'tracker-columns-tests.mjs', expectExit: 0, skipIfMissing: true },
+  // tracker-columns coverage lives at tests/tracker-columns.test.mjs
+  // (auto-discovered) since the header-aware parsing port.
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   // Bare run: no portals.yml in the repo, so it must exit 0 gracefully (and hit
   // no network). The probe logic itself is unit-tested below with a mock.

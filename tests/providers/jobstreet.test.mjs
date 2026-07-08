@@ -99,6 +99,20 @@ try {
     fail(`parseJobstreetItem companyName fallback: ${JSON.stringify(companyNameOnly)}`);
   }
 
+  // parseJobstreetItem — handles missing locations gracefully (upstream #1499 union).
+  const noLocItem = {
+    id: '42',
+    title: 'Remote Engineer',
+    advertiser: { description: 'RemoteCo' },
+    listingDate: '2026-06-15T00:00:00Z',
+  };
+  const noLocParsed = parseJobstreetItem(noLocItem, 'https://id.jobstreet.com', 'Fallback');
+  if (noLocParsed && noLocParsed.location === '') {
+    pass('parseJobstreetItem handles missing locations gracefully');
+  } else {
+    fail(`parseJobstreetItem empty location: ${JSON.stringify(noLocParsed)}`);
+  }
+
   // fetch() — happy path with mock context
   const mockCtx = {
     transport: 'http',

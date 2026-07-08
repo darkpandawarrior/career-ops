@@ -32,6 +32,19 @@ try {
     fail('smartrecruiters.detect() should return null for non-SR URLs');
   }
 
+  // entry.api precedence: a branded careers_url is kept while the SR slug is
+  // pinned via api: (mirrors greenhouse/ashby; upstream #1499 union).
+  const hitApi = sr.detect({
+    name: 'Continental',
+    careers_url: 'https://jobs.continental.com',
+    api: 'https://careers.smartrecruiters.com/Continental',
+  });
+  if (hitApi && hitApi.url.startsWith('https://api.smartrecruiters.com/v1/companies/Continental/postings')) {
+    pass('smartrecruiters.detect() honors api: over a branded careers_url');
+  } else {
+    fail(`smartrecruiters.detect(api-pinned) returned ${JSON.stringify(hitApi)}`);
+  }
+
   // parseSmartRecruitersResponse
   const sample = {
     content: [

@@ -44,6 +44,7 @@ Parse the JSON output. It contains:
 | `remotePolicy` | Per-policy bucket: total, positive, negative, conversion rate |
 | `companySizeBreakdown` | Per-size bucket: startup, scaleup, enterprise |
 | `vendorAnalysis` | ATS channel analysis: per-vendor advance rate + coverage (see below) |
+| `viaChannelAnalysis` | Via channel analysis: per-agency advance rate + agency-vs-direct aggregate (see below) |
 | `scoreThreshold` | Recommended minimum score + reasoning |
 | `techStackGaps` | Most frequent tech gaps in negative outcomes |
 | `recommendations` | Top 5 actionable items with reasoning and impact level |
@@ -75,6 +76,24 @@ When you narrate this to the user:
 - The `recommendations` array already contains the `high`-impact channel action
   when one qualifies — surface it verbatim rather than inventing a stronger claim.
 
+### `viaChannelAnalysis` — per-agency advance rate
+
+Groups **submitted** applications by their `Via` channel (the recruiter/agency
+firm; requires the optional Via column in `data/applications.md` — trackers
+without it produce `agencySubmitted: 0, directSubmitted: 0, unknownVia: {all}`,
+which just means the column hasn't been added yet, not that nothing is being
+tracked). `breakdown` lists each agency with total/advanced/`advanceRate`/
+`sufficientSample`. Submitted rows with an empty Via cell are counted in
+`unknownVia` — when it's non-zero, state it so the user knows the agency/direct
+split covers a subset of submissions.
+
+In an agency-mediated search the highest-leverage decision is which recruiter
+to keep working with. Present this the same way as `vendorAnalysis` — respect
+`sufficientSample`, never a bias/causal claim, a strong agency is *"prioritize
+roles via X — it converts"*, a weak one is an observation, not an accusation.
+The `recommendations` array carries the best-converting-agency action when one
+qualifies — surface it verbatim rather than inventing a stronger claim.
+
 ## Step 1b — Session-Content Targeting Signal (optional)
 
 Outcome data (Step 1) tells you *whether* you're winning. Interview sessions tell you *what role you're actually selling* in the room — a higher-resolution, lower-noise signal of role-fit than win/loss, which is confounded by comp, timing, headcount, and a dozen reasons unrelated to fit.
@@ -97,6 +116,13 @@ Then aggregate across all sessions:
 This is the difference between *"you're losing"* (Step 1, outcomes) and *"you're aiming at the wrong target"* (Step 1b, content). Feed the result into the Step 2 report and Step 4 recommendations.
 
 **Privacy:** sessions contain real interviewer names and companies. Read them locally only; **never quote a real name or company into a committed report.** Summarize the signal (competency clusters), never the content.
+
+### Compensation gap (optional)
+
+If the user asks about pay outcomes, or `data/salary-observations.tsv` exists, run
+`node salary-gap.mjs --summary` and fold its per-application desired/advertised/actual
+comparison into the recommendations — e.g. a persistent advertised→actual gap at a
+given company type or Via channel is itself a targeting signal.
 
 ## Step 2 — Generate Report
 

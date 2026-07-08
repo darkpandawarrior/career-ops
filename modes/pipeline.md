@@ -27,7 +27,7 @@ This complements — does not replace — the per-URL liveness gate in `auto-pip
       3. **WebFetch / WebSearch:** last-resort fallbacks for static pages.
       For high-value roles, still run a quick Playwright liveness check (navigate + saved snapshot, grep for expired signals) even when the API returned the JD.
    c. If the URL is not accessible → mark as `- [!]` with a note and continue
-   d. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= `auto_pdf_score_threshold`) → Tracker
+   d. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= `auto_pdf_score_threshold`) → Tracker. Read `modes/_custom.md` (if it exists) and apply its House Rules to every item processed here.
    e. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅/❌`
 
    **About the PDF gate (configurable):** Read `config/profile.yml` → `auto_pdf_score_threshold`. If the key does not exist, default to `3.0` (this mode's original gate). If the evaluation score is less than the threshold, skip PDF generation: write the report normally, show in the header `**PDF:** not generated — run /career-ops pdf {company-slug} to create on demand`, and mark PDF ❌ in the tracker. If the score is ≥ threshold, generate the PDF as usual.

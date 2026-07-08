@@ -245,6 +245,20 @@ describe("POST /api/assistant — non-claude raw passthrough", () => {
   });
 });
 
+describe("POST /api/assistant — cancel() safety (#1155)", () => {
+  it("does not throw when the child emits data/close after the client disconnects", async () => {
+    const res = await POST(makeReq({ message: "hi", cliId: "claude" }));
+    const child = h.lastChild!; // start() already ran synchronously during POST
+    const reader = res.body!.getReader();
+    await reader.cancel(); // simulates a client disconnect → cancel()
+    expect(() => {
+      child.stdout.emit("data", Buffer.from(delta("late text")));
+      child.emit("close");
+    }).not.toThrow();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+});
+
 describe("POST /api/assistant — spawn wiring", () => {
   it("spawns the claude binary with stream-json + read-only tool guardrails and the data root env", async () => {
     await run({ message: "hello there", cliId: "claude" }, (child) => child.emit("close"));

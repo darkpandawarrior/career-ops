@@ -2,6 +2,8 @@
 
 ## Full pipeline
 
+Before generating: read `modes/_custom.md` (if it exists) and apply its House Rules / Output Preferences to every CV in this session, including every item of a batch.
+
 1. Read `cv.md` as the source of truth
 2. Ask the user for the JD if it is not in context (text or URL)
 3. Extract 15-20 keywords from the JD
