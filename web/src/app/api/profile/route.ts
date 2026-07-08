@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { requestRoot } from "@/lib/profile-registry";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 
@@ -69,7 +69,8 @@ export async function POST(req: Request) {
   } else {
     let parsed: unknown;
     try {
-      parsed = yaml.load(fs.readFileSync(profileFile, "utf8"));
+      const raw = fs.readFileSync(profileFile, "utf8");
+      parsed = raw.trim() ? yaml.load(raw) : {};
     } catch {
       return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
     }

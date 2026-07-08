@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 
 // The portals route writes portals.yml under the request's active root. We mock
 // profile-registry's requestRoot() to a tmp profile dir (approach (a) from the
@@ -187,6 +187,13 @@ describe("POST /api/portals — write behavior", () => {
   it("recovers when an existing portals.yml is malformed yaml (falls back to template, else {})", async () => {
     // Unparseable portals.yml + no template -> doc resets to {}; positive still written.
     fs.writeFileSync(portalsPath(), "title_filter: \"unterminated\n  : : :");
+    const res = await POST(makeReq({ roles: ["Recovered"] }));
+    expect(res.status).toBe(200);
+    expect((readPortals().title_filter as Record<string, unknown>).positive).toEqual(["Recovered"]);
+  });
+
+  it("treats an existing empty portals.yml as {} (js-yaml v5 throws on load(''))", async () => {
+    fs.writeFileSync(portalsPath(), "");
     const res = await POST(makeReq({ roles: ["Recovered"] }));
     expect(res.status).toBe(200);
     expect((readPortals().title_filter as Record<string, unknown>).positive).toEqual(["Recovered"]);

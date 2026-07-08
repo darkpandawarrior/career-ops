@@ -103,7 +103,8 @@ function patchToProfile(p) {
 
 function loadYaml(file) {
   try {
-    const doc = yaml.load(readFileSync(file, 'utf-8'));
+    const raw = readFileSync(file, 'utf-8');
+    const doc = raw.trim() ? yaml.load(raw) : {};
     return isObj(doc) ? doc : {};
   } catch {
     return null;

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 
 // A throwaway profile root. requestRoot() (from profile-registry) is mocked to
 // return it directly so the route reads data/job-dashboard.json + config/
