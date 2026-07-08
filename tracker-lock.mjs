@@ -210,7 +210,9 @@ export async function acquireTrackerLock(lockDir, options = {}) {
     }
   }
 
-  throw new Error(`Timed out waiting for tracker merge lock at ${lockDir}`);
+  const timeoutErr = new Error(`Timed out waiting for tracker merge lock at ${lockDir}`);
+  timeoutErr.code = 'LOCK_TIMEOUT';
+  throw timeoutErr;
 }
 
 /**

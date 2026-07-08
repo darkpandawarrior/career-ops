@@ -65,6 +65,7 @@ const EXIT_OK = 0;
 const EXIT_USAGE = 1;
 const EXIT_NOT_FOUND = 2;
 const EXIT_AMBIGUOUS = 3;
+const EXIT_LOCK_TIMEOUT = 4;
 
 const USAGE = `Usage: node set-status.mjs <report#|company> <state> [--note "..."] [--role "..."] [--dry-run] [--json]
 
@@ -132,8 +133,16 @@ function failWith(exitCode, code, message, extra = {}) {
  * @returns {never}
  */
 function failUsage(message) {
-  if (message) console.error(`❌ ${message}\n`);
-  console.error(USAGE);
+  // failUsage can fire mid-argv-parse — before flags.json is settled — so
+  // JSON mode is detected from the raw argv directly.
+  if (rawArgs.includes('--json')) {
+    const msg = message ?? 'Expected 2 arguments: <report#|company> <state>';
+    console.log(JSON.stringify({ error: msg, code: 'usage' }));
+    console.error(`❌ ${msg}`);
+  } else {
+    if (message) console.error(`❌ ${message}\n`);
+    console.error(USAGE);
+  }
   process.exit(EXIT_USAGE);
 }
 
@@ -291,25 +300,37 @@ function resolveRow(rows, lock) {
 // merge-tracker.mjs and the web dashboard's status API use, so a batch merge
 // and a CLI status update can never race each other into a lost update) ─────
 
-const lockDir = lockDirFor(canonicalizeTrackerPath(APPS_FILE), process.env.CAREER_OPS_TRACKER_LOCK);
-let trackerLock;
-try {
-  trackerLock = await acquireTrackerLock(lockDir, {
-    timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 10_000,
-    retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
-    staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
-    tracker: APPS_FILE,
-  });
-  process.once('exit', () => trackerLock?.release());
-} catch (err) {
-  failWith(EXIT_USAGE, 'lock-timeout', err.message);
+// Dry-run never writes, so it must not hold the exclusive lock: a read-only
+// preview should not block (or be blocked by) merge-tracker or another
+// set-status writer. A stale read is acceptable for a preview.
+let trackerLock = null;
+if (!flags.dryRun) {
+  const lockDir = lockDirFor(canonicalizeTrackerPath(APPS_FILE), process.env.CAREER_OPS_TRACKER_LOCK);
+  try {
+    trackerLock = await acquireTrackerLock(lockDir, {
+      timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 10_000,
+      retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+      staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+      tracker: APPS_FILE,
+    });
+    process.once('exit', () => trackerLock?.release());
+  } catch (err) {
+    // Exit 4 means "lock is busy — retry later" and must stay reserved for
+    // the actual timeout. Filesystem/configuration failures (EACCES on the
+    // lock dir, unwritable owner.json, …) are not retryable and fail as a
+    // config error instead.
+    if (err?.code === 'LOCK_TIMEOUT') {
+      failWith(EXIT_LOCK_TIMEOUT, 'lock-timeout', err.message);
+    }
+    failWith(EXIT_USAGE, 'lock-error', `Cannot acquire tracker lock: ${err.message}`);
+  }
 }
 
 let content;
 try {
   content = readFileSync(APPS_FILE, 'utf-8');
 } catch (err) {
-  trackerLock.release();
+  trackerLock?.release();
   failWith(EXIT_NOT_FOUND, 'read-failure', `Cannot read tracker at ${APPS_FILE}: ${err.message}`);
 }
 const lines = content.split('\n');
@@ -321,7 +342,7 @@ for (let i = 0; i < lines.length; i++) {
   if (row) rows.push({ ...row, lineIdx: i });
 }
 if (rows.length === 0) {
-  trackerLock.release();
+  trackerLock?.release();
   failWith(EXIT_NOT_FOUND, 'empty-tracker', `Tracker at ${APPS_FILE} has no data rows`);
 }
 
@@ -340,7 +361,7 @@ parts[colmap.status] = newStatus;
 let noteChanged = false;
 if (note) {
   if (colmap.notes == null) {
-    trackerLock.release();
+    trackerLock?.release();
     failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
   }
   const existing = parts[colmap.notes] ?? '';
@@ -369,11 +390,11 @@ if (changed && !flags.dryRun) {
     try { copyFileSync(APPS_FILE, APPS_FILE + '.bak'); } catch { /* non-fatal */ }
     writeFileAtomic(APPS_FILE, lines.join('\n'));
   } catch (err) {
-    trackerLock.release();
+    trackerLock?.release();
     failWith(EXIT_USAGE, 'write-failure', `Failed to write tracker at ${APPS_FILE}: ${err.message}`);
   }
 }
-trackerLock.release();
+trackerLock?.release();
 
 // ── report ───────────────────────────────────────────────────────
 
@@ -386,6 +407,10 @@ const result = {
   newStatus,
   ...(note != null ? { note } : {}),
   ...(flags.dryRun ? { dryRun: true } : {}),
+  // Fire the #1430 hook only on an actual transition INTO Applied — an
+  // idempotent re-run of an already-Applied row must not invite a consumer
+  // to seed a duplicate follow-up.
+  ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
   tracker: APPS_FILE,
 };
 
@@ -394,5 +419,8 @@ if (flags.json) {
 } else {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
+  if (statusChanged && !flags.dryRun && newStatus === 'Applied') {
+    console.error('ℹ️  Status is Applied — seed follow-ups: node followup-seed.mjs ' + target.num);
+  }
 }
 process.exit(EXIT_OK);
