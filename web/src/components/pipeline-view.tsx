@@ -161,7 +161,7 @@ export function PipelineView({
               key={t}
               onClick={() => setParams({ tab: t === "INBOX" ? null : t })}
               className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-xs font-medium transition-colors",
+                "-mb-px border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 tab === t
                   ? "border-brand text-foreground"
                   : "border-transparent text-muted hover:text-foreground",
@@ -179,7 +179,7 @@ export function PipelineView({
           <button
             type="button"
             onClick={() => setParams({ min: null })}
-            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
+            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15 max-sm:min-h-[44px]"
             title="Clear score filter"
           >
             score ≥ {minFilter.toFixed(1)}
@@ -384,7 +384,7 @@ function StatusCell({ n, status, onSaved }: { n: string; status: string; onSaved
         defaultValue={status.trim()}
         onChange={(e) => save(e.target.value)}
         disabled={busy}
-        className="cursor-pointer rounded border border-transparent bg-transparent py-0.5 pl-0.5 pr-4 text-muted outline-none transition-colors hover:border-border hover:bg-surface focus:border-brand/50"
+        className="cursor-pointer rounded border border-transparent bg-transparent py-0.5 pl-0.5 pr-4 text-muted outline-none transition-colors hover:border-border hover:bg-surface focus:border-brand/50 max-sm:min-h-[44px]"
       >
         {!CANONICAL_STATES.includes(status.trim() as (typeof CANONICAL_STATES)[number]) && (
           <option value={status.trim()}>{status.trim() || "—"}</option>
@@ -431,7 +431,7 @@ function NotesCell({ n, notes, onSaved }: { n: string; notes: string; onSaved: (
           if (e.key === "Escape") { setValue(notes); setEditing(false); }
         }}
         disabled={busy}
-        className="w-full min-w-40 rounded border border-brand/40 bg-surface px-2 py-1 text-xs outline-none"
+        className="w-full min-w-40 rounded border border-brand/40 bg-surface px-2 py-1 text-xs outline-none max-sm:min-h-[44px]"
       />
     );
   }
@@ -439,7 +439,7 @@ function NotesCell({ n, notes, onSaved }: { n: string; notes: string; onSaved: (
     <button
       type="button"
       onClick={() => setEditing(true)}
-      className="line-clamp-2 max-w-xs text-left text-xs text-faint transition-colors hover:text-foreground"
+      className="line-clamp-2 max-w-xs text-left text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
       title="Click to edit notes"
     >
       {notes?.trim() || <span className="italic opacity-60">add note…</span>}
