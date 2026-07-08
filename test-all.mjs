@@ -125,17 +125,14 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
-  // Self-updater scaffolding (update-system.mjs and its test scripts) was
-  // deliberately dropped from this fork — HireSignal doesn't self-update the
-  // way the OSS project does. skipIfMissing keeps these entries documenting
-  // intent without failing when the scaffolding is (correctly) absent.
-  { name: 'updater-migration-tests.mjs', expectExit: 0, skipIfMissing: true },
+  // tracker-columns-tests.mjs: not yet ported (tracked as a follow-up —
+  // header-aware tracker parsing). skipIfMissing documents intent without
+  // failing while the suite doesn't exist yet.
   { name: 'tracker-columns-tests.mjs', expectExit: 0, skipIfMissing: true },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   // Bare run: no portals.yml in the repo, so it must exit 0 gracefully (and hit
   // no network). The probe logic itself is unit-tested below with a mock.
   { name: 'verify-portals.mjs', expectExit: 0 },
-  { name: 'update-system.mjs check', expectExit: 0, skipIfMissing: true },
 ];
 
 for (const { name, allowFail, skipIfMissing } of scripts) {
@@ -563,27 +560,6 @@ if (!/waitUntil:\s*['"]networkidle['"]/.test(generatePdfScript)) {
   fail('generate-pdf still waits for networkidle');
 }
 
-// ── 7c. UPDATER DASHBOARD REBUILD ─────────────────────────────────
-
-console.log('\n7c. Updater dashboard rebuild');
-
-if (!fileExists('update-system.mjs')) {
-  warn('7c skipped (self-updater not shipped in this fork)');
-} else {
-  const updateSystemScript = readFile('update-system.mjs');
-  if (
-    /git\('diff',\s*'--name-only',\s*'HEAD',\s*'--',\s*'dashboard'\)/.test(updateSystemScript) &&
-    /path\.startsWith\(['"]dashboard\/['"]\)\s*&&\s*path\.endsWith\(['"]\.go['"]\)/.test(updateSystemScript) &&
-    /go build -o career-dashboard \./.test(updateSystemScript) &&
-    /cwd:\s*join\(ROOT,\s*['"]dashboard['"]\)/.test(updateSystemScript) &&
-    /dashboard binary rebuild skipped/.test(updateSystemScript)
-  ) {
-    pass('update-system rebuilds dashboard binary when dashboard Go sources change');
-  } else {
-    fail('update-system does not rebuild dashboard binary after dashboard Go source updates');
-  }
-}
-
 // ── 8. MODE FILE INTEGRITY ──────────────────────────────────────
 
 console.log('\n8. Mode file integrity');
@@ -966,8 +942,8 @@ try {
 console.log('\n11. AGENTS.md integrity');
 
 const agents = readFile('AGENTS.md');
-// 'Update Check' intentionally excluded — it documents update-system.mjs's
-// self-update flow, which this fork deliberately doesn't ship.
+// 'Update Check' intentionally excluded — this fork deliberately doesn't
+// ship a self-update flow (career-ops syncs upstream via hand-merge).
 const requiredSections = [
   'Data Contract', 'Ethical Use',
   'Offer Verification', 'Canonical States', 'TSV Format',
@@ -1045,183 +1021,6 @@ for (const link of symlinks) {
   } else {
     fail(`${link} resolves to ${resolved}, expected ${canonicalReal} or byte-identical canonical skill copy`);
   }
-}
-
-console.log('\n12a. Skill entrypoint materialization');
-
-if (!fileExists('update-system.mjs')) {
-  warn('12a/12b skipped (self-updater not shipped in this fork)');
-} else {
-
-{
-  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skills-'));
-  try {
-    const canonicalDir = join(fixtureRoot, '.agents', 'skills', 'career-ops');
-    const claudeDir = join(fixtureRoot, '.claude', 'skills', 'career-ops');
-    const opencodeDir = join(fixtureRoot, '.opencode', 'skills', 'career-ops');
-    mkdirSync(canonicalDir, { recursive: true });
-    mkdirSync(claudeDir, { recursive: true });
-    mkdirSync(opencodeDir, { recursive: true });
-
-    const fixtureSkill = '---\nname: career-ops\n---\n\n# canonical skill\n';
-    const pointer = '../../../.agents/skills/career-ops/SKILL.md';
-    writeFileSync(join(canonicalDir, 'SKILL.md'), fixtureSkill);
-    writeFileSync(join(claudeDir, 'SKILL.md'), pointer);
-    writeFileSync(join(opencodeDir, 'SKILL.md'), pointer);
-
-    const updater = await import(pathToFileURL(join(ROOT, 'update-system.mjs')).href);
-    const materialized = updater.materializeSkillEntrypoints(fixtureRoot).sort();
-    const expected = [
-      '.claude/skills/career-ops/SKILL.md',
-      '.opencode/skills/career-ops/SKILL.md',
-    ];
-
-    if (JSON.stringify(materialized) === JSON.stringify(expected)) {
-      pass('update-system materializes pointer skill entrypoints');
-    } else {
-      fail(`unexpected materialized skill entrypoints: ${JSON.stringify(materialized)}`);
-    }
-
-    const claudeSkill = readFileSync(join(claudeDir, 'SKILL.md'), 'utf-8');
-    const opencodeSkill = readFileSync(join(opencodeDir, 'SKILL.md'), 'utf-8');
-    if (claudeSkill === fixtureSkill && opencodeSkill === fixtureSkill) {
-      pass('materialized skill entrypoints match canonical content');
-    } else {
-      fail('materialized skill entrypoints do not match canonical content');
-    }
-  } catch (e) {
-    fail(`skill entrypoint materialization test crashed: ${e.message}`);
-  } finally {
-    rmSync(fixtureRoot, { recursive: true, force: true });
-  }
-}
-
-{
-  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skills-unreadable-'));
-  try {
-    const canonicalDir = join(fixtureRoot, '.agents', 'skills', 'career-ops');
-    const claudeDir = join(fixtureRoot, '.claude', 'skills', 'career-ops');
-    mkdirSync(canonicalDir, { recursive: true });
-    mkdirSync(claudeDir, { recursive: true });
-
-    const pointer = '../../../.agents/skills/career-ops/SKILL.md';
-    mkdirSync(join(canonicalDir, 'SKILL.md'));
-    writeFileSync(join(claudeDir, 'SKILL.md'), pointer);
-
-    const updater = await import(pathToFileURL(join(ROOT, 'update-system.mjs')).href);
-    const materialized = updater.materializeSkillEntrypoints(fixtureRoot);
-    const claudeSkill = readFileSync(join(claudeDir, 'SKILL.md'), 'utf-8');
-    if (materialized.length === 0 && claudeSkill === pointer) {
-      pass('update-system skips skill materialization when canonical entrypoint is unreadable');
-    } else {
-      fail(`unreadable canonical skill unexpectedly materialized: ${JSON.stringify(materialized)}`);
-    }
-  } catch (e) {
-    fail(`unreadable canonical skill test crashed: ${e.message}`);
-  } finally {
-    rmSync(fixtureRoot, { recursive: true, force: true });
-  }
-}
-
-{
-  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skills-entry-dir-'));
-  try {
-    const canonicalDir = join(fixtureRoot, '.agents', 'skills', 'career-ops');
-    const claudeDir = join(fixtureRoot, '.claude', 'skills', 'career-ops');
-    const opencodeDir = join(fixtureRoot, '.opencode', 'skills', 'career-ops');
-    mkdirSync(canonicalDir, { recursive: true });
-    mkdirSync(claudeDir, { recursive: true });
-    mkdirSync(opencodeDir, { recursive: true });
-
-    const fixtureSkill = '---\nname: career-ops\n---\n\n# canonical skill\n';
-    const pointer = '../../../.agents/skills/career-ops/SKILL.md';
-    writeFileSync(join(canonicalDir, 'SKILL.md'), fixtureSkill);
-    mkdirSync(join(claudeDir, 'SKILL.md'));
-    writeFileSync(join(opencodeDir, 'SKILL.md'), pointer);
-
-    const updater = await import(pathToFileURL(join(ROOT, 'update-system.mjs')).href);
-    const materialized = updater.materializeSkillEntrypoints(fixtureRoot);
-    const opencodeSkill = readFileSync(join(opencodeDir, 'SKILL.md'), 'utf-8');
-    if (JSON.stringify(materialized) === JSON.stringify(['.opencode/skills/career-ops/SKILL.md']) && opencodeSkill === fixtureSkill) {
-      pass('update-system skips non-file skill entrypoints while materializing valid pointers');
-    } else {
-      fail(`non-file skill entrypoint handling was unexpected: ${JSON.stringify(materialized)}`);
-    }
-  } catch (e) {
-    fail(`non-file skill entrypoint test crashed: ${e.message}`);
-  } finally {
-    rmSync(fixtureRoot, { recursive: true, force: true });
-  }
-}
-
-console.log('\n12b. Materialized skill index mode');
-
-{
-  const fixtureRoot = mkdtempSync(join(tmpdir(), 'career-ops-skill-git-'));
-  const gitRun = (args, opts = {}) => execFileSync('git', args, {
-    cwd: fixtureRoot,
-    encoding: 'utf-8',
-    timeout: 30000,
-    ...opts,
-  }).trim();
-  const gitRaw = (args) => execFileSync('git', args, {
-    cwd: fixtureRoot,
-    encoding: 'utf-8',
-    timeout: 30000,
-  });
-
-  try {
-    const canonicalDir = join(fixtureRoot, '.agents', 'skills', 'career-ops');
-    const claudeDir = join(fixtureRoot, '.claude', 'skills', 'career-ops');
-    const opencodeDir = join(fixtureRoot, '.opencode', 'skills', 'career-ops');
-    mkdirSync(canonicalDir, { recursive: true });
-    mkdirSync(claudeDir, { recursive: true });
-    mkdirSync(opencodeDir, { recursive: true });
-
-    const fixtureSkill = '---\nname: career-ops\n---\n\n# canonical skill\n';
-    const pointer = '../../../.agents/skills/career-ops/SKILL.md';
-
-    gitRun(['init']);
-    gitRun(['config', 'core.symlinks', 'false']);
-    gitRun(['config', 'user.email', 'test@example.com']);
-    gitRun(['config', 'user.name', 'Test User']);
-
-    writeFileSync(join(canonicalDir, 'SKILL.md'), fixtureSkill);
-    writeFileSync(join(claudeDir, 'SKILL.md'), pointer);
-    writeFileSync(join(opencodeDir, 'SKILL.md'), pointer);
-    gitRun(['add', '--', '.agents/skills/career-ops/SKILL.md']);
-
-    const pointerBlob = gitRun(['hash-object', '-w', '--stdin'], { input: pointer });
-    gitRun(['update-index', '--add', '--cacheinfo', `120000,${pointerBlob},.claude/skills/career-ops/SKILL.md`]);
-    gitRun(['update-index', '--add', '--cacheinfo', `120000,${pointerBlob},.opencode/skills/career-ops/SKILL.md`]);
-
-    const updater = await import(pathToFileURL(join(ROOT, 'update-system.mjs')).href);
-    const materialized = updater.materializeSkillEntrypoints(fixtureRoot);
-    updater.prepareMaterializedSkillEntrypointsForStage(materialized, fixtureRoot);
-    gitRun(['add', '--', '.claude/skills/', '.opencode/skills/']);
-
-    const claudeIndex = gitRun(['ls-files', '-s', '--', '.claude/skills/career-ops/SKILL.md']);
-    const opencodeIndex = gitRun(['ls-files', '-s', '--', '.opencode/skills/career-ops/SKILL.md']);
-    if (claudeIndex.startsWith('100644 ') && opencodeIndex.startsWith('100644 ')) {
-      pass('materialized skill entrypoints stage as regular files, not symlink blobs');
-    } else {
-      fail(`materialized skill entrypoints staged with wrong modes: ${JSON.stringify([claudeIndex, opencodeIndex])}`);
-    }
-
-    const claudeBlob = gitRaw(['show', ':.claude/skills/career-ops/SKILL.md']);
-    const opencodeBlob = gitRaw(['show', ':.opencode/skills/career-ops/SKILL.md']);
-    if (claudeBlob === fixtureSkill && opencodeBlob === fixtureSkill) {
-      pass('materialized skill blobs contain canonical skill content');
-    } else {
-      fail('materialized skill blobs do not contain canonical skill content');
-    }
-  } catch (e) {
-    fail(`skill entrypoint index-mode test crashed: ${e.message}`);
-  } finally {
-    rmSync(fixtureRoot, { recursive: true, force: true });
-  }
-}
-
 }
 
 // ── 14. VERSION FILE ─────────────────────────────────────────────
@@ -2555,45 +2354,6 @@ try {
   }
 } catch (e) {
   fail(`Batch runner MCP isolation test crashed: ${e.message}`);
-}
-
-// ── 16. UPDATE-SYSTEM SEMVER PARSING (#923) ─────────────────────
-
-console.log('\n16. update-system SEMVER_RE');
-
-if (!fileExists('update-system.mjs')) {
-  warn('16 skipped (self-updater not shipped in this fork)');
-} else {
-try {
-  // Importing must not trigger the CLI (the import.meta.url guard); it
-  // exposes SEMVER_RE, which the releases-API fallback uses on release.tag_name.
-  const { SEMVER_RE } = await import(pathToFileURL(join(ROOT, 'update-system.mjs')).href);
-  const parse = (tag) => String(tag).trim().match(SEMVER_RE)?.[1] ?? null;
-
-  // Release Please tags carry the component prefix (career-ops-v1.9.0); the
-  // prefix must be stripped or the releases-API fallback is dead code (#923).
-  if (parse('career-ops-v1.9.0') === '1.9.0') {
-    pass('SEMVER_RE parses Release Please component-prefixed tag (career-ops-v1.9.0 → 1.9.0)');
-  } else {
-    fail(`SEMVER_RE failed on career-ops-v1.9.0 (got ${parse('career-ops-v1.9.0')}) — releases-API fallback is dead code (#923)`);
-  }
-
-  // No regression on plain tags.
-  if (parse('v1.9.0') === '1.9.0' && parse('1.9.0') === '1.9.0') {
-    pass('SEMVER_RE still parses plain v-prefixed and bare semver tags');
-  } else {
-    fail(`SEMVER_RE regressed on plain tags (v1.9.0 → ${parse('v1.9.0')}, 1.9.0 → ${parse('1.9.0')})`);
-  }
-
-  // Non-semver input must not match.
-  if (parse('career-ops') === null && parse('v1.9') === null) {
-    pass('SEMVER_RE rejects non-semver input');
-  } else {
-    fail(`SEMVER_RE matched non-semver input (career-ops → ${parse('career-ops')}, v1.9 → ${parse('v1.9')})`);
-  }
-} catch (e) {
-  fail(`update-system SEMVER_RE test crashed: ${e.message}`);
-}
 }
 
 // ── 17. COVER LETTER GREETING BLOCK ─────────────────────────────
