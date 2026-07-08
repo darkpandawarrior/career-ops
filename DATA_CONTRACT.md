@@ -27,6 +27,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/scan-history.tsv` | Your scan history |
 | `data/follow-ups.md` | Your follow-up history |
 | `data/apply-queue.md` | Your ranked apply queue (generated from your pipeline + profile) |
+| `data/salary-observations.tsv` | Your append-only compensation observation log (desired/advertised/actual pay per application; read by `salary-gap.mjs`) |
 | `writing-samples/*` | Your personal writing samples for style calibration (except `writing-samples/README.md`, which is system-owned documentation delivered by updates) |
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |

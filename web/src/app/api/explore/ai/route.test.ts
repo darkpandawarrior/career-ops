@@ -209,6 +209,20 @@ describe("POST /api/explore/ai — streaming (generic CLI)", () => {
   });
 });
 
+describe("POST /api/explore/ai — cancel() safety (#1155)", () => {
+  it("does not throw when the child emits data/close after the client disconnects", async () => {
+    const res = await POST(makeReq({ query: "x", cliId: "codex" }));
+    const child = h.lastChild!; // start() already ran synchronously during POST
+    const reader = res.body!.getReader();
+    await reader.cancel(); // simulates a client disconnect → cancel()
+    expect(() => {
+      child.stdout.emit("data", Buffer.from("late text"));
+      child.emit("close");
+    }).not.toThrow();
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+});
+
 describe("POST /api/explore/ai — streaming (claude stream-json)", () => {
   beforeEach(() => {
     // Claude path is keyed off cliId === "claude".

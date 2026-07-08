@@ -93,7 +93,19 @@ Use the bounded research budget above for:
 - Company's compensation reputation
 - Demand trend for the role
 
-Table with data and cited sources. If there is no data, state it instead of inventing.
+Before interpreting any salary number, classify the company type and assign a
+compensation-reliability tier — see `_shared.md` § Company Type and
+Compensation Reliability for the taxonomy and tiers. State both as one line
+each: **Company type:** {category or `Unknown`} — {confidence + one evidence
+phrase}, **Compensation reliability:** {tier}.
+
+Table with data and cited sources. If there is no data, state it instead of inventing. The table's **first row is always the JD's own advertised figure, verbatim** (or `not stated` if none) — before any researched market data:
+
+```markdown
+| Advertised (JD) | {verbatim figure or "not stated"} | JD |
+```
+
+Never blend the advertised figure with researched estimates or replace it with them — market research rows follow below it. This same verbatim figure is what the Machine Summary's `advertised_comp` key carries (see Post-evaluation § Machine Summary) and what `salary-gap.mjs` reads as the advertised-compensation observation for `data/salary-observations.tsv`'s per-application comparison (desired vs. advertised vs. actual).
 
 ## Block E — Customization Plan
 
@@ -286,6 +298,9 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ---
 
+## Machine Summary
+(YAML fence for downstream scripts — see requirement below)
+
 ## A) Role Summary
 (full content of block A)
 
@@ -316,14 +331,17 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 (list of 15-20 keywords from the JD for ATS optimization)
 ```
 
+**Machine Summary (required):** every report carries a `## Machine Summary` YAML fence directly after the header — same schema, exact field names, and rules as the "Machine Summary" block in `batch/batch-prompt.md` (do not duplicate the schema here; that file is the source of truth). It includes `advertised_comp`: the JD's own salary figure **verbatim** (e.g. `"80-90k EUR"`), or `null` when the JD states nothing — never estimated, never replaced with researched market data. This key seeds the advertised salary observation read by `node salary-gap.mjs`.
+
 ### 2. Record in tracker
 
 **ALWAYS** record in `data/applications.md`:
 - Next sequential number
 - Current date
-- Company
+- Company — the END employer. If the JD is agency-mediated ("our client", agency domain, no employer named), ASK the user which agency it came through, use `?` as Company, and put a distinguishing descriptor in Notes (e.g. `fintech, Leeds`). Never write "Confidential" — the `?` marker is locale-invariant and can't collide with a real firm.
+- Via (when the tracker has the column) — the agency/recruiter firm, `—` for direct. In the tracker-addition TSV, append it as a tagged extra field: `via={Agency}` (see the TSV format spec in `AGENTS.md`).
 - Role
-- Score: match average (1-5)
+- Score: match average (1-5) — read `modes/_custom.md` → House Rules, if it exists, and apply its override here. Default (if absent or silent): average of block scores.
 - Status: `Evaluated`
 - PDF: ❌ (or ✅ if auto-pipeline generated PDF)
 - Report: root-relative link `[001](reports/001-company-2026-01-01.md)` (when merged via `merge-tracker.mjs` it is normalized to be relative to the tracker's own dir, e.g. `../reports/...`; see #760)
@@ -333,3 +351,19 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ```markdown
 | # | Date | Company | Role | Score | Status | PDF | Report |
 ```
+
+With the optional Via column (intermediary channel) after Company:
+
+```markdown
+| # | Date | Company | Via | Role | Score | Status | PDF | Report |
+```
+
+### 3. Salary observations (desired ask only)
+
+If — and only if — the user **explicitly stated a role-specific desired number for THIS application** in the conversation ("I'd ask 95k here"), append one `desired` line (source `user`) to `data/salary-observations.tsv` (create the file if missing):
+
+```text
+{tracker#}\t{YYYY-MM-DD}\tdesired\t{amount}\t{currency}\tuser\t{short context note}
+```
+
+Never infer a desired number from the JD, the score, or past conversations. The profile default (`config/profile.yml` → `compensation.target_range`) needs no line — `salary-gap.mjs` reads it as the fallback. The advertised figure also needs no line: the report's `advertised_comp` **is** the advertised observation. An `actual` line (the real offer/contract number) is appended later, once an offer exists — see `modes/tracker.md` and `modes/patterns.md` for where it's surfaced.

@@ -80,12 +80,18 @@ export async function POST(req: Request) {
   const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, shell: process.platform === "win32" });
 
   const encoder = new TextEncoder();
+  // `closed` + the kill timer live in the OUTER scope (not inside start()) so
+  // cancel() — fired on client disconnect — can flip `closed` before any late
+  // child-process event tries to enqueue on an already-closed controller
+  // (uncaught "Controller is already closed", #1155). emit() is also
+  // try/catch'd as a second line of defense.
+  let closed = false;
+  let killer: ReturnType<typeof setTimeout> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      let closed = false;
       let buf = "";
       let emitted = false;
-      const killer = setTimeout(() => {
+      killer = setTimeout(() => {
         try {
           child.kill("SIGTERM");
         } catch {
@@ -95,7 +101,7 @@ export async function POST(req: Request) {
       const safeClose = () => {
         if (!closed) {
           closed = true;
-          clearTimeout(killer);
+          if (killer) clearTimeout(killer);
           try {
             controller.close();
           } catch {
@@ -104,9 +110,12 @@ export async function POST(req: Request) {
         }
       };
       const emit = (s: string) => {
-        if (!closed && s) {
-          emitted = true;
+        if (closed || !s) return;
+        emitted = true;
+        try {
           controller.enqueue(encoder.encode(s));
+        } catch {
+          closed = true;
         }
       };
 
@@ -135,20 +144,20 @@ export async function POST(req: Request) {
       });
       child.stderr.on("data", (d: Buffer) => {
         const s = d.toString();
-        if (/error|not found|denied|fatal/i.test(s) && !closed) {
-          controller.enqueue(encoder.encode(`\n[${spec.name}] ${s.trim()}\n`));
-        }
+        if (/error|not found|denied|fatal/i.test(s)) emit(`\n[${spec.name}] ${s.trim()}\n`);
       });
       child.on("error", (e) => {
-        if (!closed) controller.enqueue(encoder.encode(`\n[error launching ${spec.name}: ${e.message}]`));
+        emit(`\n[error launching ${spec.name}: ${e.message}]`);
         safeClose();
       });
       child.on("close", () => {
-        if (!emitted && !closed) controller.enqueue(encoder.encode("_(no output — is the CLI authenticated?)_"));
+        if (!emitted) emit("_(no output — is the CLI authenticated?)_");
         safeClose();
       });
     },
     cancel() {
+      closed = true;
+      if (killer) clearTimeout(killer);
       try {
         child.kill("SIGTERM");
       } catch {
