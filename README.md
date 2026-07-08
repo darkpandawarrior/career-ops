@@ -39,7 +39,6 @@ HireSignal extends that foundation with a **local web dashboard** that helps a c
 - convert resume evidence into a structured search profile
 - discover jobs from ATS feeds, configured sources, remote boards, and search leads
 - score opportunities against candidate facts instead of shallow title matching
-- generate evidence-preserving tailored resumes
 - keep career-ops compatibility for scans, reports, trackers, modes, and templates
 
 > **The intent is simple: fewer random applications, more informed decisions.**
@@ -83,7 +82,6 @@ It treats your resume and preferences as the source of truth, then searches and 
 | Evidence-backed profile review | Converts resume sections into editable candidate facts: target roles, skills, seniority, location policy, and compensation preferences |
 | Profile-driven search | Builds discovery queries from candidate facts, combining ATS providers, remote feeds, configured portals, scan history, and pipeline entries |
 | Fit scoring | Scores roles using skills, experience, eligibility, compensation, availability, and preferences — not title-only matching |
-| Tailored resumes | Generates tailored HTML/PDF resumes while preserving factual claims from the canonical CV |
 | Portfolio site generator | Builds a personal portfolio **website** from a candidate's own career-ops data (identity, CV, storybank, proof points, pipeline) — role-agnostic, themeable, exportable as a standalone Vite project. See [`docs/PORTFOLIO.md`](docs/PORTFOLIO.md). |
 | Privacy audit | Verifies local dashboard code does not leak private resume/profile data into system-layer files |
 | career-ops compatibility | Keeps core tracker files, reports, scanner scripts, modes, templates, and data contract available |
@@ -226,7 +224,7 @@ query-builder.mjs ◀───────────────────�
                     └─▶ data/job-dashboard.json
                           └─▶ dashboard review
                                 └─▶ generate-pdf.mjs  (/career-ops pdf mode)
-                                      └─▶ output/tailored-resumes/
+                                      └─▶ output/
 ```
 
 Private candidate data stays in the local user layer throughout. System-layer code and public docs never contain real resume details, salary targets, or application history.
@@ -273,7 +271,6 @@ docs/
 | 4. Activation | `profile-writer.mjs` | Writes reviewed data into career-ops user-layer files; validates YAML; keeps rollback data; clears stale caches |
 | 5. Search | `query-builder.mjs`, `job-search-runner.mjs` | Builds search plan from profile; combines career-ops scanner, ATS discovery, provider feeds, pipeline entries, scan history |
 | 6. Scoring | `scorer.mjs` | Every job normalized and scored; results cached in `data/job-dashboard.json`; displayed as Recommended / Review / Source searches |
-| 7. Resume tailoring | `resume-tailor.mjs` | Reorders existing CV evidence around job keywords; produces HTML, PDF, notes, editing prompt in `output/tailored-resumes/`; never invents bullets |
 
 ---
 
@@ -310,7 +307,6 @@ Applied before and during scoring:
 
 - selectable PDF text preferred; layout recovery handles single-column, sidebar, and multi-column layouts
 - only resume evidence used for demonstrated skills — gaps surfaced as gaps, not counted as experience
-- tailored resumes reuse existing claims; no bullets invented
 
 ---
 
