@@ -191,7 +191,8 @@ function loadRegistry(registryPath) {
   if (!existsSync(registryPath)) return { profiles: [] };
   let doc;
   try {
-    doc = yaml.load(readFileSync(registryPath, 'utf8'));
+    const raw = readFileSync(registryPath, 'utf8');
+    doc = raw.trim() ? yaml.load(raw) : null;
   } catch (err) {
     die(`failed to parse ${registryPath}: ${err.message}`);
   }

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
@@ -32,10 +32,12 @@ export async function POST(req: Request) {
   const file = path.join(root, "portals.yml");
   let doc: Record<string, unknown> = {};
   try {
-    doc = (yaml.load(fs.readFileSync(file, "utf8")) as Record<string, unknown>) || {};
+    const raw = fs.readFileSync(file, "utf8");
+    doc = (raw.trim() ? (yaml.load(raw) as Record<string, unknown>) : {}) || {};
   } catch {
     try {
-      doc = (yaml.load(fs.readFileSync(path.join(root, "templates", "portals.example.yml"), "utf8")) as Record<string, unknown>) || {};
+      const raw = fs.readFileSync(path.join(root, "templates", "portals.example.yml"), "utf8");
+      doc = (raw.trim() ? (yaml.load(raw) as Record<string, unknown>) : {}) || {};
     } catch {
       doc = {};
     }

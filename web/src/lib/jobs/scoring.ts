@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { scoreJob, normalizeJob } from "@/lib/scoring/scorer.mjs";
 import { validateJobSearchConfig } from "@/lib/search/config-schema.mjs";
 import { buildSearchPlan } from "@/lib/search/query-builder.mjs";

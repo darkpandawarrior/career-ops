@@ -316,7 +316,8 @@ export async function verifyCompanies(companies, { fetchJson = defaultFetchJson,
  */
 export async function verifyPortalsFile(filePath, { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {}) {
   if (!existsSync(filePath)) return { found: false, results: [] };
-  const config = yaml.load(readFileSync(filePath, 'utf-8'));
+  const raw = readFileSync(filePath, 'utf-8');
+  const config = raw.trim() ? yaml.load(raw) : undefined;
   const companies = Array.isArray(config?.tracked_companies) ? config.tracked_companies : [];
   const results = await verifyCompanies(companies, { fetchJson, providers, httpCtx });
   return { found: true, results };

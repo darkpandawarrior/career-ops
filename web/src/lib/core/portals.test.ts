@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 
 // A DECOY engine root. careerOpsRoot() is mocked to point here so that any test
 // which forgets to pass `root` (or any regression where seedExploreFilters reads
@@ -56,9 +56,10 @@ describe("serializePortals", () => {
     expect(out).toContain("# Ephemeral Explorer filters");
     expect(out).not.toContain("title_filter");
     expect(out).not.toContain("location_filter");
-    // header-only must still parse to null/empty (a comment-only YAML doc)
-    const doc = yaml.load(out);
-    expect(doc == null).toBe(true);
+    // header-only (comment-only) YAML has no document — js-yaml v5 throws on
+    // load() here instead of v4's `null` return, so callers must guard it the
+    // same way production code does (see loadYaml() in core/portals.ts).
+    expect(() => yaml.load(out)).toThrow(/expected a document/);
   });
 
   it("emits title_filter only when positive/negative present", () => {

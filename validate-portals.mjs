@@ -194,7 +194,8 @@ async function validateFile(filePath) {
     throw new Error(`file not found: ${filePath}`);
   }
   const providerIds = await loadProviderIds();
-  const parsed = yaml.load(readFileSync(filePath, 'utf-8'));
+  const raw = readFileSync(filePath, 'utf-8');
+  const parsed = raw.trim() ? yaml.load(raw) : undefined;
   return validatePortalsConfig(parsed, { providerIds });
 }
 

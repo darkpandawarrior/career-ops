@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 
 /**
@@ -96,7 +96,7 @@ export function readFullProfile(root: string = careerOpsRoot()): FullProfile | n
   }
   let doc: Record<string, unknown>;
   try {
-    doc = (yaml.load(raw) as Record<string, unknown>) ?? {};
+    doc = (raw.trim() ? (yaml.load(raw) as Record<string, unknown>) : {}) ?? {};
   } catch {
     return null;
   }

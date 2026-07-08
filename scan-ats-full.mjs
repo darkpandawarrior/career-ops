@@ -368,7 +368,8 @@ async function main() {
     console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
     process.exit(1);
   }
-  const config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
+  const portalsRaw = readFileSync(PORTALS_PATH, 'utf-8');
+  const config = portalsRaw.trim() ? yaml.load(portalsRaw) : undefined;
   const titleFilter = buildTitleFilter(config?.title_filter);
   const locationFilter = buildLocationFilter(config?.location_filter);
   const contentFilter = buildContentFilter(config?.content_filter);

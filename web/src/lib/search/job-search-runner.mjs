@@ -597,7 +597,8 @@ function decodeHtml(value) {
 
 async function readYaml(file) {
   if (!existsSync(file)) return {};
-  return yaml.load(await readFile(file, 'utf8')) || {};
+  const raw = await readFile(file, 'utf8');
+  return (raw.trim() ? yaml.load(raw) : {}) || {};
 }
 
 function searchError(code, message, status) {

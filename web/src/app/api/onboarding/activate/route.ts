@@ -1,6 +1,6 @@
 import path from "node:path";
 import { NextResponse } from "next/server";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { runOnboarding } from "@/lib/onboarding/run";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { careerOpsRoot } from "@/lib/career-ops";

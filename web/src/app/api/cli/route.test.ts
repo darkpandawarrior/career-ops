@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vites
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 
 // A throwaway engine root with a profiles.yml fixture. careerOpsRoot() is mocked
 // to point here so requestRoot() (real, from profile-registry) resolves a tmp

@@ -235,7 +235,8 @@ export function scanCompanyNames(content) {
 export function computePortalStats(portalsYmlContent, scanStats, producingCompanyNames = []) {
   let cfg;
   try {
-    cfg = yaml.load(String(portalsYmlContent ?? '')) || {};
+    const raw = String(portalsYmlContent ?? '');
+    cfg = (raw.trim() ? yaml.load(raw) : {}) || {};
   } catch {
     return null; // malformed YAML → no portal section rather than a crash
   }

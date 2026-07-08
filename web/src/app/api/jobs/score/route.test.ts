@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 
 // A throwaway data root holding config/job-search.yml. The route's scoreJobs()
 // reads its config from here (via the real scoring lib), so requestRoot() is
