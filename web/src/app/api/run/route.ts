@@ -156,22 +156,29 @@ export async function POST(req: Request) {
   const child = spawn(binPath, args, { cwd: root, env: { ...process.env, CAREER_OPS_ROOT: root }, shell: process.platform === "win32" });
   const enc = new TextEncoder();
 
+  // `closed` + the kill timer live in the OUTER scope (not inside start()) so
+  // cancel() — fired on client disconnect — can flip `closed` before any late
+  // child-process event tries to enqueue on an already-closed controller
+  // (uncaught "Controller is already closed", #1155). send() is also
+  // try/catch'd as a second line of defense.
+  let closed = false;
+  let killer: ReturnType<typeof setTimeout> | undefined;
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      let closed = false;
       let buf = "";
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false;
       // pdf-mode tailors a full CV + renders it — give it more headroom.
       const killMs = kind === "pdf" ? 720_000 : 285_000;
-      const killer = setTimeout(() => {
+      killer = setTimeout(() => {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
       const send = (obj: unknown) => {
-        if (!closed) controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+        if (closed) return;
+        try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { closed = true; }
       };
       const close = () => {
-        if (!closed) { closed = true; clearTimeout(killer); try { controller.close(); } catch { /* */ } }
+        if (!closed) { closed = true; if (killer) clearTimeout(killer); try { controller.close(); } catch { /* */ } }
       };
 
       child.stdout.on("data", (d: Buffer) => {
@@ -234,6 +241,8 @@ export async function POST(req: Request) {
       });
     },
     cancel() {
+      closed = true;
+      if (killer) clearTimeout(killer);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
     },
   });
