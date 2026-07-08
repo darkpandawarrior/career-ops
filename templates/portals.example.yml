@@ -695,6 +695,10 @@ search_queries:
 #   provider: landingjobs
 #   enabled: true
 #
+# - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
+#   provider: larajobs
+#   enabled: true
+#
 # - name: RemoteOK
 #   provider: remoteok
 #   enabled: true

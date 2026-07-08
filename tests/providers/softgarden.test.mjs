@@ -24,10 +24,22 @@ try {
     fail('softgarden.resolveWidgetUrl() should default to /de/widgets/jobs');
   }
 
+  if (resolveWidgetUrl({ careers_url: 'https://acme.softgarden.io/en/vacancies' }) === 'https://acme.softgarden.io/en/widgets/jobs') {
+    pass('softgarden.resolveWidgetUrl() defaults other tenant URLs to the URL\'s own lang widget');
+  } else {
+    fail(`softgarden.resolveWidgetUrl() lang-prefixed default wrong: ${resolveWidgetUrl({ careers_url: 'https://acme.softgarden.io/en/vacancies' })}`);
+  }
+
   if (resolveWidgetUrl({ api: 'https://evil.com/x.softgarden.io' }) === null && resolveWidgetUrl({ api: 'https://softgarden.io.evil.com/x' }) === null) {
     pass('softgarden.resolveWidgetUrl() rejects path- and suffix-spoofed hosts');
   } else {
     fail('softgarden.resolveWidgetUrl() should reject spoofed hosts');
+  }
+
+  if (softgarden.detect({ careers_url: 'https://evil.com/x.softgarden.io' }) === null && softgarden.detect({ careers_url: 'https://softgarden.io.evil.com/x' }) === null) {
+    pass('softgarden.detect() rejects path- and suffix-spoofed hosts');
+  } else {
+    fail('softgarden.detect() should reject spoofed hosts');
   }
 
   if (parseSoftgardenDate('04.07.26') === Date.UTC(2026, 6, 4) && parseSoftgardenDate('7/4/26') === Date.UTC(2026, 6, 4) && parseSoftgardenDate('junk') === undefined) {
@@ -48,6 +60,39 @@ try {
   const sgJobs = await softgarden.fetch({ name: 'RENK', api: 'https://renk-group.softgarden.io/de/widgets/jobs' }, sgCtx);
   if (sgJobs.length === 1 && sgJobs[0].company === 'RENK') pass('softgarden.fetch() parses the widget page and tags company from entry.name');
   else fail(`softgarden.fetch() returned ${JSON.stringify(sgJobs)}`);
+
+  // parseWidget — multi-card, multi-city, entity-heavy fragment (upstream #1499 union).
+  const sgCard = (id, title, cities) =>
+    `<div class="matchElement" id="job_id_${id}">` +
+    `<div class="matchValue date">04.07.26</div>` +
+    `<div target="_blank" class="matchValue title"><a href="../../job/${id}/slug-${id}?jobDbPVId=9${id}&amp;l=de" target="_blank">${title}</a></div>` +
+    `<div class="matchValue audience">Berufserfahrene</div>` +
+    `<div class="matchValue ProjectGeoLocationCity"><div><div class="location-container">${cities.map((c) => `<span class="location-view-item">${c}</span>`).join('')}</div></div></div>` +
+    `</div>`;
+  const sgHtml = '<html>' + sgCard('111', 'Fachkraft (m/w/d) f&#252;r Export &amp; Zoll', ['Hannover']) + sgCard('222', 'SAP Consultant', ['Augsburg', 'M&#252;nchen']) + '</html>';
+  const sgRows = parseWidget(sgHtml, 'https://renk-group.softgarden.io/de/widgets/jobs');
+  if (sgRows.length === 2) pass('softgarden.parseWidget() yields one row per matchElement');
+  else fail(`softgarden.parseWidget() returned ${sgRows.length}, expected 2`);
+  if (sgRows[0]?.title === 'Fachkraft (m/w/d) für Export & Zoll') pass('softgarden.parseWidget() decodes entities in titles');
+  else fail(`softgarden.parseWidget() title wrong: ${JSON.stringify(sgRows[0]?.title)}`);
+  if (sgRows[0]?.url === 'https://renk-group.softgarden.io/job/111/slug-111?jobDbPVId=9111&l=de') pass('softgarden.parseWidget() resolves ../../job/ hrefs against the widget path');
+  else fail(`softgarden.parseWidget() url wrong: ${JSON.stringify(sgRows[0]?.url)}`);
+  if (sgRows[1]?.location === 'Augsburg / München' && sgRows[0]?.postedAt === Date.UTC(2026, 6, 4)) pass('softgarden.parseWidget() joins cities and parses the date');
+  else fail(`softgarden.parseWidget() fields wrong: ${JSON.stringify(sgRows[1])}`);
+  if (parseWidget('<html>none</html>', 'https://x.softgarden.io/de/widgets/jobs').length === 0 && parseWidget(undefined, 'https://x').length === 0) {
+    pass('softgarden.parseWidget() returns [] for card-less / non-string input');
+  } else {
+    fail('softgarden.parseWidget() should return [] without cards');
+  }
+
+  // fetch() — single widget request, jobs normalized from a multi-card page.
+  const sgCtx2 = { fetchText: async () => sgHtml };
+  const sgJobs2 = await softgarden.fetch({ name: 'Renk', api: 'https://renk-group.softgarden.io/de/widgets/jobs' }, sgCtx2);
+  if (sgJobs2.length === 2 && sgJobs2[0].company === 'Renk' && sgJobs2.every((j) => j.url.startsWith('https://renk-group.softgarden.io/job/'))) {
+    pass('softgarden.fetch() returns normalized jobs from one widget request');
+  } else {
+    fail(`softgarden.fetch() wrong: ${JSON.stringify(sgJobs2)}`);
+  }
 } catch (e) {
   fail(`softgarden provider tests crashed: ${e.message}`);
 }
