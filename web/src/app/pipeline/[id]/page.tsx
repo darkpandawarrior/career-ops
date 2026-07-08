@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { readReport, readReportForApplication, findApplication } from "@/lib/career-ops";
+import { readReport, readReportForApplication, findApplication, trackerCanDelete } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { ReportView } from "@/components/report-view";
 
@@ -13,5 +13,13 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
   // falling back to a by-number lookup when there is no matching row.
   const report = app ? readReportForApplication(app, root) : readReport(id, root);
   if (!app && !report) notFound();
-  return <ReportView id={id} app={app} report={report?.content ?? null} file={report?.file ?? null} />;
+  return (
+    <ReportView
+      id={id}
+      app={app}
+      report={report?.content ?? null}
+      file={report?.file ?? null}
+      canDelete={trackerCanDelete()}
+    />
+  );
 }

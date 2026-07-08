@@ -40,6 +40,7 @@ import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
+import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
 const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
@@ -487,10 +488,10 @@ function writeFileAtomic(filePath, content) {
 // `delete --num N` removes one application row from applications.md and rebuilds
 // the derived index. The markdown stays the source of truth: callers (incl. the
 // web) orchestrate this script rather than editing applications.md directly, so
-// the write-gate holds. The write is atomic; callers should still avoid running
-// a delete concurrently with a scan-merge (they share the same file — serialize
-// at the orchestration layer; a shared lock is a follow-up once merge-tracker is
-// import-safe).
+// the write-gate holds. The write is atomic AND, for the real (non-dry-run) path,
+// serialized under the SAME cross-process lock merge-tracker.mjs/set-status.mjs
+// use (tracker-lock.mjs) — a batch merge and a row delete can no longer race each
+// other into a corrupted/half-written applications.md.
 async function deleteApp(args) {
   const num = flagValue(args, '--num');
   if (!num) {
@@ -501,28 +502,51 @@ async function deleteApp(args) {
     console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
     process.exit(1);
   }
-  const { removed, removedCount, report, newContent } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
-  if (!removed) {
-    console.error(`No application numbered ${num} in ${MD_PATH}.`);
-    process.exit(1);
+  const dryRun = args.includes('--dry-run');
+  // Dry-runs write nothing, so they can safely overlap with a real merge/delete —
+  // only the actual write needs the exclusive lock.
+  let trackerLock;
+  if (!dryRun) {
+    const lockDir = lockDirFor(canonicalizeTrackerPath(MD_PATH), process.env.CAREER_OPS_TRACKER_LOCK);
+    try {
+      trackerLock = await acquireTrackerLock(lockDir, {
+        timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 10_000,
+        retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+        staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+        tracker: MD_PATH,
+      });
+      process.once('exit', () => trackerLock?.release());
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
   }
-  if (args.includes('--dry-run')) {
-    console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
-    if (report) console.error(`(report file would be orphaned: ${report})`);
-    return;
-  }
-  writeFileAtomic(MD_PATH, newContent);
-  // Rebuild the derived SQLite index from the now-updated markdown.
   try {
-    const states = loadStates();
-    const DatabaseSync = await loadSqlite();
-    const db = openDb(DatabaseSync);
-    syncIndex(db, states);
-  } catch (e) {
-    console.error(`(row removed; index resync skipped: ${e.message})`);
+    const { removed, removedCount, report, newContent } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
+    if (!removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exit(1);
+    }
+    if (dryRun) {
+      console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
+      if (report) console.error(`(report file would be orphaned: ${report})`);
+      return;
+    }
+    writeFileAtomic(MD_PATH, newContent);
+    // Rebuild the derived SQLite index from the now-updated markdown.
+    try {
+      const states = loadStates();
+      const DatabaseSync = await loadSqlite();
+      const db = openDb(DatabaseSync);
+      syncIndex(db, states);
+    } catch (e) {
+      console.error(`(row removed; index resync skipped: ${e.message})`);
+    }
+    console.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH} and reindexed.`);
+    if (report) console.error(`Note: report file may now be orphaned — ${report}`);
+  } finally {
+    trackerLock?.release();
   }
-  console.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH} and reindexed.`);
-  if (report) console.error(`Note: report file may now be orphaned — ${report}`);
 }
 
 const COMMANDS = { sync, query, history, export: exportMd, delete: deleteApp };

@@ -4,6 +4,7 @@ import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { readMemory } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
+import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -152,6 +153,10 @@ export async function POST(req: Request) {
   };
   const persists = kind === "evaluate";
   const reportsBefore = persists ? countReports() : 0;
+  // Tracker-mutating runs hold a write token so a row delete can't race their merge
+  // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
+  // evaluate merges a new row; pdf flips the PDF column ❌→✅ — both touch applications.md.
+  const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
 
   const child = spawn(binPath, args, { cwd: root, env: { ...process.env, CAREER_OPS_ROOT: root }, shell: process.platform === "win32" });
   const enc = new TextEncoder();
@@ -171,7 +176,12 @@ export async function POST(req: Request) {
         if (!closed) controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
       };
       const close = () => {
-        if (!closed) { closed = true; clearTimeout(killer); try { controller.close(); } catch { /* */ } }
+        if (!closed) {
+          closed = true;
+          clearTimeout(killer);
+          if (writeToken !== null) releaseTrackerWrite(writeToken);
+          try { controller.close(); } catch { /* */ }
+        }
       };
 
       child.stdout.on("data", (d: Buffer) => {
@@ -234,6 +244,7 @@ export async function POST(req: Request) {
       });
     },
     cancel() {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
       try { child.kill("SIGTERM"); } catch { /* ignore */ }
     },
   });
