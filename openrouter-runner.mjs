@@ -197,7 +197,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
         headers: {
           'Authorization': `Bearer ${key}`,
           'Content-Type':  'application/json',
-          'HTTP-Referer':  'https://github.com/santifer/career-ops',
+          'HTTP-Referer':  'https://github.com/kirklazar-android/hiresignal',
           'X-Title':       'career-ops',
         },
         body,
@@ -256,7 +256,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
           headers: {
             'Authorization': `Bearer ${key}`,
             'Content-Type':  'application/json',
-            'HTTP-Referer':  'https://github.com/santifer/career-ops',
+            'HTTP-Referer':  'https://github.com/kirklazar-android/hiresignal',
             'X-Title':       'career-ops',
           },
           body,
