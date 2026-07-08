@@ -2782,6 +2782,96 @@ try {
   fail(`plugin manifest path-containment tests crashed: ${e.message}`);
 }
 
+console.log('\n30b. Plugin registry split (#1401)');
+try {
+  const { loadRegistry, loadRegistryFiles, successorFor } = await import(pathToFileURL(join(ROOT, 'plugins/_registry.mjs')).href);
+  const { discoverPlugins, resolveSuccessorIds } = await import(pathToFileURL(join(ROOT, 'plugins/_engine.mjs')).href);
+  const { validateRegistry } = await import(pathToFileURL(join(ROOT, 'validate-plugin-registry.mjs')).href);
+
+  // Real registry: per-plugin files load, each filename matches its own id, shape is valid.
+  const realFiles = loadRegistryFiles(ROOT);
+  if (realFiles.length >= 8 && realFiles.every(({ file, entry }) => entry?.id && `${entry.id}.json` === file)) {
+    pass('loadRegistryFiles reads plugins-registry/*.json with filename === "<id>.json"');
+  } else {
+    fail(`loadRegistryFiles mismatch: ${JSON.stringify(realFiles.map(f => f.file))}`);
+  }
+  const realProblems = validateRegistry(ROOT);
+  if (realProblems.length === 0) {
+    pass('validateRegistry finds no problems in the real plugins-registry/');
+  } else {
+    fail(`validateRegistry found problems in the real registry: ${realProblems.join('; ')}`);
+  }
+
+  // Sandboxed fixture: a bundled "greeter" plugin + a registry entry declaring
+  // a supersedesBundled successor, to exercise resolveSuccessorIds/discoverPlugins
+  // end-to-end without touching the real plugins/ or plugins-registry/.
+  const fixTmp = mkdtempSync(join(tmpdir(), 'career-ops-plugin-registry-'));
+  try {
+    const bundledDir = join(fixTmp, 'plugins', 'greeter');
+    mkdirSync(bundledDir, { recursive: true });
+    writeFileSync(join(bundledDir, 'manifest.json'), JSON.stringify({
+      id: 'greeter', apiVersion: 1, description: 'bundled reference', hooks: ['export'],
+      requiredEnv: [], optionalEnv: [], allowedHosts: [], entry: 'index.mjs', humanInTheLoop: true,
+    }));
+    writeFileSync(join(bundledDir, 'index.mjs'), 'export default {};\n');
+
+    const localDir = join(fixTmp, 'plugins.local', 'greeter');
+    mkdirSync(localDir, { recursive: true });
+    writeFileSync(join(localDir, 'manifest.json'), JSON.stringify({
+      id: 'greeter', apiVersion: 1, description: 'community successor', hooks: ['export'],
+      requiredEnv: [], optionalEnv: [], allowedHosts: [], entry: 'index.mjs', humanInTheLoop: true,
+    }));
+    writeFileSync(join(localDir, 'index.mjs'), 'export default {};\n');
+
+    const registryDir = join(fixTmp, 'plugins-registry');
+    mkdirSync(registryDir, { recursive: true });
+    const sha = 'a'.repeat(40);
+    writeFileSync(join(registryDir, 'greeter.json'), JSON.stringify({
+      id: 'greeter', name: 'career-ops-plugin-greeter', version: '0.1.0', license: 'MIT',
+      description: 'community successor', repo: 'https://github.com/example/career-ops-plugin-greeter',
+      sha, hooks: ['export'], requiredEnv: [], allowedHosts: [], supersedesBundled: true,
+    }));
+
+    const lockDir = join(fixTmp, '.career-ops');
+    mkdirSync(lockDir, { recursive: true });
+    writeFileSync(join(fixTmp, 'plugins.lock'), JSON.stringify({ plugins: { greeter: { sha } } }));
+
+    if (successorFor(fixTmp, 'greeter')?.sha === sha) {
+      pass('successorFor finds the registry entry declaring supersedesBundled for the bundled id');
+    } else {
+      fail('successorFor should find the greeter successor entry');
+    }
+
+    const overridden = resolveSuccessorIds(fixTmp);
+    if (overridden.has('greeter')) {
+      pass('resolveSuccessorIds approves the successor: installed + sha matches the pinned registry sha');
+    } else {
+      fail('resolveSuccessorIds should approve greeter (installed at the exact pinned sha)');
+    }
+
+    const manifests = discoverPlugins([join(fixTmp, 'plugins'), join(fixTmp, 'plugins.local')], overridden);
+    const greeter = manifests.find(m => m.id === 'greeter');
+    if (greeter?.description === 'community successor') {
+      pass('discoverPlugins lets an approved successor override the bundled reference');
+    } else {
+      fail(`discoverPlugins should have returned the local successor manifest, got: ${JSON.stringify(greeter)}`);
+    }
+
+    // Without an approved override, first-root-wins still holds (no regression).
+    const noOverride = discoverPlugins([join(fixTmp, 'plugins'), join(fixTmp, 'plugins.local')]);
+    const greeterDefault = noOverride.find(m => m.id === 'greeter');
+    if (greeterDefault?.description === 'bundled reference') {
+      pass('discoverPlugins defaults to bundled-wins when no overrideIds are passed');
+    } else {
+      fail('discoverPlugins default behavior (no overrideIds) regressed');
+    }
+  } finally {
+    rmSync(fixTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`plugin registry split tests crashed: ${e.message}`);
+}
+
 console.log('\n31. scan.mjs --doctor (read-only health sweep)');
 
 try {
