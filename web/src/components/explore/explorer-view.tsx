@@ -38,7 +38,7 @@ export function ExplorerView({
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, status, error, errorCode, mode, setMode, aiIntent, setAiIntent, discoverAI } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, status, error, errorCode, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable } = useExplore();
   const inited = useRef(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [cli, setCli] = useState<{ id: string | null; name?: string }>({ id: null });
@@ -219,6 +219,19 @@ export function ExplorerView({
                 void discover();
               }}
               rerunLabel="Widen to 30 days · clear location"
+            />
+          )}
+          {phase === "degraded" && (
+            <EmptyState
+              tone="loose"
+              title="Scan didn't finish cleanly."
+              body={
+                companiesAvailable > 0
+                  ? `Scanned ${companiesScanned.toLocaleString()} of ${companiesAvailable.toLocaleString()} companies — some boards were capped, stale, or unreachable. This isn't "all caught up," it's incomplete. Try again.`
+                  : "Some ATS boards were capped, stale, or unreachable, so this run isn't a reliable read. Try again."
+              }
+              onRerun={() => void discover()}
+              rerunLabel="Retry scan"
             />
           )}
           {phase === "failed" && <FailedCard msg={error || status} code={errorCode} onRetry={() => void discover()} />}

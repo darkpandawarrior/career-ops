@@ -76,7 +76,18 @@ export type ScanEvent =
   | { kind: "progress"; ats: string; scanned: number; total: number; matches: number }
   | { kind: "atsDone"; ats: string; unreachable: number }
   | { kind: "offer"; offer: DiscoveredOffer }
-  | { kind: "summary"; companiesScanned: number; unreachable: number; matches: number }
+  | {
+      kind: "summary";
+      companiesScanned: number;
+      unreachable: number;
+      matches: number;
+      // Authoritative degraded-vs-empty signals from the scanner's --json mode (#1199).
+      // Absent on older local checkouts (the legacy human-stdout parse can't supply them).
+      companiesAvailable?: number;
+      capHit?: boolean;
+      datasetStatus?: Record<string, "ok" | "stale" | "empty">;
+      postingsDroppedNoDate?: number;
+    }
   | { kind: "log"; line: string }
   | { kind: "error"; message: string }
   | { kind: "done"; count: number; offers: DiscoveredOffer[]; cost?: { tokens: number; usd: number } };
