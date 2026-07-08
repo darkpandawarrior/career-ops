@@ -57,6 +57,7 @@ For each **overdue** or **urgent** entry only:
 1. Read the linked report (`reportPath` from JSON) for company context
 2. Read `cv.md` for proof points
 3. Read `config/profile.yml` for candidate name and identity
+4. Check the entry's row in `data/applications.md` for a Via column (the cadence JSON does not carry `via` yet — read the tracker row directly). If Via is set to an agency (not `—`), the chase target is the **agency contact** (the recruiter named in the notes/contacts), not the company — the recruiter owns the client relationship and has their own incentive to respond. Reference the role by the agency's framing (their listing title, not necessarily the employer's). When Via is set but the employer IS known (Company isn't `?`), address the recruiter but mention the client company by name.
 
 ### Email Follow-up Framework (first follow-up, followupCount == 0)
 

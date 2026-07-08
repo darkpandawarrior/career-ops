@@ -21,10 +21,12 @@ The files below are the **ONLY** sources for user-facing content (CV, cover lett
 | writing-samples/ | `writing-samples/` | When generating candidate-facing text — check `_profile.md` for cached `## Writing Style` first; only scan files if absent |
 | voice-dna.md | `voice-dna.md` (project root, if exists) | When generating candidate-facing text. Anti-AI-slop guardrail + voice. See Voice DNA precedence below. |
 | interview-prep | `interview-prep/story-bank.md`, `interview-prep/{company}-{role}.md` | When generating ATS form answers / interview content — the user's own STAR stories + prep notes (same trust as cv.md). Consumed by `apply`/`match-star` + interview modes |
+| _custom.md | `modes/_custom.md` (if it exists) | ALWAYS (user house rules: formatting/content preferences, custom workflows, "always/never do X" automations). Procedural rules only — never a content source for claims |
 
 **RULE: NEVER hardcode metrics from proof points.** Read them from cv.md + article-digest.md at evaluation time.
 **RULE: For article/project metrics, article-digest.md takes precedence over cv.md.**
 **RULE: Read _profile.md AFTER this file. User customizations in _profile.md override defaults here.**
+**RULE: Read _custom.md (if it exists) AFTER this file and honor its House Rules / Output Preferences in every mode.** It is where the user's persistent instructions live ("use this date format", "never reorder section X", "always include Y in summaries") — an instruction recorded there is NOT optional and does not expire between sessions or between items in a batch. When the user states a lasting preference in conversation, write it to `modes/_custom.md` so it survives the session.
 **RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
 **RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
 
@@ -97,6 +99,38 @@ Block G assesses whether a posting is likely a real, active opening. It does NOT
 - NEVER present findings as accusations of dishonesty
 - Present signals and let the user decide
 - Always note legitimate explanations for concerning signals
+
+## Company Type and Compensation Reliability
+
+Public salary data is a signal, not a promise. Before interpreting compensation, classify the employer / hiring entity first, then decide how much to trust the published range.
+
+**Company type taxonomy:**
+
+| Company type | Typical comp reliability | Signals |
+|--------------|--------------------------|---------|
+| Public big tech / mature tech | High to medium | Public company, structured levels, large engineering org, repeatable hiring process |
+| Growth-stage startup / VC-backed startup | Medium | Funded startup, competitive hiring market, may mix base + equity + bonus |
+| Early-stage startup / pre-revenue startup | Medium to low | Small team, vague role scope, equity-heavy promises, unclear bands |
+| Enterprise / traditional corporate | Medium | Formal HR process, stable base, slower bands, bonus may be discretionary |
+| Agency / outsourcing / consulting vendor | Medium to low | Client allocation, project-based work, billability pressure, variable bonus |
+| Local SMB / service business | Low | Small company, broad role, informal HR, "comprehensive salary" language |
+| Sales / commission-heavy org | Low unless base is explicit | OTE, uncapped commission, performance bonus, target-based pay |
+| Recruiter / staffing listing | Low to medium | Third-party posting, range may reflect client budget rather than offer terms |
+| Government / academic / nonprofit | Medium to high | Published grades/bands, but lower market competitiveness |
+| Open-source community / education community | Medium to low | Community-led org, foundation/association sponsor, campus/community operations, unclear employment entity |
+
+If the brand differs from the legal employer or posting entity, classify the **actual contract / hiring entity** first and mention the brand relationship separately. If the company type is uncertain, mark it as `Unknown` and default compensation reliability to the conservative canonical tier: `Low`.
+
+**Compensation reliability tiers:**
+
+| Tier | Meaning |
+|------|---------|
+| High | Salary is stated as base or backed by structured public bands / multiple consistent sources |
+| Medium | Range is plausible but components are not fully separated |
+| Low | Public number likely includes variable, attendance, commission, subsidy, or "up to" components |
+| Unknown | No usable salary data |
+
+When a JD publishes a salary figure, distinguish advertised range, likely guaranteed base, variable / conditional cash components, expected stable cash, and non-cash benefits. If the JD publishes no salary figure, collapse compensation analysis to two concise lines: company type and reliability tier. Never present advertised compensation as real take-home pay unless the source explicitly supports that interpretation. The JD's own verbatim advertised figure (or `null` if none) is always the first data point recorded — never blended with or replaced by researched market estimates — and it seeds the report's Machine Summary `advertised_comp` key, which `salary-gap.mjs` reads as the advertised-compensation observation.
 
 ## Archetype Detection
 
