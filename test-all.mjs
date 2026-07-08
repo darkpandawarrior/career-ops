@@ -125,6 +125,12 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
+  // Root-level standalone suites: they call process.exit / use node:test, so
+  // they must run as subprocesses, not be imported by tests/ discovery.
+  { name: 'invite-match.test.mjs', expectExit: 0 },
+  { name: 'detect-reposts.test.mjs', expectExit: 0 },
+  { name: 'process-quality.test.mjs', expectExit: 0 },
+  { name: 'reply-matcher.test.mjs', expectExit: 0 },
   // tracker-columns coverage lives at tests/tracker-columns.test.mjs
   // (auto-discovered) since the header-aware parsing port.
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
