@@ -28,7 +28,7 @@ import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFil
 import { join, dirname, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { pass, fail, warn, run, fileExists, finish, ROOT, QUICK, NODE, toBashPath } from './tests/helpers.mjs';
+import { pass, fail, warn, run, fileExists, finish, ROOT, NODE, toBashPath } from './tests/helpers.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -137,7 +137,7 @@ const scripts = [
 
 for (const { name, allowFail, skipIfMissing } of scripts) {
   if (skipIfMissing && !fileExists(name.split(' ')[0])) {
-    warn(`${name} skipped (self-updater not shipped in this fork)`);
+    warn(`${name} skipped (not shipped in this fork yet)`);
     continue;
   }
   const result = run(NODE, name.split(' '), { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -381,32 +381,6 @@ try {
   fail(`Liveness classification tests crashed: ${e.message}`);
 }
 
-// ── 4. DASHBOARD BUILD ──────────────────────────────────────────
-
-if (!QUICK) {
-  console.log('\n4. Dashboard build');
-  // HireSignal ships a compiled dashboard/career-dashboard binary but does not
-  // maintain the Go TUI source (no .go files, no go.mod) — skip rather than
-  // fail on scaffolding this fork deliberately doesn't carry.
-  if (!fileExists('dashboard/go.mod')) {
-    warn('Dashboard build skipped (Go source not shipped in this fork)');
-  } else {
-  const isWindows = process.platform === 'win32';
-  const outPath = isWindows ? 'career-dashboard-test.exe' : '/tmp/career-dashboard-test';
-  const goBuild = run(`cd dashboard && go build -o ${outPath} . 2>&1`);
-  if (goBuild !== null) {
-    pass('Dashboard compiles');
-    if (isWindows) {
-      try { rmSync(join(ROOT, 'dashboard', 'career-dashboard-test.exe'), { force: true }); } catch (e) {}
-    }
-  } else {
-    fail('Dashboard build failed');
-  }
-  }
-} else {
-  console.log('\n4. Dashboard build (skipped --quick)');
-}
-
 // ── 5. DATA CONTRACT ────────────────────────────────────────────
 
 console.log('\n5. Data contract validation');
@@ -496,9 +470,8 @@ const allowedFiles = [
   // Community / governance files (added in v1.3.0, all legitimately reference the maintainer)
   'CODE_OF_CONDUCT.md', 'GOVERNANCE.md', 'SECURITY.md', 'SUPPORT.md',
   '.github/SECURITY.md',
-  // Dashboard credit string
-  'dashboard/internal/ui/screens/pipeline.go',
-  'dashboard/internal/ui/screens/progress.go',
+  // Upstream-author provenance credit
+  'NOTICE.md',
 ];
 
 // Build pathspec for git grep — only scan tracked files matching these
