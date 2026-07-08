@@ -10,6 +10,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
+import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { PageShell } from "@/components/ui/page-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 
@@ -78,11 +79,13 @@ export function ReportView({
   app,
   report,
   file,
+  canDelete = false,
 }: {
   id: string;
   app: Application | null;
   report: string | null;
   file: string | null;
+  canDelete?: boolean;
 }) {
   const meta = report ? parseReport(report) : null;
   const field = (label: string) => meta?.fields.find((f) => f.label === label)?.value;
@@ -125,6 +128,12 @@ export function ReportView({
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
         </div>
 
+        {app && canDelete && (
+          <div className="mt-3">
+            <DeleteFromTracker n={id} />
+          </div>
+        )}
+
         {(archetype || date || (url && url.startsWith("http"))) && (
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
             {archetype && <span className="max-w-full truncate">{archetype}</span>}
@@ -134,7 +143,7 @@ export function ReportView({
                 href={url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-brand hover:underline"
+                className="inline-flex items-center justify-center gap-1 text-brand hover:underline max-sm:min-h-[44px]"
               >
                 posting <ExternalLink className="size-3" />
               </a>

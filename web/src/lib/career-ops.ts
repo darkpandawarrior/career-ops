@@ -26,6 +26,17 @@ export function rootScript(nameNoExt: string): string {
   return path.join(careerOpsRoot(), `${nameNoExt}.mjs`);
 }
 
+// Feature-detect the core's `tracker.mjs delete --num` row-delete (#1200) by probing
+// the local script source — older checkouts lack it, so the delete UI hides itself.
+export function trackerCanDelete(): boolean {
+  try {
+    const src = fs.readFileSync(rootScript("tracker"), "utf8");
+    return src.includes("delete") && src.includes("--num");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The engine CODE root — the career-ops checkout the web app ships inside
  * (`<checkout>/web`), resolved from the server's launch cwd (always `web/`), NOT

@@ -235,7 +235,7 @@ function DiscoverBar({ canDiscover, onDiscover, label }: { canDiscover: boolean;
         type="button"
         disabled={!canDiscover}
         onClick={onDiscover}
-        className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:brightness-110 disabled:opacity-50"
+        className="inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:brightness-110 disabled:opacity-50 max-sm:min-h-[44px]"
       >
         <Compass className="size-4" /> {label}
       </button>
@@ -254,7 +254,7 @@ function EmptyState({ tone, title, body, onRerun, rerunLabel }: { tone: "good" |
       </div>
       <h2 className={`${instrumentSerif.className} mt-4 text-2xl text-foreground`}>{title}</h2>
       <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">{body}</p>
-      <button onClick={onRerun} className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/50 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:border-brand/40 hover:text-brand">
+      <button onClick={onRerun} className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface/50 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
         <RotateCcw className="size-4" /> {rerunLabel}
       </button>
     </div>
@@ -279,10 +279,10 @@ function FailedCard({ msg, code, onRetry }: { msg: string; code?: string; onRetr
           update career-ops, or paste a job URL on the pipeline to evaluate it directly.
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-2">
-          <Link href="/pipeline" className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110">
+          <Link href="/pipeline" className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110 max-sm:min-h-[44px]">
             Open pipeline
           </Link>
-          <Link href="/config" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand">
+          <Link href="/config" className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3.5 py-2 text-sm font-medium text-foreground transition hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]">
             Open Config
           </Link>
         </div>
@@ -294,7 +294,7 @@ function FailedCard({ msg, code, onRetry }: { msg: string; code?: string; onRetr
       <AlertTriangle className="mx-auto size-6 text-amber-500" />
       <p className="mt-2 text-sm font-medium text-foreground">Couldn’t finish the search.</p>
       <p className="mt-1 text-[13px] text-muted">{msg}</p>
-      <button onClick={onRetry} className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand">
+      <button onClick={onRetry} className="mt-3 inline-flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand max-sm:min-h-[44px]">
         <RotateCcw className="size-4" /> Try again
       </button>
     </div>
@@ -311,7 +311,7 @@ function BlockedCard() {
       <p className="mx-auto mt-1.5 max-w-md text-sm text-muted">
         Connect Claude Code, Gemini, or any agent CLI — your key, your tokens, your machine. The free Scan stays available without one.
       </p>
-      <Link href="/config" className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110">
+      <Link href="/config" className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-sm font-semibold text-white transition hover:brightness-110 max-sm:min-h-[44px]">
         <Settings className="size-4" /> Open Config
       </Link>
     </div>

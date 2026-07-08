@@ -104,7 +104,7 @@ export function BetaBanner() {
           <span className="size-1.5 animate-pulse rounded-full bg-brand" /> {meta.version} · {meta.channel}
         </span>
         {meta.sha && <span className="hidden font-mono text-faint sm:inline">{meta.sha}</span>}
-        <button ref={triggerRef} onClick={openReport} className="ml-1 inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 font-medium text-brand transition-colors hover:bg-brand/15">
+        <button ref={triggerRef} onClick={openReport} className="ml-1 inline-flex items-center gap-1 rounded-full bg-brand-soft px-2 py-0.5 font-medium text-brand transition-colors hover:bg-brand/15 max-sm:min-h-[44px]">
           <Bug className="size-3" /> Report a bug
         </button>
       </div>
@@ -115,7 +115,7 @@ export function BetaBanner() {
             <div className="mb-3 flex items-center gap-2">
               <Bug className="size-4 text-brand" />
               <h2 className="text-sm font-semibold text-foreground">Report a bug · {diag.channel}</h2>
-              <button onClick={closeModal} aria-label="Close" className="ml-auto text-faint transition-colors hover:text-foreground">
+              <button onClick={closeModal} aria-label="Close" className="ml-auto inline-flex items-center justify-center text-faint transition-colors hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]">
                 <X className="size-4" />
               </button>
             </div>
@@ -131,7 +131,7 @@ export function BetaBanner() {
               <button
                 onClick={checkExisting}
                 disabled={checking}
-                className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-brand disabled:opacity-60"
+                className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-brand disabled:opacity-60 max-sm:min-h-[44px]"
               >
                 {checking ? <Loader2 className="size-3 animate-spin" /> : <Search className="size-3" />} Check for existing reports first
               </button>
@@ -164,7 +164,7 @@ export function BetaBanner() {
               <ShieldCheck className="mt-px size-3.5 shrink-0 text-emerald-500" /> Opens a GitHub issue you confirm — nothing is sent until you click. NEVER includes your CV, profile, application answers, or job URLs.
             </p>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={closeModal} className="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:text-foreground">
+              <button onClick={closeModal} className="rounded-full px-4 py-2 text-sm text-muted transition-colors hover:text-foreground max-sm:min-h-[44px]">
                 Cancel
               </button>
               <a
@@ -172,7 +172,7 @@ export function BetaBanner() {
                 target="_blank"
                 rel="noreferrer"
                 onClick={closeModal}
-                className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
+                className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 max-sm:min-h-[44px]"
               >
                 <Bug className="size-4" /> Open GitHub issue
               </a>
