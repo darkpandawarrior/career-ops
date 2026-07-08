@@ -47,10 +47,8 @@ Ashby, and Workday company boards, direct board feeds, and generated discovery
 across ATS, remote, startup, general, and regional job sites. See
 `docs/PUBLIC_DASHBOARD_SEARCH_STRATEGY.md`.
 
-Real job cards expose two actions:
+Real job cards expose one action:
 
-- **Tailor resume** creates an HTML resume, PDF, Markdown change notes, and an
-  editing prompt under `output/tailored-resumes/`.
 - **Open job** opens the original listing.
 
 The dashboard does not queue jobs, submit applications, or fill application

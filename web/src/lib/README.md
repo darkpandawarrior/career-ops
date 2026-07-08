@@ -13,7 +13,7 @@ own data root (`cv.md`, `data/`, `reports/` …). Two modules carry the whole co
   to `careerOpsRoot()`. The functions stay **synchronous**; root resolution happens
   once, upstream, at the request entry point.
 - **`profile-registry.ts`** — resolves the active `?profile` slug (forwarded by
-  `middleware.ts` as the `x-co-profile` header) against `<root>/profiles.yml`.
+  `proxy.ts` as the `x-co-profile` header) against `<root>/profiles.yml`.
   Request entry points call `await requestRoot()` and pass the result into the
   `career-ops.ts` readers; subprocess spawns use `requestSpawnEnv()`.
 

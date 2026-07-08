@@ -4,7 +4,7 @@ import * as yaml from "js-yaml";
 import { headers } from "next/headers";
 import { careerOpsRoot } from "@/lib/career-ops";
 
-/** Request header set by `middleware.ts` carrying the sanitized active slug. */
+/** Request header set by `proxy.ts` carrying the sanitized active slug. */
 const PROFILE_HEADER = "x-co-profile";
 
 /**

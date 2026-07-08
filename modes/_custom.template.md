@@ -17,9 +17,9 @@
      touched, and we never auto-submit an application for you).
 
      Because this is a user-layer file, anything you write here
-     survives `node update-system.mjs`. Put customizations HERE,
-     not in CLAUDE.md / modes/_shared.md / other system files --
-     those get overwritten on update.
+     survives a system update (hand-merged from upstream). Put
+     customizations HERE, not in CLAUDE.md / modes/_shared.md /
+     other system files -- those get overwritten on update.
      ============================================================ -->
 
 ## House Rules

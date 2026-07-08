@@ -30,7 +30,7 @@ export function rootScript(nameNoExt: string): string {
  * The engine CODE root — the career-ops checkout the web app ships inside
  * (`<checkout>/web`), resolved from the server's launch cwd (always `web/`), NOT
  * from CAREER_OPS_ROOT. This is where the web's own bridge scripts live
- * (onboarding-cli.mjs, job-search-cli.mjs + dashboard-web/). It matters in dev,
+ * (onboarding-cli.mjs, job-search-cli.mjs). It matters in dev,
  * where CAREER_OPS_ROOT points at a SEPARATE data checkout that does not carry
  * these web-only scripts; in production code and data are the same checkout.
  */
