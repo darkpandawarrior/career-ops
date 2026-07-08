@@ -1,11 +1,10 @@
 name: Build Desktop App
 
+# Manual-only: macOS/Windows runners burn 10-25x Actions minutes on a private
+# repo, packaging is only needed for releases, and the upload step has been
+# failing anyway (dist/*.dmg|exe not found) — diagnose via a dispatch run.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  pull_request:
 
 jobs:
   build-desktop:
