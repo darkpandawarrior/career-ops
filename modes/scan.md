@@ -127,25 +127,29 @@ For companies with a public API or structured feed **that are not in `local_pars
 - Full provider table: [Supported job boards](../docs/SUPPORTED_JOB_BOARDS.md)
 
 - **Greenhouse**: `https://boards-api.greenhouse.io/v1/boards/{company}/jobs`
-- **Ashby**: `https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobBoardWithTeams`
+- **Ashby**: `https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true`
 - **BambooHR**: list `https://{company}.bamboohr.com/careers/list`; job details `https://{company}.bamboohr.com/careers/{id}/detail`
-- **Lever**: `https://api.lever.co/v0/postings/{company}?mode=json`
+- **Lever**: `https://api.(eu.)?lever.co/v0/postings/{company}`
 - **Teamtailor**: `https://{company}.teamtailor.com/jobs.rss`
 - **Workday**: `https://{company}.{shard}.myworkdayjobs.com/wday/cxs/{company}/{site}/jobs`
 - **Breezy**: `https://{company}.breezy.hr/json`
 
 **Parsing Conventions by Provider:**
-- `greenhouse`: `jobs[]` → `title`, `absolute_url`
-- `ashby`: GraphQL `ApiJobBoardWithTeams` with `organizationHostedJobsPageName={company}` → `jobBoard.jobPostings[]` (`title`, `id`; build public URL if not present in payload)
-- `bamboohr`: list `result[]` → `jobOpeningName`, `id`; build detail URL `https://{company}.bamboohr.com/careers/{id}/detail`; to read full JD, make a GET request to the detail URL and use `result.jobOpening` (`jobOpeningName`, `description`, `datePosted`, `minimumExperience`, `compensation`, `jobOpeningShareUrl`)
-- `lever`: root array `[]` → `text`, `hostedUrl` (fallback: `applyUrl`)
-- `teamtailor`: RSS items → `title`, `link`
-- `workday`: `jobPostings[]`/`jobPostings` (based on tenant) → `title`, `externalPath` or URL built from the host
+- `greenhouse`: `jobs[]` → `title`, `absolute_url`, `location.name`
+- `ashby`: GET REST API → `jobs[]` with `title`, `jobUrl`, `location` (fold in `secondaryLocations[]` — Ashby lists extra hiring regions there), `compensation` (`minValue`/`maxValue`/`currency`; already fetched via `?includeCompensation=true`), `publishedAt`; slug derived from `careers_url` pattern `jobs.ashbyhq.com/{slug}`
+- `bamboohr`: list `result[]` → `jobOpeningName`, `id`, `location` (city + state; append "Remote" when `isRemote`); build detail URL `https://{company}.bamboohr.com/careers/{id}/detail`; to read full JD, make a GET request to the detail URL and use `result.jobOpening` (`jobOpeningName`, `description`, `datePosted`, `minimumExperience`, `compensation`, `jobOpeningShareUrl`)
+- `lever`: root array `[]` → `text`, `hostedUrl` (fallback: `applyUrl`), `categories.location`, `descriptionPlain` (the list API ships the JD body — feeds `content_filter` and the cross-listing fingerprint)
+- `teamtailor`: RSS items → `title`, `link`, `location` (from the `tt:` block — `tt:city` / `tt:country`)
+- `workday`: `jobPostings[]`/`jobPostings` (based on tenant) → `title`, `externalPath` or URL built from the host, `locationsText` (fallback: derive from the URL path)
 - `breezy`: top-level array `[]` → `name`, `url` (absolute), `location.name` (or city/state/country + `is_remote`), `published_date`
+
+> **Caution — do not infer absence from a truncated read.** Careers SPAs paginate and lazy-load; a `browser_snapshot` or WebFetch of the page (and any LLM summary of that HTML) can silently drop rows, showing only the first screen of roles. Never conclude "role X is not posted" or "only N roles exist" from such a read. When the company has a public ATS API, hit it directly (append `?content=true` where the provider supports it) before making any presence/absence claim — the API returns the full board in one structured response.
 
 ### Level 3 — WebSearch Queries (BROAD DISCOVERY)
 
 The `search_queries` with `site:` filters cover portals transversally (all Ashby, all Greenhouse, etc.). Useful for discovering NEW companies that are not yet in `tracked_companies`, but results might be outdated. After filtering out hits from companies in `local_parser_ok`, the remaining results are deduplicated with Levels 0–2.
+
+> **Caution — Level-3 hits can be weeks stale.** WebSearch is fed by a search index that lags the live board, so a result can describe a posting that has already closed. Treat every Level-3 hit as unverified: before adding it to `data/pipeline.md` or evaluating it, confirm liveness against the real posting (`node check-liveness.mjs <url>` for ATS-hosted pages, or Playwright for non-ATS pages). Unlike the real-time ATS responses in Level 2, a Level-3 snippet is never proof a role is still open.
 
 **Execution Priority:**
 1. Level 0: Local Parser → companies with a configured `parser:` and existing script; build `local_parser_ok`
@@ -186,14 +190,11 @@ Levels are additive — they are executed in order, and results are merged and d
 5. **Level 2 — ATS APIs / Feeds** (parallel):
    For each company in `tracked_companies` with a defined `api:`, `enabled: true`, and a **name not listed in `local_parser_ok`**:
    a. WebFetch the API/feed URL.
-   b. If `api_provider` is defined, use its parser; if undefined, infer by domain (`boards-api.greenhouse.io`, `jobs.ashbyhq.com`, `api.lever.co`, `*.bamboohr.com`, `*.teamtailor.com`, `*.myworkdayjobs.com`, `*.breezy.hr`).
-   c. For **Ashby**, send a POST request with:
-      - `operationName: ApiJobBoardWithTeams`
-      - `variables.organizationHostedJobsPageName: {company}`
-      - GraphQL query of `jobBoardWithTeams` + `jobPostings { id title locationName employmentType compensationTierSummary }`
+   b. If `api_provider` is defined, use its parser; if undefined, infer by domain (`boards-api.greenhouse.io`, `api.ashbyhq.com`, `api.(eu.)?lever.co`, `*.bamboohr.com`, `*.teamtailor.com`, `*.myworkdayjobs.com`, `*.breezy.hr`).
+   c. For **Ashby**, send a GET request to `https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true` (slug from `careers_url`). Parse `jobs[]` → `title`, `jobUrl`, `location` (fold in `secondaryLocations[]`), `compensation`. No GraphQL needed.
    d. For **BambooHR**, the list only returns basic metadata. For each relevant item, retrieve the `id`, make a GET request to `https://{company}.bamboohr.com/careers/{id}/detail`, and extract the full JD from `result.jobOpening`. Use `jobOpeningShareUrl` as the public URL if present; otherwise, use the detail URL.
    e. For **Workday**, send a JSON POST request with at least `{"appliedFacets":{},"limit":20,"offset":0,"searchText":""}` and paginate by `offset` until results are exhausted.
-   f. For each job, extract and normalize: `{title, url, company}`.
+   f. For each job, extract and normalize: `{title, url, company, location}`.
    g. Accumulate in the candidates list (deduplicated against Level 1).
 
 6. **Level 3 — WebSearch Queries** (parallel if possible):
@@ -320,16 +321,16 @@ Fallback: if you only have the direct ATS URL, navigate first to the company's w
 **Known Patterns by Platform:**
 - **Ashby:** `https://jobs.ashbyhq.com/{slug}`
 - **Greenhouse:** `https://job-boards.greenhouse.io/{slug}` or `https://job-boards.eu.greenhouse.io/{slug}`
-- **Lever:** `https://jobs.lever.co/{slug}`
+- **Lever:** `https://jobs.(eu.)?lever.co/{slug}`
 - **BambooHR:** list `https://{company}.bamboohr.com/careers/list`; detail `https://{company}.bamboohr.com/careers/{id}/detail`
 - **Teamtailor:** `https://{company}.teamtailor.com/jobs`
 - **Workday:** `https://{company}.{shard}.myworkdayjobs.com/{site}`
 - **Custom:** The company's own URL (e.g. `https://openai.com/careers`)
 
 **API/Feed Patterns by Platform:**
-- **Ashby API:** `https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobBoardWithTeams`
+- **Ashby API:** `https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true`
 - **BambooHR API:** list `https://{company}.bamboohr.com/careers/list`; detail `https://{company}.bamboohr.com/careers/{id}/detail` (`result.jobOpening`)
-- **Lever API:** `https://api.lever.co/v0/postings/{company}?mode=json`
+- **Lever API:** `https://api.(eu.)?lever.co/v0/postings/{company}`
 - **Teamtailor RSS:** `https://{company}.teamtailor.com/jobs.rss`
 - **Workday API:** `https://{company}.{shard}.myworkdayjobs.com/wday/cxs/{company}/{site}/jobs`
 
