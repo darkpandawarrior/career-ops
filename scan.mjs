@@ -75,6 +75,7 @@ const { engineRoot: _SCAN_ENGINE, dataRoot: _SCAN_DATA_ROOT } = resolveCareerOps
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(_SCAN_DATA_ROOT, 'portals.yml');
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(_SCAN_DATA_ROOT, 'config/profile.yml');
 const SCAN_HISTORY_PATH = path.join(_SCAN_DATA_ROOT, 'data/scan-history.tsv');
+const SCAN_RUNS_PATH = path.join(_SCAN_DATA_ROOT, 'data/scan-runs.tsv');
 const PIPELINE_PATH = path.join(_SCAN_DATA_ROOT, 'data/pipeline.md');
 const APPLICATIONS_PATH = path.join(_SCAN_DATA_ROOT, 'data/applications.md');
 const PROVIDERS_DIR = path.resolve(_SCAN_ENGINE, 'providers');
@@ -669,8 +670,16 @@ export function formatPipelineOffer(offer) {
   const location = typeof offer.location === 'string' ? sanitizeMarkdownField(offer.location) : '';
   const compensation = formatCompensation(offer.salary);
   const base = `- [ ] ${url} | ${company} | ${title}`;
-  if (compensation) return `${base} | ${location} | ${compensation}`;
-  return location ? `${base} | ${location}` : base;
+  let line = base;
+  if (compensation) line = `${base} | ${location} | ${compensation}`;
+  else if (location) line = `${base} | ${location}`;
+  // Optional free-text ranking signal (e.g. a curated-list flag an importer
+  // attaches). Labeled — not positional like location/compensation — so it can
+  // ride on any row shape (bare URL, 3-, 4-, or 5-column) without a reader
+  // confusing it for a positional cell, and it stays generic: nothing here is
+  // source-specific, and an offer without `note` produces byte-identical output.
+  const note = typeof offer.note === 'string' ? sanitizeMarkdownField(offer.note) : '';
+  return note ? `${line} | note: ${note}` : line;
 }
 
 export function formatScanHistoryRow(offer, date, status = 'added') {
@@ -791,6 +800,26 @@ export function appendToScanHistory(offers, date, status = 'added') {
   const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
   appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+}
+
+// ── Scan-run persistence (#1604) ────────────────────────────────────
+
+// One row of run counters per non-dry scan — before this, these numbers were
+// printed once in the summary and lost when the terminal scrolled. Full ISO
+// timestamp (two scans in one day must not collapse). `status` is reserved:
+// always 'completed' in v1; a follow-up wires failure-path writes so trend
+// stats can exclude survivorship bias. Consumers MUST parse by header name,
+// never by position — columns may be appended in later versions.
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\n';
+
+export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
+  if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+  const row = [
+    c.timestamp, c.status ?? 'completed', c.companies, c.boards, c.found,
+    c.filteredTitle, c.filteredTier, c.filteredLocation, c.filteredSalary,
+    c.filteredContent, c.filteredCooldown, c.dupes, c.newAdded, c.errors,
+  ].join('\t') + '\n';
+  appendFileSync(filePath, row, 'utf-8');
 }
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
@@ -1440,6 +1469,19 @@ async function main() {
     } else {
       console.log(`\nResults saved to ${PIPELINE_PATH} and ${SCAN_HISTORY_PATH}`);
     }
+  }
+
+  // Persist this run's counters (#1604) — guarded exactly like the other
+  // writes; a --dry-run must leave no trace.
+  if (!dryRun) {
+    appendScanRunSummary({
+      timestamp: new Date().toISOString(), status: 'completed',
+      companies: summaryCompanies, boards: summaryBoards, found: totalFound,
+      filteredTitle: totalFilteredTitle, filteredTier: totalFilteredTier,
+      filteredLocation: totalFilteredLocation, filteredSalary: totalFilteredSalary,
+      filteredContent: totalFilteredContent, filteredCooldown: totalFilteredCooldown,
+      dupes: totalDupes, newAdded: verifiedOffers.length, errors: errors.length,
+    });
   }
 
   // --apify: broad paid search, opt-in, runs after the zero-token scan above.

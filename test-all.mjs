@@ -1254,8 +1254,91 @@ try {
     fail('content_filter should be case-insensitive');
   }
 
+  // content_filter.by_title_keyword (#1638): a stricter override scoped to
+  // only jobs whose title matched a specific title_filter.positive keyword.
+  const { matchedTitleKeywords } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const byKeywordCf = buildContentFilter({
+    positive: ['engineer'],
+    negative: [],
+    by_title_keyword: { 'ai engineer': { positive: ['pytorch', 'tensorflow'] } },
+  });
+  const titleFilterCfg = { positive: ['ai engineer', 'engineer'] };
+  const aiMatched = matchedTitleKeywords('Senior AI Engineer', titleFilterCfg);
+  if (byKeywordCf('Builds models in PyTorch', aiMatched) === true) {
+    pass('content_filter.by_title_keyword override passes on its own positive keyword');
+  } else {
+    fail('content_filter.by_title_keyword override should pass on its own positive keyword');
+  }
+  if (byKeywordCf('Uses only Excel macros', aiMatched) === false) {
+    pass('content_filter.by_title_keyword override rejects when its positive keyword is absent');
+  } else {
+    fail('content_filter.by_title_keyword override should reject without its positive keyword');
+  }
+  // A title match with NO override entry falls back to the global pair.
+  const backendMatched = matchedTitleKeywords('Backend Engineer', titleFilterCfg);
+  if (byKeywordCf('Generic engineering role', backendMatched) === true) {
+    pass('content_filter.by_title_keyword falls back to global pair for unmatched-override keywords');
+  } else {
+    fail('content_filter.by_title_keyword should fall back to the global pair without an override');
+  }
+
+  // formatPipelineOffer: optional labeled `| note: {text}` segment (#1483).
+  const notedOffer = { url: 'https://jobs.example.com/9', company: 'Acme', title: 'Engineer', note: 'curated list' };
+  const notedRow = formatPipelineOffer(notedOffer);
+  if (notedRow.endsWith('| note: curated list')) {
+    pass('formatPipelineOffer appends a labeled note segment when offer.note is set');
+  } else {
+    fail(`formatPipelineOffer should append "| note: ..." — got: ${notedRow}`);
+  }
+  const unnotedOffer = { url: 'https://jobs.example.com/10', company: 'Acme', title: 'Engineer' };
+  if (!formatPipelineOffer(unnotedOffer).includes('note:')) {
+    pass('formatPipelineOffer omits the note segment when offer.note is absent (byte-identical output)');
+  } else {
+    fail('formatPipelineOffer should omit the note segment without offer.note');
+  }
+
 } catch (e) {
   fail(`always_allow tests crashed: ${e.message}`);
+}
+
+// ── SCAN-RUNS PERSISTENCE (#1604) ────────────────────────────────
+console.log('\nscan.mjs — scan-runs.tsv persistence (#1604)');
+try {
+  const { appendScanRunSummary, SCAN_RUNS_HEADER } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const runsTmp = mkdtempSync(join(tmpdir(), 'career-ops-scan-runs-'));
+  try {
+    const runsFile = join(runsTmp, 'scan-runs.tsv');
+    appendScanRunSummary({
+      timestamp: '2026-07-08T00:00:00.000Z', companies: 10, boards: 2, found: 50,
+      filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredSalary: 0,
+      filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29, errors: 0,
+    }, runsFile);
+    const content = readFileSync(runsFile, 'utf-8');
+    const lines = content.trim().split('\n');
+    if (lines[0] + '\n' === SCAN_RUNS_HEADER) {
+      pass('appendScanRunSummary writes the canonical header on first write');
+    } else {
+      fail(`appendScanRunSummary header mismatch — got: ${lines[0]}`);
+    }
+    const cols = lines[1].split('\t');
+    if (cols.length === 14 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed' && cols[12] === '29') {
+      pass('appendScanRunSummary writes one tab-delimited row with the run counters');
+    } else {
+      fail(`appendScanRunSummary row shape wrong: ${JSON.stringify(cols)}`);
+    }
+    // Second call appends without rewriting the header.
+    appendScanRunSummary({ timestamp: '2026-07-09T00:00:00.000Z', companies: 10, boards: 2, found: 40, filteredTitle: 0, filteredTier: 0, filteredLocation: 0, filteredSalary: 0, filteredContent: 0, filteredCooldown: 0, dupes: 0, newAdded: 40, errors: 0 }, runsFile);
+    const afterSecond = readFileSync(runsFile, 'utf-8').trim().split('\n');
+    if (afterSecond.length === 3) {
+      pass('appendScanRunSummary appends a second row without duplicating the header');
+    } else {
+      fail(`appendScanRunSummary should have 3 lines (header + 2 rows), got ${afterSecond.length}`);
+    }
+  } finally {
+    rmSync(runsTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`scan-runs persistence tests crashed: ${e.message}`);
 }
 // ── 12. FOLLOW-UP CADENCE LOGIC ─────────────────────────────────
 

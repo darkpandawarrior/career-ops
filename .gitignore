@@ -5,6 +5,7 @@ data/applications.md
 data/applications.db
 data/pipeline.md
 data/scan-history.tsv
+data/scan-runs.tsv
 data/apply-queue.md
 data/follow-ups.md
 data/salary-observations.tsv
