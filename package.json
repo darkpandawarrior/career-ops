@@ -19,6 +19,7 @@
     "cover-letter": "node generate-cover-letter.mjs --payload",
     "sync-check": "node cv-sync-check.mjs",
     "liveness": "node check-liveness.mjs",
+    "extract": "node browser-extract.mjs",
     "board:clean": "node board-clean.mjs",
     "board:sweep": "node board-sweep.mjs",
     "scan": "node scan.mjs",
