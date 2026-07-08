@@ -1037,6 +1037,13 @@ if (fileExists('VERSION')) {
   } else {
     fail(`VERSION is not valid semver: "${version}"`);
   }
+
+  const pkgVersion = JSON.parse(readFile('package.json')).version;
+  if (pkgVersion === version) {
+    pass(`package.json version matches VERSION (${version})`);
+  } else {
+    fail(`package.json version "${pkgVersion}" does not match VERSION "${version}" — bump one to match the other`);
+  }
 } else {
   fail('VERSION file missing');
 }
