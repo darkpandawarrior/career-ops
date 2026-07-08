@@ -265,7 +265,7 @@ docs/
 
 | Step | Module | What happens |
 |------|--------|-------------|
-| 1. Resume upload | `upload-intake.mjs` | PDF validated (type, size, filename), staged in ignored draft storage — active profile unchanged |
+| 1. Resume upload | `api/onboarding/extract/route.ts`, `api/cv/ingest/route.ts` | PDF validated (type, size), extracted to a profile draft — active profile unchanged until confirmed |
 | 2. Local extraction | `resume-extractor.mjs`, `pdf-layout.mjs`, `resume-normalizer.mjs` | Text extracted locally; sections identified (summary, experience, projects, education, skills); warnings shown for image-heavy PDFs |
 | 3. Profile inference | `profile-inference.mjs` | Proposes candidate facts: target roles, skills, seniority, location, compensation, availability, exclusions — user reviews before activation |
 | 4. Activation | `profile-writer.mjs` | Writes reviewed data into career-ops user-layer files; validates YAML; keeps rollback data; clears stale caches |

@@ -21,7 +21,7 @@ Strategy. This report describes runtime behavior, not intended documentation.
 
 | Effective requirement | Runtime implementation | Automated evidence | Status / remediation |
 |---|---|---|---|
-| Upload creates local draft only | `onboarding/upload-intake.mjs` | `upload-intake.test.mjs` | Pass |
+| Upload creates local draft only | `api/onboarding/extract/route.ts`, `api/cv/ingest/route.ts` | `api/cv/ingest/route.test.ts`, `lib/onboarding/resume-extractor.test.mjs` | Pass |
 | Replacement clears stale inference and rolls back on failed search | upload intake + `profile-writer.mjs` | upload/profile-writer suites | Pass |
 | Candidate Profile / Job Preferences two-column responsive review | `public/index.html`, `styles.css` | onboarding UI suite | Pass |
 | Only Current Role, Skills, Interested Roles controls | `public/index.html`, `app.js` | onboarding UI suite | Pass |
