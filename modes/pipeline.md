@@ -70,6 +70,7 @@ read as having empty values for the missing trailing columns.
 
 1. **Provider API (preferred — cheapest):** `node fetch-jd.mjs "{url}"` returns clean JD text via the ATS API (Greenhouse/Ashby/Lever/Workday). ~80-90% fewer tokens than scraping a page, and no SPA mis-fetch. Exits non-zero on unknown provider / API miss → fall through.
 2. **Playwright (liveness + API-miss fallback):** `browser_navigate` + `browser_snapshot` **saved to a file via `filename:`**, then grep the file — never dump the full a11y tree into context. Use for real-time liveness verification and when the API misses.
+   - **Opt-in — CLI extractor (`scan.extractor: cli` in `config/profile.yml`):** run `node browser-extract.mjs <url>` (default `--mode jd`) instead of the MCP snapshot; it returns compact `{ "url", "title", "text" }` — the JD main text at ~4–5× fewer tokens. Use its `text` as the JD. **Fall back silently** to `browser_navigate` + `browser_snapshot` if it errors or is missing.
 3. **WebFetch (fallback):** For static pages or when the above are unavailable.
 4. **WebSearch (last resort):** Search secondary portals that index the JD.
 

@@ -63,6 +63,7 @@ import { buildTrustValidator } from './providers/_trust-validator.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError, discoverAlternates, verifyPortalsFile } from './verify-portals.mjs';
+import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const parseYaml = yaml.load;
@@ -114,6 +115,32 @@ export function buildTitleFilter(titleFilter) {
     const hasNegative = negative.some(m => m(lower));
     return hasPositive && !hasNegative;
   };
+}
+
+// Compiled-matcher cache for matchedTitleKeywords(), keyed by the
+// `title_filter.positive` array reference. The scan loop calls this once per
+// job with the same titleFilter config object, so caching avoids recompiling
+// every keyword (compileKeyword()) on every single job.
+const compiledPositiveCache = new WeakMap();
+
+function compiledPositiveMatchers(positiveList) {
+  if (compiledPositiveCache.has(positiveList)) return compiledPositiveCache.get(positiveList);
+  const compiled = positiveList
+    .filter(k => typeof k === 'string' && k.trim().length > 0)
+    .map(k => ({ raw: k, match: compileKeyword(k.trim().toLowerCase()) }));
+  compiledPositiveCache.set(positiveList, compiled);
+  return compiled;
+}
+
+// Returns the raw (as-written in portals.yml) `title_filter.positive` keywords
+// that matched a given title — used to scope `content_filter.by_title_keyword`
+// overrides to only the categories that opted into a stricter content check.
+export function matchedTitleKeywords(title, titleFilter) {
+  const raw = Array.isArray(titleFilter?.positive) ? titleFilter.positive : [];
+  const lower = (title || '').toLowerCase();
+  return compiledPositiveMatchers(raw)
+    .filter(({ match }) => match(lower))
+    .map(({ raw: kw }) => kw);
 }
 
 // ── Location filter ─────────────────────────────────────────────────
@@ -181,9 +208,34 @@ export function buildContentFilter(contentFilter) {
   const positive = normalizeKeywordList(contentFilter.positive);
   const negative = normalizeKeywordList(contentFilter.negative);
 
-  return (description) => {
+  const byTitleKeyword = new Map();
+  if (contentFilter.by_title_keyword && typeof contentFilter.by_title_keyword === 'object' && !Array.isArray(contentFilter.by_title_keyword)) {
+    for (const [kw, rule] of Object.entries(contentFilter.by_title_keyword)) {
+      if (typeof kw !== 'string' || !kw.trim()) continue;
+      byTitleKeyword.set(kw.trim().toLowerCase(), {
+        positive: normalizeKeywordList(rule?.positive),
+        negative: normalizeKeywordList(rule?.negative),
+      });
+    }
+  }
+
+  return (description, matchedKeywords = []) => {
     if (typeof description !== 'string' || description.trim() === '') return true;
     const lower = description.toLowerCase();
+
+    const overrides = matchedKeywords
+      .filter(k => typeof k === 'string')
+      .map(k => byTitleKeyword.get(k.trim().toLowerCase()))
+      .filter(Boolean);
+
+    if (overrides.length > 0) {
+      return overrides.some(rule => {
+        if (rule.negative.length > 0 && rule.negative.some(k => lower.includes(k))) return false;
+        if (rule.positive.length === 0) return true;
+        return rule.positive.some(k => lower.includes(k));
+      });
+    }
+
     if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
     if (positive.length === 0) return true;
     return positive.some(k => lower.includes(k));
@@ -626,7 +678,36 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     offer.company,
     status,
     offer.location || '',
+    // JD-content fingerprint (#1597): 16 hex chars when the provider's list
+    // API shipped a usable description, '' otherwise. Lets later scans flag
+    // the same body re-posted under a different company (agency cross-listing)
+    // without storing the body. All readers tolerate the extra column.
+    offer.fingerprint ?? fingerprintText(offer.description),
   ].map(sanitizeTsvField).join('\t');
+}
+
+/**
+ * Read scan-history.tsv rows that carry a fingerprint, for the cross-listing
+ * check. Older rows without the 8th column simply never match.
+ *
+ * @param {string} [historyPath] - Override for tests.
+ * @returns {Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}
+ */
+export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
+  if (!existsSync(historyPath)) return [];
+  const rows = [];
+  for (const line of readFileSync(historyPath, 'utf-8').split('\n')) {
+    const cols = line.split('\t');
+    if (cols.length < 8 || !cols[7].trim()) continue;
+    rows.push({
+      url: (cols[0] || '').trim(),
+      dateStr: (cols[1] || '').trim(),
+      title: (cols[3] || '').trim(),
+      company: (cols[4] || '').trim(),
+      fingerprint: cols[7].trim(),
+    });
+  }
+  return rows;
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -1088,7 +1169,7 @@ async function main() {
           totalFilteredSalary++;
           continue;
         }
-        if (!contentFilter(job.description)) {
+        if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
           totalFilteredContent++;
           continue;
         }
@@ -1154,6 +1235,16 @@ async function main() {
       verifiedOffers = [...verifiedOffers, ...migratedOffers];
     }
   }
+
+  // 5.7. Cross-listing check (#1597): fingerprint each new offer's JD body and
+  // compare against recent history rows from a DIFFERENT company — the same
+  // requirements text under two names is usually an agency re-post of a direct
+  // listing (or vice versa), which URL and company+role dedup both miss.
+  // Fingerprints are computed once here and reused by appendToScanHistory.
+  for (const offer of verifiedOffers) {
+    offer.fingerprint = fingerprintText(offer.description);
+  }
+  const crossListings = findCrossListings(verifiedOffers, loadFingerprintHistory());
 
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
@@ -1222,6 +1313,16 @@ async function main() {
     console.log(`Filtered by cooldown:  ${totalFilteredCooldown} removed`);
   }
   console.log(`Duplicates:            ${totalDupes} skipped`);
+  if (crossListings.length > 0) {
+    console.log(`\n⚠️  Possible cross-listings (same JD text, different company) — warn only, nothing was dropped:`);
+    for (const { offer, row, score } of crossListings) {
+      console.log(`  - ${offer.company} — ${offer.title}`);
+      console.log(`    ≈ ${Math.round(score * 100)}% of ${row.company} — ${row.title} (seen ${row.dateStr})`);
+      console.log(`    ${offer.url}`);
+      console.log(`    vs ${row.url}`);
+    }
+    console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both.`);
+  }
   if (historyPolicy.recheckAfterDays != null) {
     console.log(`Recheck eligible:      ${seenUrlState.recheckEligible} old scan-history URL(s)`);
   }

@@ -12,9 +12,12 @@ export default function PortalsPage() {
         title="Portals"
         description={
           <>
-            The companies the scanner watches for new roles (<code className="text-foreground">portals.yml</code>). Run a
-            health check to catch ATS slugs that have quietly broken — a 404 means that company silently disappears from
-            every future scan.
+            The companies career-ops watches for new roles. Run a health check to catch company boards that have
+            quietly broken — a broken link means that company silently disappears from every future scan.
+            <br />
+            <span className="text-xs text-faint">
+              Backed by <code className="text-muted">portals.yml</code> — edit it directly or ask the assistant.
+            </span>
           </>
         }
       />
