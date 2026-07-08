@@ -237,7 +237,10 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
   }
   if (status === 'responded') {
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.responded_subsequent);
-    return addDays(parseDate(appDate), CADENCE.responded_subsequent);
+    // First follow-up after a recruiter reply uses the shorter responded_initial
+    // cadence, not responded_subsequent — a fresh reply deserves a quick nudge,
+    // not the same spacing as a chase after an earlier follow-up already went out.
+    return addDays(parseDate(appDate), CADENCE.responded_initial);
   }
   if (status === 'interview') {
     return addDays(parseDate(appDate), CADENCE.interview_thankyou);

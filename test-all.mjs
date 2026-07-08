@@ -1899,6 +1899,40 @@ try {
     } else {
       fail(`set-status: invalid state not rejected cleanly (exit ${invalid.status}, code ${invalidJson?.code}, tracker changed: ${afterInvalid !== beforeInvalid})`);
     }
+
+    // (f) "--note --dry-run" must never swallow --dry-run as the note value —
+    // that would silently turn a preview into a real write.
+    const beforeFlagGuard = readFileSync(tracker, 'utf-8');
+    const flagGuard = runSetStatus(['43', 'Applied', '--note', '--dry-run', '--json'], tracker);
+    const afterFlagGuard = readFileSync(tracker, 'utf-8');
+    if (flagGuard.status !== 0 && afterFlagGuard === beforeFlagGuard) {
+      pass('set-status: "--note --dry-run" rejects the missing value instead of eating --dry-run');
+    } else {
+      fail(`set-status: --note flag-value guard (exit ${flagGuard.status}, tracker changed: ${afterFlagGuard !== beforeFlagGuard})`);
+    }
+
+    // (g) delimiter-aware note idempotency — a short note that is a bare
+    // substring of an existing longer note must still be appended, and once
+    // appended, re-applying the same note must not duplicate it.
+    const noteRun1 = runSetStatus(['43', 'Applied', '--note', 'sent CV', '--json'], tracker);
+    const afterNote1 = readFileSync(tracker, 'utf-8').split('\n').find(l => l.startsWith('| 43'));
+    const noteRun2 = runSetStatus(['43', 'Applied', '--note', 'sent', '--json'], tracker);
+    const afterNote2 = readFileSync(tracker, 'utf-8').split('\n').find(l => l.startsWith('| 43'));
+    const noteRun3 = runSetStatus(['43', 'Applied', '--note', 'sent', '--json'], tracker);
+    const afterNote3 = readFileSync(tracker, 'utf-8').split('\n').find(l => l.startsWith('| 43'));
+    let noteJson2 = null, noteJson3 = null;
+    try { noteJson2 = JSON.parse(noteRun2.stdout); } catch { /* leave null, checked below */ }
+    try { noteJson3 = JSON.parse(noteRun3.stdout); } catch { /* leave null, checked below */ }
+    if (afterNote1.includes('sent CV') && afterNote2.includes('sent CV; sent') && noteJson2?.changed === true) {
+      pass('set-status: note that is a substring of an existing entry is still appended');
+    } else {
+      fail(`set-status: substring note not appended — after1 "${afterNote1}", after2 "${afterNote2}"`);
+    }
+    if (afterNote3 === afterNote2 && noteJson3?.changed === false) {
+      pass('set-status: re-applying the identical note is idempotent (delimiter-aware match)');
+    } else {
+      fail(`set-status: note idempotency broken — after2 "${afterNote2}", after3 "${afterNote3}", changed ${noteJson3?.changed}`);
+    }
   } finally {
     rmSync(statusTmp, { recursive: true, force: true });
   }

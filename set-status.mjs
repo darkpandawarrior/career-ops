@@ -83,8 +83,16 @@ const flags = { note: null, role: null, dryRun: false, json: false };
 
 for (let i = 0; i < rawArgs.length; i++) {
   const a = rawArgs[i];
-  if (a === '--note') { flags.note = rawArgs[++i] ?? ''; }
-  else if (a === '--role') { flags.role = rawArgs[++i] ?? ''; }
+  if (a === '--note' || a === '--role') {
+    // Never consume a following flag as the value: "--note --dry-run" would
+    // silently disable dry-run and turn a preview into a real write.
+    const value = rawArgs[i + 1];
+    if (value === undefined || value.startsWith('--')) {
+      failUsage(`Missing value for ${a}`);
+    }
+    flags[a === '--note' ? 'note' : 'role'] = value;
+    i++;
+  }
   else if (a === '--dry-run') { flags.dryRun = true; }
   else if (a === '--json') { flags.json = true; }
   else if (a.startsWith('--')) { failUsage(`Unknown flag: ${a}`); }
@@ -336,9 +344,16 @@ if (note) {
     failWith(EXIT_USAGE, 'no-notes-column', 'Tracker has no Notes column — cannot apply --note');
   }
   const existing = parts[colmap.notes] ?? '';
-  // Substring check keeps retries idempotent even when the note itself
-  // contains "; " — a segment-wise comparison would re-append it forever.
-  const hasNote = existing.includes(note);
+  // Delimiter-aware idempotency: the note counts as already present only when
+  // it appears as a whole "; "-delimited entry (or as the entire field) — a
+  // bare substring of a longer entry ("sent" inside "sent CV") must not
+  // suppress a genuinely new note. Matching the full note text at entry
+  // boundaries (instead of splitting the field into segments) keeps retries
+  // idempotent even when the note itself contains "; ".
+  const hasNote = existing === note
+    || existing.startsWith(`${note}; `)
+    || existing.endsWith(`; ${note}`)
+    || existing.includes(`; ${note}; `);
   if (!hasNote) {
     parts[colmap.notes] = existing && existing !== '—' && existing !== '-' ? `${existing}; ${note}` : note;
     noteChanged = true;

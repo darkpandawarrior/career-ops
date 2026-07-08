@@ -80,6 +80,10 @@ export async function loadPluginConfig(root) {
   const file = pluginsConfigPath(root);
   if (!existsSync(file)) return {};
   try {
+    // Not `.default` — this fork is already on js-yaml 5's native ESM build
+    // (dist/js-yaml.mjs), which exposes `load` directly on the namespace; the
+    // `.default` unwrap upstream needs is a v4-CJS-interop artifact that
+    // doesn't apply here (and would make `yaml` undefined).
     const yaml = await import('js-yaml');
     const parsed = yaml.load(readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -114,26 +118,60 @@ export async function loadPluginConfig(root) {
  * @property {string} dir
  */
 /**
- * True if `candidateAbs` resolves (symlinks followed) to inside `dirAbs`.
- * A raw startsWith() on unresolved paths is bypassable via a symlink that
- * textually starts with the right prefix but points elsewhere — resolve both
- * sides with realpathSync first. Fails closed (returns false) if either path
- * doesn't exist, since a manifest referencing a nonexistent file is invalid
- * anyway.
- * @param {string} dirAbs
+ * True if `candidateAbs` is textually inside `rootAbs` (no symlink resolution
+ * — a pure path-relation check used both directly and as the second, resolved
+ * pass inside isSafePluginPath).
+ * @param {string} rootAbs
  * @param {string} candidateAbs
  * @returns {boolean}
  */
-function isContainedIn(dirAbs, candidateAbs) {
-  let realDir, realCandidate;
+function isWithinDirectory(rootAbs, candidateAbs) {
+  const rel = path.relative(rootAbs, candidateAbs);
+  return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
+}
+
+/**
+ * Walk up from `absPath` to the nearest ancestor that actually exists on
+ * disk. A manifest can validly reference a path that doesn't exist yet (the
+ * old existsSync-gated check skipped the containment check entirely in that
+ * case, which is bypassable if a later step creates the file) — this lets
+ * isSafePluginPath validate containment against the nearest real ancestor
+ * instead of silently trusting an unchecked path.
+ * @param {string} absPath
+ * @returns {string|null}
+ */
+function nearestExistingPath(absPath) {
+  let current = path.resolve(absPath);
+  while (!existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+  return current;
+}
+
+/**
+ * True if `candidateAbs` resolves (symlinks followed) to inside `rootAbs`.
+ * A raw startsWith() on unresolved paths is bypassable via a symlink that
+ * textually starts with the right prefix but points elsewhere — resolve both
+ * sides with realpathSync (via the nearest existing ancestor, so a
+ * not-yet-created path is still validated) before comparing.
+ * @param {string} rootAbs
+ * @param {string} candidateAbs
+ * @returns {boolean}
+ */
+function isSafePluginPath(rootAbs, candidateAbs) {
+  const rootResolved = path.resolve(rootAbs);
+  const candidateResolved = path.resolve(candidateAbs);
+  if (!isWithinDirectory(rootResolved, candidateResolved)) return false;
+
+  const nearestExisting = nearestExistingPath(candidateResolved);
+  if (!nearestExisting) return false;
   try {
-    realDir = realpathSync(dirAbs);
-    realCandidate = realpathSync(candidateAbs);
+    return isWithinDirectory(realpathSync(rootResolved), realpathSync(nearestExisting));
   } catch {
     return false;
   }
-  const rel = path.relative(realDir, realCandidate);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 export function validateManifest(m, dir, dirName) {
@@ -179,7 +217,7 @@ export function validateManifest(m, dir, dirName) {
   if (!entry.endsWith('.mjs')) { warnSkip(label, `entry "${entry}" must be a .mjs file`); return null; }
   const entryAbs = path.resolve(dir, entry);
   if (!existsSync(entryAbs)) { warnSkip(label, `entry file not found: ${entry}`); return null; }
-  if (!isContainedIn(dir, entryAbs)) { warnSkip(label, `entry "${entry}" escapes the plugin directory`); return null; }
+  if (!isSafePluginPath(dir, entryAbs)) { warnSkip(label, `entry "${entry}" escapes the plugin directory`); return null; }
 
   // Optional companion skill (Open-Agent-Skill-Standard SKILL.md). Traversal-
   // guarded like entry. Surfaced on-demand via `plugins.mjs skill <id>`; never
@@ -189,7 +227,7 @@ export function validateManifest(m, dir, dirName) {
     if (typeof m.skill !== 'string' || !m.skill.endsWith('.md')) { warnSkip(label, 'skill must be a relative .md path'); return null; }
     const skillAbs = path.resolve(dir, m.skill);
     if (!existsSync(skillAbs)) { warnSkip(label, `skill file not found: ${m.skill}`); return null; }
-    if (!isContainedIn(dir, skillAbs)) { warnSkip(label, `skill "${m.skill}" escapes the plugin directory`); return null; }
+    if (!isSafePluginPath(dir, skillAbs)) { warnSkip(label, `skill "${m.skill}" escapes the plugin directory`); return null; }
     skill = m.skill;
   }
 

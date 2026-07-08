@@ -20,7 +20,7 @@ import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { LEGACY_COLMAP, detectColumns, normalizeVia } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, detectColumns, normalizeVia, looksLikeScoreCell } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
 
@@ -390,9 +390,11 @@ function parseTsvContent(content, filename) {
     // a guess rather than a detection.
     const col4 = parts[4].trim();
     const col5 = parts[5].trim();
-    const looksLikeScore = (v) => /^\d+(\.\d+)?\/5$/.test(v) || /^N\/A$/i.test(v) || /^DUP$/i.test(v);
-    const col4LooksLikeScore = looksLikeScore(col4);
-    const col5LooksLikeScore = looksLikeScore(col5);
+    // Shared with tracker-parse.mjs's resolveColumns/resolveScoreStatus (#1427)
+    // so the score/status discriminator can't drift between the TSV ingester
+    // here and the markdown-table readers.
+    const col4LooksLikeScore = looksLikeScoreCell(col4);
+    const col5LooksLikeScore = looksLikeScoreCell(col5);
 
     let statusCol, scoreCol;
     if (col4LooksLikeScore && !col5LooksLikeScore) {
