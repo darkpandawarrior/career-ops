@@ -20,7 +20,7 @@ import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { LEGACY_COLMAP, detectColumns, normalizeVia, looksLikeScoreCell } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, detectColumns, normalizeVia, resolveScoreStatus } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
 
@@ -202,23 +202,32 @@ function extractReportNum(reportStr) {
   return m ? parseInt(m[1]) : null;
 }
 
+// Matches the req/job-number labels actually seen in this tracker's free-text
+// Notes column: `R_1488728`, `Req PRACT011038`, `Req #1311`, `REQ-2026-32061`,
+// `Job 202606-116491`, `Job ID 65136`, `Posting ID 5340`, `JR00124259`,
+// `Ref R2857957`. The label is required so we don't grab an unrelated number
+// (a salary figure, a date fragment) — only text explicitly tagged as a
+// req/job/posting/reference id counts.
+const REQ_NUMBER_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:#_-]*([a-z][a-z0-9-]*\d[a-z0-9-]*|\d[a-z0-9-]*)\b/i;
+
 /**
  * Extract a requisition/job-ID number from a free-text notes field.
  *
  * The tier-3 fuzzy company+role match has no way to tell apart two distinct
- * postings with similar/generic titles (e.g. two different "Software
- * Engineer" reqs at the same company). When the notes field carries a req or
- * job ID, it's a stronger identity signal than title similarity — use it as an
- * additional guard so same-title-different-req rows are never collapsed.
+ * postings with similar/generic titles (#1524 — e.g. two TD Bank L&D postings
+ * distinguished only by `R_1494379` vs `R_1488728`). When the notes field
+ * carries a req or job ID, it's a stronger identity signal than title
+ * similarity — use it as an additional guard so same-title-different-req rows
+ * are never collapsed. Broadened beyond bare numeric IDs (#1524/#1427) to also
+ * catch `R_…`, `JR…`, hyphenated `REQ-2026-…`, and `Posting ID …` forms.
  *
  * @param {string} notes - Free-text notes cell from the tracker or TSV addition.
- * @returns {string|null} The extracted requisition number, or null when absent.
+ * @returns {string|null} The extracted requisition number (uppercased), or null when absent.
  */
 function extractReqNumber(notes) {
   if (!notes) return null;
-  const m = String(notes).match(/req\s*#?\s*(\d+)|job\s*id:?\s*(\d+)|#(\d{4,})/i);
-  if (!m) return null;
-  return m[1] || m[2] || m[3];
+  const m = String(notes).match(REQ_NUMBER_RE);
+  return m ? m[1].toUpperCase() : null;
 }
 
 /**
@@ -388,21 +397,16 @@ function parseTsvContent(content, filename) {
     // neither column looks like a score) do we fall back to the fixed-position
     // assumption (col4=status, col5=score), and that fallback is logged since it's
     // a guess rather than a detection.
-    const col4 = parts[4].trim();
-    const col5 = parts[5].trim();
     // Shared with tracker-parse.mjs's resolveColumns/resolveScoreStatus (#1427)
     // so the score/status discriminator can't drift between the TSV ingester
     // here and the markdown-table readers.
-    const col4LooksLikeScore = looksLikeScoreCell(col4);
-    const col5LooksLikeScore = looksLikeScoreCell(col5);
+    const col4 = parts[4].trim();
+    const col5 = parts[5].trim();
+    const resolved = resolveScoreStatus(col4, col5);
 
     let statusCol, scoreCol;
-    if (col4LooksLikeScore && !col5LooksLikeScore) {
-      // Swapped format: col4=score, col5=status
-      statusCol = col5; scoreCol = col4;
-    } else if (col5LooksLikeScore && !col4LooksLikeScore) {
-      // Standard format: col4=status, col5=score
-      statusCol = col4; scoreCol = col5;
+    if (resolved) {
+      statusCol = resolved.status; scoreCol = resolved.score;
     } else {
       // Inconclusive (both or neither column looks like a score) — fall back to the
       // fixed-position assumption and flag it rather than silently guessing.

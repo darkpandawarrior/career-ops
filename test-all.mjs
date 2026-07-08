@@ -1828,6 +1828,51 @@ try {
   fail(`merge-tracker fuzzy dedup tests crashed: ${e.message}`);
 }
 
+// ── MERGE-TRACKER REQ-ID GUARD (#1524/#1427) ──────────────────────
+// A same-title posting at the same company can still be a genuinely distinct
+// req when the Notes column carries a req/job number — broaden the guard's
+// regex beyond bare numeric IDs to catch `R_…`, `JR…`, hyphenated `REQ-…`,
+// and `Posting ID …` forms actually seen in the wild.
+console.log('\n🧪 Testing merge-tracker req-ID guard (#1524/#1427)...');
+try {
+  const reqTmp = mkdtempSync(join(tmpdir(), 'career-ops-merge-reqid-'));
+  try {
+    mkdirSync(join(reqTmp, 'data'));
+    mkdirSync(join(reqTmp, 'reports'));
+    const additionsDir = join(reqTmp, 'additions');
+    mkdirSync(additionsDir);
+    const tracker = join(reqTmp, 'data', 'applications.md');
+    writeFileSync(tracker,
+      '# Applications Tracker\n\n' +
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
+      '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
+      '| 1 | 2026-01-04 | TD Bank | L&D Specialist | 4.0/5 | Evaluated | ❌ | [1](../reports/001-td-bank-2026-01-04.md) | Req R_1488728 |\n');
+    for (const n of ['001-td-bank-2026-01-04', '002-td-bank-2026-01-05']) {
+      writeFileSync(join(reqTmp, 'reports', `${n}.md`), '# fixture\n');
+    }
+    // Identical title, but a DIFFERENT underscore-prefixed req id — must NOT collapse (#1524's exact repro).
+    writeFileSync(join(additionsDir, '002-td-bank.tsv'),
+      '2\t2026-01-05\tTD Bank\tL&D Specialist\tEvaluated\t4.1/5\t❌\t[2](reports/002-td-bank-2026-01-05.md)\tReq R_1494379\n');
+
+    const reqResult = run(NODE, ['merge-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: additionsDir } });
+    if (reqResult === null) {
+      fail('merge-tracker.mjs crashed during req-ID guard regression test');
+    } else {
+      const merged = readFileSync(tracker, 'utf-8');
+      const ldRows = merged.split('\n').filter(l => l.includes('L&D Specialist'));
+      if (ldRows.length === 2 && merged.includes('R_1488728') && merged.includes('R_1494379')) {
+        pass('distinct R_-prefixed req IDs at same title/company kept as separate rows (#1524)');
+      } else {
+        fail(`distinct req IDs were collapsed — expected 2 rows, got ${ldRows.length}: ${JSON.stringify(ldRows)}`);
+      }
+    }
+  } finally {
+    rmSync(reqTmp, { recursive: true, force: true });
+  }
+} catch (e) {
+  fail(`merge-tracker req-ID guard test crashed: ${e.message}`);
+}
+
 // ── MERGE-TRACKER REPORT-NUMBER COLLISION (#912) ─────────────────
 // The report-number dedup check was not company-guarded: a TSV for NewCo
 // with report [1] would find the existing tracker row [1] for OtherCo and
