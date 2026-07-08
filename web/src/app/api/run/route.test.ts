@@ -238,7 +238,21 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
       child.emit("close");
     });
     expect(events).toContainEqual({ type: "status", label: "Agent ready" });
-    expect(events).toContainEqual({ type: "done" });
+    expect(events).toContainEqual({ type: "done", tokens: 0, costUsd: null });
+  });
+
+  it("parses {tokens, costUsd} from the result event's usage/total_cost_usd fields", async () => {
+    const resultLine =
+      JSON.stringify({
+        type: "result",
+        usage: { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 10 },
+        total_cost_usd: 0.0042,
+      }) + "\n";
+    const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
+      child.stdout.emit("data", Buffer.from(delta("hi") + resultLine));
+      child.emit("close");
+    });
+    expect(events).toContainEqual({ type: "done", tokens: 160, costUsd: 0.0042 });
   });
 
   it("reassembles a delta record split across stdout chunks", async () => {
@@ -311,7 +325,7 @@ describe("POST /api/run — evaluate persistence honesty", () => {
       fs.writeFileSync(path.join(ROOT, "reports", "035-acme-2026-06-30.md"), "# report\n");
       child.emit("close", 0);
     });
-    expect(events).toContainEqual({ type: "done" });
+    expect(events).toContainEqual({ type: "done", tokens: 0, costUsd: null });
     expect(events.some((e) => e.type === "error")).toBe(false);
   });
 });

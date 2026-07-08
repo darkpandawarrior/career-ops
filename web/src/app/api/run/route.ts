@@ -173,6 +173,8 @@ export async function POST(req: Request) {
       let buf = "";
       let emittedText = false; // any assistant text delta → the CLI actually ran
       let sawError = false;
+      let lastTokens = 0; // per-run token cost from the Claude result event (#6) — local only
+      let lastCostUsd: number | null = null;
       // pdf-mode tailors a full CV + renders it — give it more headroom.
       const killMs = kind === "pdf" ? 720_000 : 285_000;
       killer = setTimeout(() => {
@@ -217,7 +219,13 @@ export async function POST(req: Request) {
             } else if (ev.type === "system" && ev.subtype === "init") {
               send({ type: "status", label: "Agent ready" });
             } else if (ev.type === "result") {
-              send({ type: "done" });
+              // Capture the per-run cost; the authoritative "done" is sent on close
+              // (so the honesty gate decides done-vs-error first, instead of this
+              // firing a premature "done" the close-time error could contradict).
+              // Tokens = the same formula /api/usage uses: input + output + cache-creation.
+              const u = ev.usage || {};
+              lastTokens = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
+              if (typeof ev.total_cost_usd === "number") lastCostUsd = ev.total_cost_usd;
             }
           } catch {
             /* partial line */
@@ -245,7 +253,7 @@ export async function POST(req: Request) {
           // without file-write authorization) — surface it instead of a fake score.
           send({ type: "error", msg: "This evaluation ran but didn't save a report — the CLI needs file-write access to persist results (Claude Code and Codex have this by default). Verify it's authenticated and try again." });
         } else {
-          send({ type: "done" });
+          send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd });
         }
         close();
       });
