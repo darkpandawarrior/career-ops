@@ -72,10 +72,17 @@ import {
 const { dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 
 /** Canonical header written when data/follow-ups.md doesn't exist yet. */
+// Divergence from upstream: upstream renamed the header to lowercase
+// `num|appNum|date|company|role|channel|contact|notes` (#1430's machine-
+// parseable header). Both versions' parseFollowups() is purely POSITIONAL
+// (fixed `split('|')` indices, not header-driven — see followup-cadence.mjs),
+// so the header text is cosmetic only. Keeping our own fork's existing
+// capitalized header (matches modes/followup.md's documented table) rather
+// than adopting upstream's casing for no functional gain.
 export const FOLLOWUPS_HEADER = [
   '# Follow-ups',
   '',
-  '| num | appNum | date | company | role | channel | contact | notes |',
+  '| # | App# | Date | Company | Role | Channel | Contact | Notes |',
   '|---|---|---|---|---|---|---|---|',
 ].join('\n');
 

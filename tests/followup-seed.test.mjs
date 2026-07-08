@@ -141,7 +141,7 @@ function cleanup(sandbox) {
   const tableHeader = [
     '# Follow-ups',
     '',
-    '| num | appNum | date | company | role | channel | contact | notes |',
+    '| # | App# | Date | Company | Role | Channel | Contact | Notes |',
     '|---|---|---|---|---|---|---|---|',
     '| 1 | 2 | 2026-06-10 | Globex | Manager | email | recruiter@globex.com | sent |',
     '',
@@ -208,7 +208,7 @@ function cleanup(sandbox) {
   const expectedHeader = [
     '# Follow-ups',
     '',
-    '| num | appNum | date | company | role | channel | contact | notes |',
+    '| # | App# | Date | Company | Role | Channel | Contact | Notes |',
     '|---|---|---|---|---|---|---|---|',
   ].join('\n');
   if (content.startsWith(expectedHeader)) pass('5. missing file created with exact canonical header');
