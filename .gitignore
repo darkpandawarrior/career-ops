@@ -119,7 +119,6 @@ desktop/dist/
 data/job-dashboard.json
 data/profile-archives/
 data/onboarding-drafts/
-package-lock.json
 
 # Playwright MCP server run artifacts (ephemeral, machine-local)
 .playwright-mcp/

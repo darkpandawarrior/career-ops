@@ -47,15 +47,57 @@ function checkNodeVersion() {
   };
 }
 
-function checkDependencies() {
-  if (existsSync(join(projectRoot, 'node_modules'))) {
-    return { pass: true, label: 'Dependencies installed' };
+// Checking that node_modules/ exists isn't enough — a merge that adds/removes/bumps
+// a dependency leaves a stale node_modules/ in place (dir still exists) until someone
+// re-runs npm install, and this was reporting a false "✓ installed" the whole time
+// while the actual missing package throws Cannot find module at runtime/build.
+function checkDependenciesAt(nodeModulesDir, packageJsonPath, label, installHint) {
+  if (!existsSync(nodeModulesDir)) {
+    return { pass: false, label: `${label} not installed`, fix: installHint };
   }
-  return {
-    pass: false,
-    label: 'Dependencies not installed',
-    fix: 'Run: npm install',
-  };
+  let declared;
+  try {
+    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+    declared = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
+  } catch {
+    return { pass: true, label: `${label} installed` };
+  }
+  const missing = declared.filter((name) => !existsSync(join(nodeModulesDir, name)));
+  if (missing.length) {
+    return {
+      pass: false,
+      label: `${label} out of date — missing: ${missing.join(', ')}`,
+      fix: installHint,
+    };
+  }
+  return { pass: true, label: `${label} installed` };
+}
+
+function checkDependencies() {
+  return checkDependenciesAt(
+    join(projectRoot, 'node_modules'),
+    join(__dirname, 'package.json'),
+    'Dependencies',
+    'Run: npm install',
+  );
+}
+
+// The dashboard (web/) has its own package.json + node_modules, entirely unchecked
+// before this — a pull that touches web/package.json without a follow-up
+// `cd web && npm install` crashes the dashboard with Module-not-found errors while
+// doctor.mjs (run from root) reported everything fine.
+function checkWebDependencies() {
+  const webRoot = join(__dirname, 'web');
+  const webPkg = join(webRoot, 'package.json');
+  if (!existsSync(webPkg)) {
+    return { pass: true, label: 'web/ dependencies (no web/ subproject here)' };
+  }
+  return checkDependenciesAt(
+    join(webRoot, 'node_modules'),
+    webPkg,
+    'web/ dependencies',
+    'Run: cd web && npm install',
+  );
 }
 
 async function checkPlaywright() {
@@ -340,6 +382,7 @@ async function main() {
   const checks = [
     checkNodeVersion(),
     checkDependencies(),
+    checkWebDependencies(),
     await checkPlaywright(),
     checkPlaywrightMcp(projectRoot),
     checkScanExtractor(projectRoot),
