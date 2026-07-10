@@ -145,6 +145,23 @@ Read `cv.md`. Table with each JD requirement mapped to exact CV lines or i18n.ts
 
 Use WebSearch for current salaries (Glassdoor, Levels.fyi, Blind), the company's comp reputation, demand trend. Table with data and cited sources. If there's no data, say so.
 
+**Before interpreting any salary, classify the company type / hiring entity.** A public salary figure is a signal, not a contractual promise. If the brand differs from the legal employer or posting entity, classify the **actual contract / hiring entity** first and mention the brand relationship separately. If the company type is uncertain, mark it `Unknown` and default compensation reliability to the conservative tier `Low`.
+
+| Company type | Typical comp reliability |
+|--------------|--------------------------|
+| Public big tech / mature tech | High to medium |
+| Growth-stage / VC-backed startup | Medium |
+| Early-stage / pre-revenue startup | Medium to low |
+| Enterprise / traditional corporate | Medium |
+| Agency / outsourcing / consulting vendor | Medium to low |
+| Local SMB / service business | Low |
+| Sales / commission-heavy org | Low unless base is explicit |
+| Recruiter / staffing listing | Low to medium |
+| Government / academic / nonprofit | Medium to high |
+| Open-source / education community | Medium to low |
+
+**Compensation reliability:** first check whether the JD states a salary figure. If none exists, collapse this block to two lines — `Company type: {category or Unknown}` and `Compensation reliability: {High|Medium|Low|Unknown}` — and skip the component split, market rows, and HR verification questions. When a figure exists, split it into: advertised range (JD's own figure, verbatim), likely guaranteed base, variable / conditional cash (bonus, commission, allowance, attendance/KPI bonus, overtime, 13th salary, sign-on), expected stable cash, and non-cash benefits. Treat "comprehensive salary", "total package", "up to", "OTE", "uncapped", "allowances included", "attendance bonus", "KPI bonus", "base + variable", "base + commission", and unusually wide ranges as low-reliability unless a fixed base is separated. When a figure exists, add 3-6 HR verification questions tailored to the company type. Never present advertised compensation as real take-home pay unless the source explicitly supports it.
+
 Comp score (1-5): 5=top quartile, 4=above market, 3=median, 2=slightly below, 1=well below.
 
 #### Block E — Personalization Plan

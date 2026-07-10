@@ -221,6 +221,11 @@ Levels are additive — they are executed in order, and results are merged and d
    - All matches are case-insensitive substring matches.
    - The location is persisted as the 7th column in `scan-history.tsv` for later auditing.
 
+6c. **Filter by Posting Age (Optional)** using `max_posting_age_days` from `portals.yml`:
+   - Opt-in. If the key is absent, 0, or non-positive, all ages pass (default behavior).
+   - An offer is skipped only when the provider supplied a posting date (`postedAt`) AND it is older than N days.
+   - Offers from providers that expose no date always pass (do not penalize missing data).
+
 7. **Deduplicate** against 3 sources:
    - `scan-history.tsv` → exact URL already seen
    - `applications.md` → normalized company + role already evaluated
@@ -277,11 +282,23 @@ If a non-publicly accessible URL is found:
 
 ## Scan History
 
-`data/scan-history.tsv` tracks ALL seen URLs:
+`data/scan-history.tsv` tracks ALL seen URLs. Each row has nine tab-separated columns:
+
+| # | Column | Example | Notes |
+|---|--------|---------|-------|
+| 1 | `url` | `https://jobs.lever.co/acme/123` | Canonical posting URL |
+| 2 | `first_seen` | `2026-02-10` | ISO date the URL was first encountered |
+| 3 | `portal` | `Ashby — AI PM` | Query name from `portals.yml` |
+| 4 | `title` | `PM AI` | Job title as returned by the ATS |
+| 5 | `company` | `Acme` | Company name |
+| 6 | `status` | `added` | `added`, `skipped_dup`, `skipped_title`, `skipped_expired` |
+| 7 | `location` | `Remote — Europe` | Location string (may be empty); persisted for later auditing |
+| 8 | `jd_fingerprint` | `a3f1c8d2e4b70592` | 64-bit SimHash of the JD text (16 hex chars); empty when no usable body was available (feeds the #1597 cross-listing check above) |
+| 9 | `postedAt` | `2026-02-08` | ISO date the role was originally posted (as reported by the ATS); empty when not available |
 
 ```tsv
-url	first_seen	portal	title	company	status
-https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added
+url	first_seen	portal	title	company	status	location	jd_fingerprint	postedAt
+https://...	2026-02-10	Ashby — AI PM	PM AI	Acme	added	Remote	a3f1c8d2e4b70592	2026-02-08
 ```
 
 ## Output Summary

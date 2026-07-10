@@ -60,6 +60,8 @@ Read the entire page/form to scan for knock-out questions BEFORE generating full
 4. If this is a known ATS from **Known ATS Quirks** below, check whether that platform is one of the ones known to hard-gate on these fields (e.g., Greenhouse/Lever knock-out screening questions) so the warning can name the mechanism, not just the question.
 5. If no knock-out questions are found, or the candidate resolves the warning, proceed to Step 6.
 
+**Blacklist check (#1742):** before any form filling starts, if `data/blacklist.md` exists, check the visible company against it (case- and punctuation-insensitive). The file is the candidate's own do-not-apply list — on a hit, STOP and surface their own recorded decision: "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want to apply?" Require an explicit yes before generating or filling anything — never silently refuse, never silently proceed; the candidate's call always wins. Absent file = skip this check.
+
 **Cross-channel check:** before drafting — and ALWAYS before the candidate authorizes an agency to submit on their behalf — check `data/applications.md` for an existing row with the same company+role under a different Via (agency vs direct, or two agencies). A double submission burns the candidate with both the agency and the employer. If found, stop and ask the candidate which channel owns the candidacy. If the end employer is still unknown (Company `?`), the check still runs in degraded form — it is never silently skipped:
 
 1. Ask the candidate (or the recruiter, via the candidate) for the client company name first — the reveal is the cheapest fix and unlocks the full check.
