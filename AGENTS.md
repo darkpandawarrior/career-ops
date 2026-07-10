@@ -82,6 +82,8 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `templates/cv-template.tex` | LaTeX/Overleaf template for CVs |
 | `generate-pdf.mjs` | Playwright: HTML to PDF |
 | `generate-latex.mjs` | LaTeX CV validator + pdflatex compiler |
+| `verify-cv-facts.mjs` | Pre-submit gate: flags invented metrics/claims in a generated CV against `cv.md`/`article-digest.md` |
+| `verify-application-match.mjs` | Pre-submit gate: flags a draft addressed to the wrong company/role or with leaked `{{TEMPLATE}}` tokens |
 | `article-digest.md` | Compact proof points from portfolio (optional) |
 | `interview-prep/story-bank.md` | Accumulated STAR+R stories across evaluations |
 | `interview-prep/{company}-{role}.md` | Company-specific interview intel reports |
@@ -362,6 +364,7 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 5. Health check: `node verify-pipeline.mjs`
 6. Normalize statuses: `node normalize-statuses.mjs`
 7. Dedup: `node dedup-tracker.mjs`
+8. **Before marking a generated CV/cover letter ready to submit**, run `node verify-cv-facts.mjs <file>` (no invented metrics) and `node verify-application-match.mjs <file> --company "..." --role "..."` (right company/role actually mentioned, no leaked `{{TEMPLATE}}` tokens or placeholder text). Both exit 1 on failure — fix the draft before it goes in the queue for the user to submit.
 
 ### Canonical States (applications.md)
 
