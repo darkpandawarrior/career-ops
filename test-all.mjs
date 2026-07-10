@@ -1207,7 +1207,8 @@ try {
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
   const historyColumns = historyRow.split('\t');
   if (
-    historyColumns.length === 8 && // 7 metadata columns + fingerprint
+    historyColumns.length === 9 && // 7 metadata + fingerprint (#1597) + postedAt (#1742)
+    historyColumns[8] === '' && // no postedAt on hostileOffer → empty trailing col
     !historyColumns.some(col => /[\r\n\t]/.test(col)) &&
     historyColumns[0] === 'https://jobs.example.com/123|evil' &&
     historyColumns[3].includes('- [ ] https://evil.example/job') &&
@@ -1323,8 +1324,9 @@ try {
     const runsFile = join(runsTmp, 'scan-runs.tsv');
     appendScanRunSummary({
       timestamp: '2026-07-08T00:00:00.000Z', companies: 10, boards: 2, found: 50,
-      filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredSalary: 0,
-      filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29, errors: 0,
+      filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredPostingAge: 7,
+      filteredSalary: 0, filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29,
+      errors: 0, filteredBlacklist: 8,
     }, runsFile);
     const content = readFileSync(runsFile, 'utf-8');
     const lines = content.trim().split('\n');
@@ -1334,7 +1336,7 @@ try {
       fail(`appendScanRunSummary header mismatch — got: ${lines[0]}`);
     }
     const cols = lines[1].split('\t');
-    if (cols.length === 14 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed' && cols[12] === '29') {
+    if (cols.length === 16 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed' && cols[13] === '29' && cols[15] === '8') {
       pass('appendScanRunSummary writes one tab-delimited row with the run counters');
     } else {
       fail(`appendScanRunSummary row shape wrong: ${JSON.stringify(cols)}`);

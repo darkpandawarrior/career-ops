@@ -90,3 +90,19 @@ export function rebuildRow(parts) {
   if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
   return '| ' + cells.join(' | ') + ' |';
 }
+
+/**
+ * Normalize company names for same-company lookups across tracker scripts.
+ *
+ * Company names can contain spaces, punctuation, or branding variants in the
+ * tracker and incoming rows. Removing non-alphanumeric characters gives every
+ * consumer (merge-tracker dedup, set-status row resolution, scan blacklist
+ * matching) the same stable company key, so a row one script would match is
+ * never missed by another.
+ *
+ * @param {string} name - Company name from the tracker or an input row.
+ * @returns {string} Lowercase alphanumeric company key.
+ */
+export function normalizeCompany(name) {
+  return String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
