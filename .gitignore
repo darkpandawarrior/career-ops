@@ -65,6 +65,7 @@ modes/_custom.md
 /profiles/
 /sync/
 /profiles.yml
+/automation/
 
 # Per-candidate web runtime + private/transient artifacts — never commit.
 /.career-ops-web/
