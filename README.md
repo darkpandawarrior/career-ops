@@ -1,24 +1,20 @@
 <div align="center">
 
-```
-██╗  ██╗██╗██████╗ ███████╗███████╗██╗ ██████╗ ███╗   ██╗ █████╗ ██╗
-██║  ██║██║██╔══██╗██╔════╝██╔════╝██║██╔════╝ ████╗  ██║██╔══██╗██║
-███████║██║██████╔╝█████╗  ███████╗██║██║  ███╗██╔██╗ ██║███████║██║
-██╔══██║██║██╔══██╗██╔══╝  ╚════██║██║██║   ██║██║╚██╗██║██╔══██║██║
-██║  ██║██║██║  ██║███████╗███████║██║╚██████╔╝██║ ╚████║██║  ██║███████╗
-╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚══════╝╚══════╝╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝
-```
+<img src="docs/assets/banner.svg" alt="HireSignal — local-first career intelligence" width="700"/>
 
 **Local-first career intelligence — evidence-backed scoring, not spray-and-pray.**
 
 ---
 
+![engine version](https://img.shields.io/badge/engine-career--ops_v1.18.0-6366f1?style=flat-square)
+![dashboard version](https://img.shields.io/badge/dashboard-web_v0.3.0-22d3ee?style=flat-square)
 ![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
-![TypeScript](https://img.shields.io/badge/TypeScript_6-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript_7-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind_4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
 ![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat-square&logo=node.js&logoColor=white)
 ![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=flat-square&logo=playwright&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-47848F?style=flat-square&logo=electron&logoColor=white)
 ![Local-first](https://img.shields.io/badge/local--first-111827?style=flat-square)
 ![Built on career-ops](https://img.shields.io/badge/built_on-career--ops-6366f1?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)
@@ -46,7 +42,7 @@ HireSignal extends that foundation with a **local web dashboard** that helps a c
 ### The dashboard
 
 HireSignal ships one dashboard over your local data and engine: `web/` — Next.js
-16 · React 19 · TypeScript 6 · Tailwind 4 (SSR/App Router), with multi-profile
+16 · React 19 · TypeScript 7 · Tailwind 4 (SSR/App Router), with multi-profile
 routing (`?profile=slug` registry + switcher), in-process scoring, and a full
 surface (Today command center · Board · Pipeline · Ops · Intel · Portals ·
 Analytics · CV · Onboarding · ⌘K palette). **This README's "modern dashboard"
@@ -172,6 +168,23 @@ The dashboard guides you through: upload a resume PDF → review the extracted
 evidence → activate a local profile → run a first job search → review ranked
 opportunities.
 
+### Desktop shell (early)
+
+`desktop/` wraps the same Next.js dashboard in an Electron window (v0.1.0 —
+an early scaffold, not yet a signed installer):
+
+```bash
+cd desktop
+npm install
+npm run build:web   # builds web/ first
+npm run dev          # launches the Electron shell
+# npm run package     # electron-builder, unsigned local build
+```
+
+User data stays in the OS's writable app-data folder by default; it still
+shells out to whatever AI CLI is on `PATH`. See [`desktop/README.md`](desktop/README.md)
+for the packaging details.
+
 ---
 
 ## Commands
@@ -196,45 +209,68 @@ npm run board:clean         # Purge non-Android false positives from pipeline.md
 node migrate-profile.mjs <slug> --display-name "Name" [--dry-run]
 ```
 
+This is a curated subset — the engine ships 40+ `npm run` scripts plus several
+`node`-only ones. See [`docs/SCRIPTS.md`](docs/SCRIPTS.md) for the full reference.
+
 ---
 
 ## Architecture
 
-```
-Resume PDF
-  └─▶ onboarding draft (ignored local storage)
-        └─▶ PDF extraction  ──────────────────────────────────────┐
-              └─▶ resume-normalizer.mjs                           │
-                    └─▶ profile-inference.mjs                     │
-                          └─▶ [user reviews facts]                │
-                                └─▶ profile-writer.mjs            │
-                                      ├─▶ cv.md                   │
-                                      ├─▶ config/profile.yml      │ user-layer
-                                      ├─▶ config/job-search.yml   │ career-ops
-                                      ├─▶ modes/_profile.md       │ files
-                                      └─▶ portals.yml             │
-                                                                   │
-query-builder.mjs ◀────────────────────────────────────────────────┘
-  └─▶ job-search-runner.mjs
-        ├─▶ scan.mjs + scan-ats-full.mjs  (zero-token ATS feeds)
-        ├─▶ provider feeds + remote boards
-        ├─▶ pipeline entries + scan history
-        └─▶ search leads
-              └─▶ scorer.mjs  (skills × experience × availability)
-                    └─▶ data/job-dashboard.json
-                          └─▶ dashboard review
-                                └─▶ generate-pdf.mjs  (/career-ops pdf mode)
-                                      └─▶ output/
+```mermaid
+flowchart TD
+    A[Resume PDF] --> B[Onboarding draft<br/><i>gitignored local storage</i>]
+    B --> C[PDF extraction]
+    C --> D[resume-normalizer.mjs]
+    D --> E[profile-inference.mjs]
+    E --> F{User reviews<br/>inferred facts}
+    F --> G[profile-writer.mjs]
+
+    G --> H1[cv.md]
+    G --> H2[config/profile.yml]
+    G --> H3[config/job-search.yml]
+    G --> H4[modes/_profile.md]
+    G --> H5[portals.yml]
+
+    subgraph UL["User-layer files (never committed, never auto-updated)"]
+        H1
+        H2
+        H3
+        H4
+        H5
+    end
+
+    UL --> I[query-builder.mjs]
+    I --> J[job-search-runner.mjs]
+
+    J --> K1["scan.mjs + scan-ats-full.mjs<br/>(zero-token ATS feeds)"]
+    J --> K2["62 provider modules"]
+    J --> K3["pipeline entries + scan history"]
+    J --> K4["search leads"]
+
+    K1 --> L["scorer.mjs<br/>5 weighted signals: skills 45 · experience 25 ·<br/>eligibility 15 · notice+education 10 · other 5"]
+    K2 --> L
+    K3 --> L
+    K4 --> L
+
+    L --> M[(data/job-dashboard.json)]
+    M --> N[Dashboard review]
+    N --> O["generate-pdf.mjs<br/>(/career-ops pdf mode)"]
+    O --> P[output/]
+
+    classDef userLayer fill:#6366f1,stroke:#4f46e5,color:#fff
+    classDef engine fill:#22d3ee,stroke:#0891b2,color:#0f172a
+    class H1,H2,H3,H4,H5 userLayer
+    class K1,K2,K3,K4,L engine
 ```
 
-Private candidate data stays in the local user layer throughout. System-layer code and public docs never contain real resume details, salary targets, or application history.
+Private candidate data stays in the local user layer throughout (indigo nodes above). System-layer code and public docs never contain real resume details, salary targets, or application history.
 
 ---
 
 ## Project Structure
 
 ```text
-web/                      The dashboard (Next.js 16 / React 19 / TS 6 / Tailwind 4)
+web/                      The dashboard (Next.js 16 / React 19 / TS 7 / Tailwind 4)
   src/app/                App Router pages + API routes (/api/jobs, /api/onboarding, …)
   src/components/         board · home · ops · intel · onboarding · ui · command palette
   src/lib/                profile-registry · career-ops readers · jobs/scoring · coach …
@@ -242,6 +278,8 @@ web/                      The dashboard (Next.js 16 / React 19 / TS 6 / Tailwind
     scoring/  search/     canonical scorer + search config/query-builder/job-search-runner
   middleware? → src/proxy.ts   ?profile=slug → x-co-profile (Next 16 proxy convention)
   docs/hiresignal-fusion.md    the migration log
+
+desktop/                  Electron shell wrapping web/ (early scaffold, v0.1.0)
 
 onboarding-cli.mjs        Bridge: resume infer / extract (pdf) / activate
 job-search-cli.mjs        Bridge: real ATS/feed crawl → scored job-dashboard.json
@@ -254,9 +292,13 @@ data/
   applications.md         career-ops tracker
   pipeline.md             pending job URLs
   job-dashboard.json      generated dashboard cache
+providers/                62 job-board provider modules (docs/SUPPORTED_JOB_BOARDS.md)
 docs/
+  SCRIPTS.md              Full script/npm-alias reference
+  SUPPORTED_JOB_BOARDS.md  Every scanner provider, by ATS/API/parser type
   MULTI_PROFILE.md        Multi-profile registry, migration, deploy
   PUBLIC_DASHBOARD_*.md    Design, privacy, setup, scoring, and search notes
+  PLUGINS.md              Optional external-integration plugin system
 ```
 
 ---
@@ -276,15 +318,17 @@ docs/
 
 ## Scoring
 
-The main relevance score uses three evidence signals:
+The main relevance score is a weighted blend of five evidence signals (default weights, `web/src/lib/search/config-schema.mjs`):
 
-| Signal | How it's measured |
-|--------|-----------------|
-| **Skills** | Demonstrated and supporting skills from reviewed profile matched against job text |
-| **Experience** | Extracted job seniority and years compared with candidate's reviewed experience band |
-| **Availability** | Joining-window language compared with candidate's notice period |
+| Signal | Weight | How it's measured |
+|--------|-------:|-----------------|
+| **Skills** | 45 | Demonstrated and supporting skills from reviewed profile matched against job text |
+| **Experience** | 25 | Extracted job seniority and years compared with candidate's reviewed experience band |
+| **Eligibility** | 15 | Work authorization / sponsorship / location-policy alignment |
+| **Notice + Education** | 10 | Joining-window language vs. candidate's notice period, blended with education fit |
+| **Other** | 5 | Remaining signals not covered above |
 
-Scores are on a **1–10 scale**. A strong score can still be gated by compensation, eligibility, exclusions, or missing verification.
+The blend produces a raw 0–100 score, shown to the user on a **1–10 scale** (`round(raw / 10)`). A strong score can still be gated by compensation, hard eligibility conflicts, exclusions, or missing verification — gates cap or block a role independently of the weighted score.
 
 | Group | Threshold |
 |-------|----------|
@@ -310,6 +354,66 @@ Applied before and during scoring:
 
 ---
 
+## Technical Deep Dive
+
+### Provider plugin contract
+
+Every job board is one file in `providers/`. `scan.mjs` loads every non-`_`-prefixed
+`.mjs` file in that directory and enforces the contract at runtime — not via a
+build step, since this is plain ESM with no bundler:
+
+```js
+// providers/_types.js — documentation-only JSDoc, IDE hints for provider authors
+/**
+ * @typedef {object} Provider
+ * @property {string} id                    Unique provider key (matches `provider:` in portals.yml)
+ * @property {(entry, ctx) => Promise<Job[]>} fetch  Returns normalized Job[] or throws
+ */
+```
+
+A provider is auto-detected from a `careers_url` pattern (e.g. any
+`jobs.ashbyhq.com/<slug>` URL resolves to the Ashby provider with zero config)
+or explicitly pinned via `provider: <id>` in `portals.yml` when a branded
+domain proxies a known ATS. `scan.mjs` enforces the contract structurally —
+`id` must be present, `fetch` must be a function, and its resolved value must
+be an array — there is no schema validator sitting in front of it. Per-provider
+quirks (rate limits, latency floors, pagination caps) are tuned locally in
+each file; Ashby, for example, carries a 30s timeout and a jittered retry
+because its public posting-api has a ~10s+ server-side latency floor that
+races the scanner's global 10s default. See
+[`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) for all 62,
+and [`docs/local-parser-cookbook.md`](docs/local-parser-cookbook.md) to add one.
+
+### Multi-profile resolution
+
+There is exactly one engine checkout; profiles are data, not code. Resolution
+order for any request:
+
+1. `?profile=slug` query param (made sticky by a cookie once set)
+2. `profiles.yml` registry entry for that slug → resolves to a `root:` data directory
+3. `CAREER_OPS_ROOT` env var, if set — points every engine script (`scan.mjs`,
+   `verify-pipeline.mjs`, the new `verify-application-match.mjs`, etc.) at that
+   directory instead of the parent checkout
+4. No registry, no env var → falls back to the checkout root (single-profile mode,
+   the default for a fresh install)
+
+This is why the web dashboard's "spawn the real `.mjs`" model (see
+[Under the hood](#under-the-hood)) works without any dashboard-specific
+duplication of engine logic: every spawned script inherits the same
+`CAREER_OPS_ROOT` scoping the web request already resolved.
+
+### Data-contract enforcement
+
+The System-Layer/User-Layer split (see [`DATA_CONTRACT.md`](DATA_CONTRACT.md))
+isn't just a convention in a doc — `private-data-audit.mjs`
+(`npm run audit:private-data`) greps System-Layer files (`modes/*.md` other
+than `_profile.md`, `*.mjs`, `web/src/lib/*`) for patterns that would indicate
+leaked candidate data (real-looking emails, phone numbers, salary figures)
+and fails the check if it finds one. It runs as part of `test-all.mjs` and is
+callable standalone before any commit that touches a System-Layer file.
+
+---
+
 ## How HireSignal Uses career-ops
 
 HireSignal is not a separate job-search engine bolted next to career-ops. It is a dashboard layer over the parts of career-ops that are useful for a local, candidate-specific workflow.
@@ -317,7 +421,7 @@ HireSignal is not a separate job-search engine bolted next to career-ops. It is 
 | career-ops capability | How HireSignal uses it |
 |----------------------|----------------------|
 | Data contract | Candidate data kept in user-layer files: `cv.md`, `config/profile.yml`, `config/job-search.yml`, `modes/_profile.md`, `portals.yml`, `data/`, `reports/`, `output/` |
-| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, provider feeds, scan history, and pipeline conventions — no hosted service needed |
+| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, 62 provider modules ([`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md)), scan history, and pipeline conventions — no hosted service needed |
 | Tracker model | `data/applications.md`, `data/pipeline.md`, status normalization, deduplication, and report links remain career-ops compatible |
 | Modes and templates | Role evaluation prompts, profile narrative, resume templates, and PDF generation flow remain available for agent-assisted review |
 | Liveness and quality rules | Job links checked, low-fit roles discouraged, no automatic submission |
@@ -389,6 +493,42 @@ HireSignal inherits career-ops' core principle: **use automation to improve judg
 - Review every generated resume and application answer
 - Avoid low-fit applications unless there is a strong human reason to override
 - Optimize for fewer, more thoughtful applications
+
+---
+
+## Version History
+
+Engine and dashboard version independently (`career-ops-vX.Y.Z` tags for the
+engine, `web-vX.Y.Z` for the dashboard) since they can each ship on their own
+cadence. No `CHANGELOG.md` is committed yet — this table is hand-curated from
+git tags and merged PRs; the full detail is always `gh pr list --repo
+kirklazar-android/hiresignal --state merged`.
+
+| Version | Date | Highlights |
+|---------|------|------------|
+| **career-ops v1.18.0 · web v0.3.0** (current) | 2026-07-08 → 07-10 | Via-channel (agency vs. direct) tracker column; pre-submit `verify-application-match.mjs` gate; TypeScript 7 + Electron 43 dependency/CVE hardening; desktop packaging fixes |
+| career-ops v1.17.0 | 2026-07-05 | Absorbed upstream origin delta; retired legacy `dashboard-web/`, consolidated engine into `web/src/lib/` |
+| web v0.2.0 — "HireSignal 2.0 fusion" | 2026-07-01 | Ground-up dashboard rewrite: multi-profile, in-process scoring, resume onboarding, scored board, HireSignal branding (Phases 0–5) |
+| career-ops v1.16.0 | 2026-07-03/04 | Email-sweep mode; fixed a desktop-app crash loop |
+| career-ops v1.15.0 | 2026-07-01 | Synced into `hiresignal` main |
+| career-ops v1.14.0 | 2026-06-29 | First System-Layer sync from upstream career-ops |
+| career-ops v1.2.0 – v1.13.0 | earlier 2026 | Pre-fusion engine history, inherited from [santifer/career-ops](https://github.com/santifer/career-ops) |
+
+---
+
+## Documentation
+
+| Doc | Covers |
+|-----|--------|
+| [`docs/SCRIPTS.md`](docs/SCRIPTS.md) | Every engine script — npm alias (or `node` invocation) and purpose |
+| [`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) | All 62 scanner provider modules, by ATS/API/parser type |
+| [`docs/MULTI_PROFILE.md`](docs/MULTI_PROFILE.md) | Multi-profile registry, migration, deploy |
+| [`docs/PORTFOLIO.md`](docs/PORTFOLIO.md) | The standalone portfolio-site generator |
+| [`docs/PLUGINS.md`](docs/PLUGINS.md) | Optional external-integration plugin system |
+| [`docs/liveness-bot-block-policy.md`](docs/liveness-bot-block-policy.md) | Bot-block-aware liveness signatures per job board |
+| [`docs/local-parser-cookbook.md`](docs/local-parser-cookbook.md) | Writing a new local/parser-based scanner provider |
+| [`docs/PUBLIC_DASHBOARD_*.md`](docs/) | Dashboard architecture, privacy, setup, scoring, and search-strategy notes |
+| [`desktop/README.md`](desktop/README.md) | Electron shell packaging notes |
 
 ---
 

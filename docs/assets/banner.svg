@@ -1,0 +1,34 @@
+<svg width="900" height="170" viewBox="0 0 900 170" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="HireSignal — local-first career intelligence">
+  <defs>
+    <linearGradient id="hs-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+
+  <text x="450" y="80" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="58" font-weight="800" fill="url(#hs-grad)">
+    HireSignal
+    <animate attributeName="opacity" values="0;1" dur="0.9s" begin="0s" fill="freeze"/>
+  </text>
+
+  <!-- animated signal wave: a dashed line continuously scrolling left, like a live trace -->
+  <path d="M 50 122 Q 110 100 170 122 T 290 122 T 410 122 T 530 122 T 650 122 T 770 122"
+        fill="none" stroke="url(#hs-grad)" stroke-width="3" stroke-linecap="round"
+        stroke-dasharray="14 10" opacity="0.85">
+    <animate attributeName="stroke-dashoffset" from="0" to="-240" dur="3s" repeatCount="indefinite"/>
+  </path>
+
+  <!-- radar-style ping at the live end of the trace -->
+  <circle cx="800" cy="122" r="5" fill="#22d3ee">
+    <animate attributeName="r" values="4;8;4" dur="1.6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="1;0.4;1" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="800" cy="122" r="5" fill="none" stroke="#22d3ee" stroke-width="2">
+    <animate attributeName="r" values="5;26" dur="1.6s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.8;0" dur="1.6s" repeatCount="indefinite"/>
+  </circle>
+
+  <text x="450" y="155" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="15" letter-spacing="3" fill="#94a3b8">
+    LOCAL-FIRST CAREER INTELLIGENCE
+  </text>
+</svg>
