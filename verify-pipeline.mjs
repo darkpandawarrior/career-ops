@@ -13,6 +13,8 @@
  * 8. Stale report-number reservation sentinels are garbage-collected
  * 9. No duplicate reports (two files claiming the same report number)
  * 10. No orphan reports (a report file with no referencing tracker row, link-text only)
+ * 11. Via channel consistency (see #1596)
+ * 12. No # value reused across 2+ tracker rows (error — see #1704)
  * 11. No duplicate reports for the same company+role (#1425)
  * 12. Every report file is referenced by num/link-text/filename-prefix (3-way, #1425)
  * 13. Via channel consistency — confidentiality markers + cross-channel dup warning (#1596)
@@ -419,6 +421,25 @@ for (const [key, vias] of channelsByRole) {
   }
 }
 if (viaIssues === 0) ok('Via channels consistent');
+
+// --- Check 12: Duplicate tracker numbers (#1704) ---
+// The # column is a row id and must be unique. Unlike the company+role dedup
+// check (which can false-positive on a legitimate re-application), the SAME
+// number on 2+ rows is never legitimate: set-status.mjs can't tell the rows
+// apart, and any external reference to "application #N" becomes ambiguous.
+const numGroups = new Map();
+for (const e of entries) {
+  if (!numGroups.has(e.num)) numGroups.set(e.num, []);
+  numGroups.get(e.num).push(e);
+}
+let dupeNums = 0;
+for (const [num, group] of numGroups) {
+  if (group.length > 1) {
+    error(`Duplicate tracker number #${num} used by ${group.length} rows: ${group.map(e => `${e.company} — ${e.role}`).join(' | ')}`);
+    dupeNums++;
+  }
+}
+if (dupeNums === 0) ok('No duplicate tracker numbers');
 
 // --- Summary ---
 console.log('\n' + '='.repeat(50));
