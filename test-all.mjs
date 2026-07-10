@@ -125,6 +125,11 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
+  // career-ops 1.19.0 scripts with inline self-tests (ported).
+  { name: 'upskill.mjs --self-test', expectExit: 0 },
+  { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
+  { name: 'assessment-log.mjs --self-test', expectExit: 0 },
+  { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   // Root-level standalone suites: they call process.exit / use node:test, so
   // they must run as subprocesses, not be imported by tests/ discovery.
   { name: 'invite-match.test.mjs', expectExit: 0 },
@@ -132,6 +137,7 @@ const scripts = [
   { name: 'process-quality.test.mjs', expectExit: 0 },
   { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'verify-application-match.test.mjs', expectExit: 0 },
+  { name: 'cv-templates.test.mjs', expectExit: 0 },
   // tracker-columns coverage lives at tests/tracker-columns.test.mjs
   // (auto-discovered) since the header-aware parsing port.
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
@@ -2932,6 +2938,45 @@ try {
   }
 } catch (e) {
   fail(`test layout guard: ${e.message}`);
+}
+
+console.log('\n40. LaTeX-tex tailoring round-trip (extract → patch, #695)');
+try {
+  const dir = mkdtempSync(join(tmpdir(), 'latex-tex-'));
+  const manifestOut = join(dir, 'manifest.json');
+  const srcTex = join(ROOT, 'examples/latex-tex/resume-subheading.tex');
+  execFileSync(NODE, ['extract-latex-content.mjs', srcTex, '--out', manifestOut], { cwd: ROOT, encoding: 'utf-8' });
+  const extracted = JSON.parse(readFileSync(manifestOut, 'utf-8'));
+  if (extracted.supported && Array.isArray(extracted.slots) && extracted.slots.length > 0) {
+    pass('extract-latex-content.mjs produces a slot manifest');
+  } else {
+    fail('extract-latex-content.mjs manifest missing slots');
+  }
+  const patchJson = join(dir, 'patches.json');
+  const patchedTex = join(dir, 'out.tex');
+  writeFileSync(patchJson, JSON.stringify({
+    slots: extracted.slots,
+    patches: [{ id: extracted.slots[0].id, text: 'CLI patch path works.' }],
+  }));
+  execFileSync(NODE, ['patch-latex-content.mjs', srcTex, patchJson, patchedTex], { cwd: ROOT, encoding: 'utf-8' });
+  if (readFileSync(patchedTex, 'utf-8').includes('CLI patch path works.')) {
+    pass('extract-latex-content.mjs + patch-latex-content.mjs CLI round-trip');
+  } else {
+    fail('CLI patch round-trip did not update the .tex file');
+  }
+  rmSync(dir, { recursive: true, force: true });
+} catch (e) {
+  fail(`LaTeX-tex tailoring test crashed: ${e.message}`);
+}
+
+console.log('\n41. CV template resolver (cv-templates.mjs, #1690)');
+try {
+  const listed = run(NODE, ['cv-templates.mjs', 'list', 'cv']);
+  if (listed !== null) pass('cv-templates.mjs list cv exits 0'); else fail('cv-templates.mjs list cv crashed');
+  const resolved = run(NODE, ['cv-templates.mjs', 'resolve', 'cv'], { env: { ...process.env, CAREER_OPS_ROOT: mkdtempSync(join(tmpdir(), 'cvt-')) } });
+  if (resolved !== null) pass('cv-templates.mjs resolve cv falls back to default without a profile'); else fail('cv-templates.mjs resolve cv crashed');
+} catch (e) {
+  fail(`cv-templates resolver test crashed: ${e.message}`);
 }
 
 await runDiscovered();

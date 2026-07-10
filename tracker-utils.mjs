@@ -6,6 +6,70 @@
  * here means a fix lands once instead of drifting between copies.
  */
 
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import * as yaml from 'js-yaml';
+import { canonicalizeTrackerPath } from './tracker-lock.mjs';
+
+/**
+ * Resolve the canonical tracker path for a project root.
+ *
+ * Honours CAREER_OPS_TRACKER, then prefers data/applications.md over the flat
+ * applications.md layout, and canonicalizes the result so every reader/writer
+ * agrees on one spelling.
+ *
+ * @param {string} rootDir - Project root (career-ops directory).
+ * @returns {string} Canonical absolute tracker path.
+ */
+export function resolveTrackerPath(rootDir) {
+  const raw = process.env.CAREER_OPS_TRACKER
+    ? process.env.CAREER_OPS_TRACKER
+    : existsSync(join(rootDir, 'data/applications.md'))
+      ? join(rootDir, 'data/applications.md')
+      : join(rootDir, 'applications.md');
+  return canonicalizeTrackerPath(raw);
+}
+
+/**
+ * Load the canonical states list from templates/states.yml.
+ *
+ * @param {string} statesPath - Path to states.yml.
+ * @returns {{id:string,label:string,aliases:string[]}[]} Parsed states.
+ */
+export function loadCanonicalStates(statesPath) {
+  const doc = yaml.load(readFileSync(statesPath, 'utf-8'));
+  if (!doc || !Array.isArray(doc.states)) {
+    throw new Error(`Malformed states file at ${statesPath}: expected a top-level "states" list`);
+  }
+  return doc.states.map(s => ({
+    id: String(s.id ?? ''),
+    label: String(s.label ?? ''),
+    aliases: Array.isArray(s.aliases) ? s.aliases.map(String) : [],
+  }));
+}
+
+/**
+ * Resolve user input to a canonical state label, strictly.
+ *
+ * Case-insensitive match against each state's label, id, and aliases, after
+ * stripping markdown bold. Unknown input returns null so the caller can reject
+ * it before anything touches the tracker.
+ *
+ * @param {string} input - Raw state text.
+ * @param {{id:string,label:string,aliases:string[]}[]} states - From loadCanonicalStates().
+ * @returns {string|null} Canonical label, or null when unknown.
+ */
+export function resolveCanonicalState(input, states) {
+  const clean = String(input ?? '').replace(/\*\*/g, '').trim().toLowerCase();
+  if (!clean) return null;
+  for (const s of states) {
+    if (s.label.toLowerCase() === clean) return s.label;
+    if (s.id.toLowerCase() === clean) return s.label;
+    if (s.aliases.some(a => a.toLowerCase() === clean)) return s.label;
+  }
+  return null;
+}
+
 /**
  * Rebuild a markdown table row from the cells produced by `line.split('|')`.
  *
