@@ -131,6 +131,7 @@ const scripts = [
   { name: 'detect-reposts.test.mjs', expectExit: 0 },
   { name: 'process-quality.test.mjs', expectExit: 0 },
   { name: 'reply-matcher.test.mjs', expectExit: 0 },
+  { name: 'verify-application-match.test.mjs', expectExit: 0 },
   // tracker-columns coverage lives at tests/tracker-columns.test.mjs
   // (auto-discovered) since the header-aware parsing port.
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
