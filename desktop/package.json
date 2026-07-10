@@ -13,8 +13,8 @@
     "start:web": "npm --prefix ../web run start"
   },
   "devDependencies": {
-    "electron": "^37.3.1",
-    "electron-builder": "^26.0.12"
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "io.careerops.desktop",
@@ -31,16 +31,17 @@
       },
       {
         "from": "../web/.next/static",
-        "to": "web/web/.next/static"
+        "to": "web/.next/static"
       },
       {
         "from": "../web/public",
-        "to": "web/web/public"
+        "to": "web/public"
       }
     ],
     "directories": {
       "output": "dist"
     },
+    "afterPack": "scripts/afterPack.cjs",
     "mac": {
       "target": [
         "dmg"

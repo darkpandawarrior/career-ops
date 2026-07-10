@@ -23,10 +23,9 @@ function sourceRoot() {
 }
 
 function packagedRoot() {
-  // The standalone build traces from the monorepo root (web/'s own fonts.ts
-  // reaches outside web/ for shared self-hosted fonts), so server.js lands
-  // nested at .next/standalone/web/, not at the standalone root itself.
-  return path.join(process.resourcesPath, "web", "web");
+  // Since fonts moved under web/ (ff7aef8), the standalone build no longer
+  // traces outside web/, so server.js lands at the standalone root itself.
+  return path.join(process.resourcesPath, "web");
 }
 
 function createWindow() {
