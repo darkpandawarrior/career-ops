@@ -14,7 +14,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname, resolve } from 'path';
+import { join, dirname, resolve, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
@@ -45,6 +45,8 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'remote',
   'team_size',
   'advertised_comp',
+  'via',
+  'company_confidential',
 ]);
 
 // --- CLI args ---
@@ -505,7 +507,18 @@ function analyze() {
   // Enrich entries with report data and classification
   const enriched = entries.map(e => {
     const reportMatch = e.report.match(/\]\(([^)]+)\)/);
-    const reportPath = reportMatch ? join(DATA_ROOT, reportMatch[1]) : null;
+    // Tracker links are relative to the tracker file's own directory (see
+    // merge-tracker.mjs link normalization); fall back to repo root for
+    // legacy root-relative links, and only accept paths that stay under reports/.
+    let reportPath = null;
+    if (reportMatch) {
+      const fromTracker = join(dirname(APPS_FILE), reportMatch[1]);
+      const candidate = existsSync(fromTracker) ? fromTracker : join(DATA_ROOT, reportMatch[1]);
+      const repoRelative = relative(DATA_ROOT, candidate).split(sep).join('/');
+      if (repoRelative.startsWith('reports/') && !repoRelative.includes('..')) {
+        reportPath = existsSync(candidate) ? candidate : null;
+      }
+    }
     const reportData = reportPath ? parseReport(reportPath) : null;
     const outcome = classifyOutcome(e.status);
     const trackerScore = parseFloat(e.score);

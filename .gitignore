@@ -9,6 +9,7 @@ data/scan-runs.tsv
 data/apply-queue.md
 data/follow-ups.md
 data/salary-observations.tsv
+data/blacklist.md
 data/pdf-index.tsv
 data/parser-output/**/*.json
 !data/parser-output/.gitkeep

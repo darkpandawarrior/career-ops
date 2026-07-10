@@ -108,6 +108,14 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `stats.mjs` | Lifetime pipeline stats aggregator — funnel, scan totals, portal coverage, follow-up compliance (`--summary` for the human table) |
 | `fingerprint-core.mjs` | Zero-dependency JD-content fingerprinting (SimHash) used by `scan.mjs`'s cross-listing check to catch an agency re-post of a direct listing |
 | `browser-extract.mjs` | Headless Playwright JD/listing reader — compact JSON instead of a full a11y-tree snapshot; strictly read-only |
+| `upskill.mjs` | Aggregate skill-gap analysis from tracked reports — which missing skills recur across evaluated roles (JSON; `--self-test`) |
+| `funnel-velocity.mjs` | Own funnel + stage velocity vs. market benchmarks (`templates/benchmarks.yml` / `config/benchmarks.yml`; `--summary`, `--self-test`) |
+| `img-to-pdf.mjs` | Convert a screenshot/image into a single-page PDF for ATS uploads (Playwright; `--self-test`) |
+| `assessment-log.mjs` | Skills-assessment event log with staleness signal (JSON; `--self-test`) |
+| `cv-templates.mjs` | Config-selectable CV / cover-letter template resolver (`list` / `resolve`; reads `config/profile.yml`) |
+| `openai-tailor.mjs` | Headless CV tailoring for the no-agent pipeline path |
+| `extract-latex-content.mjs` / `patch-latex-content.mjs` | LaTeX-tex tailoring: extract editable slots from a user-owned `.tex`, then patch them back (see `modes/latex-tex.md`) |
+| `data/blacklist.md` | Your do-not-apply list (user layer; read by `scan.mjs`, opt-in bypass via `--include-blacklisted`) |
 | Via column | Optional tracker column recording the agency/recruiter an application went through (`—` for direct); see `modes/tracker.md` |
 
 ### Plugins (optional)
@@ -271,6 +279,8 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 | Asks about rejection patterns or wants to improve targeting | `patterns` |
 | Asks about follow-ups or application cadence | `followup` |
 | Wants adjacent job titles the scanner isn't searching for yet | `titles` |
+| Wants to know which missing skills recur across evaluated roles | `upskill` |
+| Wants in-place tailoring of a user-owned LaTeX `.tex` CV | `latex-tex` |
 | Received an offer letter/contract and wants it read before signing | `offer-prep` |
 | Wants interviewer-side company red flags from past sessions | `interview-redflag` |
 | Pastes employer reply emails to triage against the tracker | `node reply-watch.mjs` |

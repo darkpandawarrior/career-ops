@@ -62,6 +62,16 @@ const APPLY_PATTERNS = [
 
 const MIN_CONTENT_CHARS = 300;
 
+// A job-detail URL almost always carries the posting's identity: a numeric req id
+// (Greenhouse, Workday pid, Microsoft) or a UUID (Lever, Ashby). If the requested
+// URL had one and the final URL lost it, the browser landed somewhere else.
+const JOB_ID_TOKEN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{5,}/gi;
+
+function jobIdToken(url = '') {
+  const matches = url.match(JOB_ID_TOKEN);
+  return matches ? matches[matches.length - 1].toLowerCase() : null;
+}
+
 // ── Bot-block classification policy (docs/liveness-bot-block-policy.md) ──────
 //
 // Four-bucket taxonomy layered over the legacy result/code wire format:
@@ -190,14 +200,14 @@ export function classifyLivenessForUrl({ url = '', status = 0, finalUrl = '', bo
       }
     }
   }
-  return classifyLiveness({ status, finalUrl, bodyText, applyControls });
+  return classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
 }
 
-export function classifyLiveness({ status = 0, finalUrl = '', bodyText = '', applyControls = [] } = {}) {
-  return withBucket(classifyLivenessInner({ status, finalUrl, bodyText, applyControls }));
+export function classifyLiveness({ status = 0, requestedUrl = '', finalUrl = '', bodyText = '', applyControls = [] } = {}) {
+  return withBucket(classifyLivenessInner({ status, requestedUrl, finalUrl, bodyText, applyControls }));
 }
 
-function classifyLivenessInner({ status = 0, finalUrl = '', bodyText = '', applyControls = [] } = {}) {
+function classifyLivenessInner({ status = 0, requestedUrl = '', finalUrl = '', bodyText = '', applyControls = [] } = {}) {
   if (status === 404 || status === 410) {
     return { result: 'expired', code: 'http_gone', reason: `HTTP ${status}` };
   }
@@ -222,6 +232,22 @@ function classifyLivenessInner({ status = 0, finalUrl = '', bodyText = '', apply
   const expiredBody = firstMatch(HARD_EXPIRED_PATTERNS, bodyText);
   if (expiredBody) {
     return { result: 'expired', code: 'expired_body', reason: `pattern matched: ${expiredBody.source}` };
+  }
+
+  // A dead permalink that 301s to a generic search/listing page still shows
+  // "Apply" buttons — on OTHER jobs' cards (seen when jobs.careers.microsoft.com
+  // permalinks migrated to apply.careers.microsoft.com). When the requested URL
+  // carried a job identifier and the final URL lost it, the page being read is
+  // not the posting, so apply controls are not evidence of liveness. Uncertain,
+  // not expired: a portal migration can 301 live postings too, and a false
+  // "expired" permanently filters a real job out of scans.
+  const jobId = jobIdToken(requestedUrl);
+  if (jobId && finalUrl && !finalUrl.toLowerCase().includes(jobId)) {
+    return {
+      result: 'uncertain',
+      code: 'redirected_off_posting',
+      reason: `redirected to ${finalUrl} — job id "${jobId}" missing from final URL`,
+    };
   }
 
   if (hasApplyControl(applyControls)) {
