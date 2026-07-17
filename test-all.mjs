@@ -1208,8 +1208,9 @@ try {
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
   const historyColumns = historyRow.split('\t');
   if (
-    historyColumns.length === 9 && // 7 metadata + fingerprint (#1597) + postedAt (#1742)
+    historyColumns.length === 11 && // 7 metadata + fingerprint (#1597) + postedAt (#1742) + trust score/flags (#1743)
     historyColumns[8] === '' && // no postedAt on hostileOffer → empty trailing col
+    historyColumns[9] === '' && historyColumns[10] === '' && // no trust signal on hostileOffer → empty trailing cols
     !historyColumns.some(col => /[\r\n\t]/.test(col)) &&
     historyColumns[0] === 'https://jobs.example.com/123|evil' &&
     historyColumns[3].includes('- [ ] https://evil.example/job') &&
