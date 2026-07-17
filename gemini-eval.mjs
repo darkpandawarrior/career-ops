@@ -175,14 +175,19 @@ function readFile(path, label) {
   return readFileSync(path, 'utf-8').trim();
 }
 
-function nextReportNumber() {
-  if (!existsSync(PATHS.reports)) return '001';
-  const files = readdirSync(PATHS.reports)
-    .filter(f => /^\d{3}-/.test(f))
-    .map(f => parseInt(f.slice(0, 3)))
-    .filter(n => !isNaN(n));
-  if (files.length === 0) return '001';
-  return String(Math.max(...files) + 1).padStart(3, '0');
+/**
+ * Atomically reserve the next report number via reserve-report-num.mjs, so two
+ * concurrent runs (batch workers, parallel windows) never collide on the same
+ * slot — see reserve-report-num.mjs for the O_CREAT|O_EXCL sentinel mechanism.
+ * @returns {string} Zero-padded report number string, e.g. "042" or "1001".
+ */
+function reserveReportNumber() {
+  return execFileSync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
+}
+
+/** Release the sentinel for a previously-reserved report number. */
+function releaseReportNumber(num) {
+  execFileSync(process.execPath, [join(ROOT, 'reserve-report-num.mjs'), '--release', num]);
 }
 
 function validateEvaluationShape(text) {
@@ -241,16 +246,6 @@ function normalizedTrackerScore(value) {
   const clean = tsvSafe(value);
   if (!clean || clean === '?') return 'N/A';
   return /\/5$/i.test(clean) ? clean : `${clean}/5`;
-}
-
-// Lazy import — only used when saving
-let readdirSync;
-try {
-  ({ readdirSync } = await import('fs'));
-} catch { /* already imported above via named exports */ }
-// Use named import fallback
-if (!readdirSync) {
-  readdirSync = (await import('fs')).readdirSync;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,12 +397,14 @@ if (summaryMatch) {
 // ---------------------------------------------------------------------------
 if (saveReport) {
   let reportSaved = false;
+  let reservedNum = null;
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
     }
 
-    const num         = nextReportNumber();
+    reservedNum       = reserveReportNumber();
+    const num         = reservedNum;
     const today       = new Date().toISOString().split('T')[0];
     const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
@@ -465,6 +462,14 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     } catch (err) {
       console.warn(`⚠️   Report saved, but could not merge tracker addition into data/applications.md: ${err.message}`);
       process.exitCode = 1;
+    }
+  }
+
+  if (reservedNum) {
+    try {
+      releaseReportNumber(reservedNum);
+    } catch (err) {
+      console.warn(`⚠️   Could not release report reservation: ${err.message}`);
     }
   }
 }

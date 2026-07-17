@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
+import { execFileSync } from 'node:child_process';
 import * as yaml from 'js-yaml';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -505,13 +506,16 @@ function addToPipeline(entries) {
 // ---------------------------------------------------------------------------
 // Report numbering
 // ---------------------------------------------------------------------------
-function nextReportNum() {
-  try {
-    const nums = fs.readdirSync(path.join(__dirname, 'reports'))
-      .map(f => parseInt(f.match(/^(\d+)/)?.[1] ?? '0', 10))
-      .filter(n => n > 0);
-    return nums.length ? Math.max(...nums) + 1 : 1;
-  } catch { return 1; }
+// Atomically reserved via reserve-report-num.mjs, so two concurrent runs
+// (batch workers, parallel windows) never collide on the same slot — see
+// reserve-report-num.mjs for the O_CREAT|O_EXCL sentinel mechanism.
+function reserveReportNum() {
+  const numStr = execFileSync(process.execPath, [path.join(__dirname, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
+  return parseInt(numStr, 10);
+}
+
+function releaseReportNum(num) {
+  execFileSync(process.execPath, [path.join(__dirname, 'reserve-report-num.mjs'), '--release', String(num).padStart(3, '0')]);
 }
 
 function extractCompanySlug(text, url) {
@@ -616,33 +620,48 @@ async function cmdEvaluate(input, ctx) {
     return null;
   }
 
-  // Save report
-  const today   = new Date().toISOString().split('T')[0];
-  const num     = nextReportNum();
-  const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
-  const numStr  = String(num).padStart(3, '0');
-  const relPath = `reports/${numStr}-${slug}-${today}.md`;
+  let num;
+  try {
+    num = reserveReportNum();
+  } catch (e) {
+    console.error(`Could not reserve a report number: ${e.message}`);
+    return null;
+  }
 
-  // Extract Legitimacy from LLM output or fall back to placeholder
-  const legitMatch = result.match(/\*\*Legitimacy:\*\*\s*([^\n]+)/);
-  const legitLine  = legitMatch ? `**Legitimacy:** ${legitMatch[1].trim()}` : '**Legitimacy:** unconfirmed';
-  writeFile(relPath, `**URL:** ${input || '(pasted)'}\n${legitLine}\n\n${result}`);
+  try {
+    // Save report
+    const today   = new Date().toISOString().split('T')[0];
+    const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
+    const numStr  = String(num).padStart(3, '0');
+    const relPath = `reports/${numStr}-${slug}-${today}.md`;
+
+    // Extract Legitimacy from LLM output or fall back to placeholder
+    const legitMatch = result.match(/\*\*Legitimacy:\*\*\s*([^\n]+)/);
+    const legitLine  = legitMatch ? `**Legitimacy:** ${legitMatch[1].trim()}` : '**Legitimacy:** unconfirmed';
+    writeFile(relPath, `**URL:** ${input || '(pasted)'}\n${legitLine}\n\n${result}`);
 
     const scoreMatch  = result.match(/(?:score|puntuaci[oó]n)[^\d]*(\d+\.?\d*)/i);
-  const scoreValue  = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
-  const scoreStr    = isFinite(scoreValue) ? `${scoreValue.toFixed(1)}/5` : '';
-  const companyName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
-  const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
-  const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
-  writeFile(tsvFile, `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvLine}`);
+    const scoreValue  = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
+    const scoreStr    = isFinite(scoreValue) ? `${scoreValue.toFixed(1)}/5` : '';
+    const companyName = slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
+    const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
+    const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
+    writeFile(tsvFile, `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvLine}`);
 
-  console.log(`\n✅ Report saved: ${relPath}`);
-  console.log('\n─── EVALUATION ──────────────────────────────────────\n');
-  console.log(result);
-  console.log('\n─────────────────────────────────────────────────────\n');
+    console.log(`\n✅ Report saved: ${relPath}`);
+    console.log('\n─── EVALUATION ──────────────────────────────────────\n');
+    console.log(result);
+    console.log('\n─────────────────────────────────────────────────────\n');
 
-  return relPath;
+    return relPath;
+  } finally {
+    try {
+      releaseReportNum(num);
+    } catch (e) {
+      console.warn(`Could not release report reservation: ${e.message}`);
+    }
+  }
 }
 
 // -- PIPELINE --
