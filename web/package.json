@@ -43,7 +43,7 @@
     "@typescript/native-preview": "^7.0.0-dev.20260707.2",
     "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "^29.1.1",
-    "postcss": "^8.5.16",
+    "postcss": "^8.5.18",
     "tailwindcss": "^4.2.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
