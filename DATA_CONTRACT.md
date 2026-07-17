@@ -26,6 +26,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/pipeline.md` | Your URL inbox |
 | `data/scan-history.tsv` | Your scan history |
 | `data/scan-runs.tsv` | Your per-run scan counters (companies/boards scanned, found/filtered/dupe/new-added tallies; appended by `scan.mjs`, read by `stats.mjs`) |
+| `data/portal-health.tsv` | Consecutive reachability status per scanned portal (`timestamp\tcompany\tstatus`; appended by `scan.mjs`, read by `stats.mjs` to flag portals persistently down) |
 | `data/follow-ups.md` | Your follow-up history |
 | `data/apply-queue.md` | Your ranked apply queue (generated from your pipeline + profile) |
 | `data/salary-observations.tsv` | Your append-only compensation observation log (desired/advertised/actual pay per application; read by `salary-gap.mjs`) |
