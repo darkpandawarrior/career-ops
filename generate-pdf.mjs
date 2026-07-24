@@ -4,12 +4,17 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--max-pages=N] [--strict-pages]
  *
  * --report links the generated PDF to its tracker/report number and records
  * the linkage in data/pdf-index.tsv so downstream tools (e.g. the TUI
  * dashboard's `d`/`D` hotkeys) can locate the exact PDF for an application.
  * Without --report a manifest row is still written, just unkeyed.
+ *
+ * --max-pages=N sets the preferred rendered CV length (default: 2 pages).
+ * The actual page count is checked after Chromium writes the PDF; overflow
+ * warns with trimming guidance by default. --strict-pages turns that warning
+ * into a hard rejection without publishing the render as successful.
  *
  * Requires: @playwright/test (or playwright) installed.
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
@@ -190,6 +195,73 @@ function validateCvSectionOrder(html, cvMarkdown) {
 }
 
 /**
+ * Decide whether a rendered CV fits its configured page budget.
+ *
+ * This is deliberately separate from rendering: page count comes from the
+ * PDF Chromium actually produced, and the renderer never changes layout to
+ * force content under the limit.
+ *
+ * @param {number} pageCount - Actual pages in the rendered PDF.
+ * @param {{ maxPages?: number, strictPages?: boolean }} [options]
+ * @returns {void}
+ */
+export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false } = {}) {
+  if (!Number.isInteger(pageCount) || pageCount < 1) {
+    throw new Error(`Could not determine the rendered PDF page count (received ${pageCount}).`);
+  }
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    throw new Error(`Invalid page budget "${maxPages}". Use a positive integer.`);
+  }
+  if (pageCount <= maxPages) return;
+
+  const actualLabel = 'pages';
+  const allowedLabel = maxPages === 1 ? 'page' : 'pages';
+  const message =
+    `CV is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
+    'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.';
+
+  if (strictPages) {
+    throw new Error(`${message} (--strict-pages requested)`);
+  }
+
+  console.warn(`⚠️  ${message} Continuing because overflow is warning-only by default; use --strict-pages to reject it.`);
+}
+
+/**
+ * Read the page count from the PDF catalog's root /Pages dictionary.
+ *
+ * Following the catalog reference keeps page-like text in content streams or
+ * metadata from being mistaken for an actual page object.
+ *
+ * @param {Buffer} pdfBuffer - PDF bytes returned by Chromium.
+ * @returns {number}
+ */
+function countRenderedPdfPages(pdfBuffer) {
+  const pdf = pdfBuffer.toString('latin1');
+  const objects = new Map();
+  const objectPattern = /(?:^|[\r\n])(\d+)\s+(\d+)\s+obj\b([\s\S]*?)\bendobj\b/g;
+
+  for (const match of pdf.matchAll(objectPattern)) {
+    const streamIndex = match[3].search(/\bstream(?:\r?\n|\r)/);
+    const dictionary = streamIndex === -1 ? match[3] : match[3].slice(0, streamIndex);
+    objects.set(`${match[1]} ${match[2]}`, dictionary);
+  }
+
+  const catalog = [...objects.values()].find((body) => /\/Type\s*\/Catalog\b/.test(body));
+  const pagesRef = catalog?.match(/\/Pages\s+(\d+)\s+(\d+)\s+R\b/);
+  const pages = pagesRef ? objects.get(`${pagesRef[1]} ${pagesRef[2]}`) : null;
+  const count = pages && /\/Type\s*\/Pages\b/.test(pages)
+    ? pages.match(/\/Count\s+(\d+)\b/)
+    : null;
+  const pageCount = count ? Number(count[1]) : 0;
+
+  if (!Number.isInteger(pageCount) || pageCount < 1) {
+    throw new Error('Could not determine the rendered PDF page count from its page tree.');
+  }
+  return pageCount;
+}
+
+/**
  * Inject a CSS @page rule for page size + margins into the HTML.
  *
  * Puppeteer/Playwright's page.pdf({ margin }) option clips backgrounds at
@@ -264,12 +336,18 @@ async function generatePDF() {
 
   // Parse arguments
   let inputPath, outputPath, format = 'a4', reportNum = '';
+  let maxPages = 2, maxPagesInput = '2', strictPages = false;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
     } else if (arg.startsWith('--report=')) {
       reportNum = arg.split('=')[1].trim();
+    } else if (arg.startsWith('--max-pages=')) {
+      maxPagesInput = arg.slice('--max-pages='.length);
+      maxPages = Number(maxPagesInput);
+    } else if (arg === '--strict-pages') {
+      strictPages = true;
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -278,12 +356,17 @@ async function generatePDF() {
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--max-pages=N] [--strict-pages]');
     process.exit(1);
   }
 
   if (reportNum && !/^\d+$/.test(reportNum)) {
     console.error(`Invalid --report "${reportNum}". Use the numeric tracker/report number, e.g. --report=018`);
+    process.exit(1);
+  }
+
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
     process.exit(1);
   }
 
@@ -308,6 +391,7 @@ async function generatePDF() {
   console.log(`📄 Input:  ${inputPath}`);
   console.log(`📁 Output: ${outputPath}`);
   console.log(`📏 Format: ${format.toUpperCase()}`);
+  console.log(`📐 Page budget: ${maxPages}${strictPages ? ' (strict)' : ' (warning only)'}`);
 
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
@@ -327,7 +411,14 @@ async function generatePDF() {
     console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
   }
 
-  return renderHtmlToPdf(html, outputPath, { format, baseDir: dirname(inputPath) });
+  return renderHtmlToPdf(html, outputPath, {
+    format,
+    baseDir: dirname(inputPath),
+    reportNum,
+    inputPath,
+    maxPages,
+    strictPages,
+  });
 }
 
 /**
@@ -387,12 +478,21 @@ export async function inlineLocalFonts(html) {
  *
  * @param {string} html - Full HTML document to render.
  * @param {string} outputPath - Absolute path to write the PDF to.
- * @param {{format?: 'a4'|'letter', baseDir?: string}} [opts]
+ * @param {{
+ *   format?: 'a4'|'letter',
+ *   baseDir?: string,
+ *   reportNum?: string,
+ *   inputPath?: string,
+ *   maxPages?: number,
+ *   strictPages?: boolean,
+ * }} [opts]
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   const format = opts.format || 'a4';
   const baseDir = opts.baseDir || process.cwd();
+  const reportNum = opts.reportNum || '';
+  const inputPath = opts.inputPath || '';
 
   mkdirSync(dirname(outputPath), { recursive: true });
 
@@ -432,9 +532,15 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
     // Write PDF
     await writeFile(outputPath, pdfBuffer);
 
-    // Count pages (approximate from PDF structure)
-    const pdfString = pdfBuffer.toString('latin1');
-    const pageCount = (pdfString.match(/\/Type\s*\/Page[^s]/g) || []).length;
+    // Read the root page-tree count so page-like text in streams is ignored.
+    const pageCount = countRenderedPdfPages(pdfBuffer);
+
+    // Strict overflow leaves the draft on disk but stops before success logs
+    // and manifest publication. Default overflow warns and continues.
+    enforcePageBudget(pageCount, {
+      maxPages: opts.maxPages ?? 2,
+      strictPages: opts.strictPages ?? false,
+    });
 
     console.log(`✅ PDF generated: ${outputPath}`);
     console.log(`📊 Pages: ${pageCount}`);
