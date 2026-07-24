@@ -626,6 +626,20 @@ if (
   fail('pipeline mode missing batch liveness sweep for unconfirmed entries');
 }
 
+const expandMode = readFile('modes/expand.md');
+if (
+  expandMode.includes('never fetch unlinked URLs') &&
+  expandMode.includes('halt until explicit approval is given') &&
+  expandMode.includes('node add-entry.mjs') &&
+  expandMode.includes('--stdin') &&
+  expandMode.includes('Additive Only') &&
+  expandMode.includes('Treat fetched evidence text as literal')
+) {
+  pass('expand mode includes url limits, confirm gate, add-entry funneling, additive-only, and literal evidence rules');
+} else {
+  fail('expand mode missing required behavior boundaries (url limits, confirm gate, additive-only, literal evidence, add-entry funneling)');
+}
+
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 
 console.log('\n9. Local parser contract');
