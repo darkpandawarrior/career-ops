@@ -264,7 +264,7 @@ try {
   // pages script the goto/evaluate calls so we can exercise the wrapper without
   // launching a browser. checkUrlLiveness reads body text first, apply controls
   // second — the fake returns them in that order.
-  const { checkUrlLivenessWithFallback, isChallengeResult, jitteredDelayMs } =
+  const { checkUrlLiveness, checkUrlLivenessWithFallback, isChallengeResult, jitteredDelayMs } =
     await import(pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href);
 
   const disabled = jitteredDelayMs(0) === 0 && jitteredDelayMs(-1) === 0;
@@ -398,6 +398,89 @@ try {
     pass('SSRF guard rejects unsupported protocol');
   } else {
     fail(`SSRF guard let unsupported protocol through: ${protoCase?.code ?? 'allowed'}`);
+  }
+
+  // SSRF redirect routing tests — the static rejectPrivateOrInvalid check above
+  // only sees the URL passed to checkUrlLiveness. A page that passes that check
+  // and then redirects (or fetches a subresource from) a private IP used to
+  // sail through untouched; checkUrlLiveness now registers a page.route()
+  // interceptor that re-validates every request. These drive that interceptor
+  // directly with a fake Playwright page (no browser launched).
+  let routeCallback = null;
+  const mockPageInstance = {
+    _blockedByGuard: null,
+    async route(pattern, callback) {
+      routeCallback = callback;
+    },
+    async goto() {
+      if (routeCallback) {
+        let aborted = false;
+        const mockRoute = {
+          request: () => ({ url: () => 'http://127.0.0.1/sensitive-internal' }),
+          abort: async () => {
+            aborted = true;
+          },
+          continue: async () => {}
+        };
+        await routeCallback(mockRoute);
+        if (aborted) {
+          throw new Error('net::ERR_BLOCKED_BY_CLIENT');
+        }
+      }
+      return { status: () => 200 };
+    },
+    async waitForTimeout() {},
+    url() { return 'https://example.com/redirected'; },
+    async evaluate() { return 'body text'; }
+  };
+
+  const redirectResult = await checkUrlLiveness(mockPageInstance, 'https://example.com/public-landing');
+  if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host') {
+    pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
+  } else {
+    fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
+  }
+
+  let legitimateRouteCallback = null;
+  const mockPageLegitimate = {
+    _blockedByGuard: null,
+    async route(pattern, callback) {
+      legitimateRouteCallback = callback;
+    },
+    async goto() {
+      if (legitimateRouteCallback) {
+        let continued = false;
+        const mockRoute = {
+          request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
+          abort: async () => {},
+          continue: async () => {
+            continued = true;
+          }
+        };
+        await legitimateRouteCallback(mockRoute);
+        if (!continued) {
+          throw new Error('Blocked legitimate request');
+        }
+      }
+      return { status: () => 200 };
+    },
+    async waitForTimeout() {},
+    url() { return 'https://example.com'; },
+    async evaluate(fn) {
+      // simulate evaluating body/controls
+      const fnStr = fn.toString();
+      if (fnStr.includes('body')) {
+        return 'legitimate page body';
+      }
+      return ['Apply'];
+    }
+  };
+
+  const legitimateResult = await checkUrlLiveness(mockPageLegitimate, 'https://example.com');
+  if (legitimateResult.result === 'active') {
+    pass('SSRF redirect guard allows legitimate subresource requests');
+  } else {
+    fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
   }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
@@ -797,6 +880,7 @@ try {
   const emptyKeywordPath = join(tmp, 'empty-keyword.yml');
   const duplicateCompanyPath = join(tmp, 'duplicate-company.yml');
   const badContentFilterPath = join(tmp, 'bad-content-filter.yml');
+  const badVisaFilterPath = join(tmp, 'bad-visa-filter.yml');
 
   writeFileSync(validPath, `
 title_filter:
@@ -846,6 +930,19 @@ tracked_companies:
     careers_url: "https://jobs.lever.co/acme"
 `, 'utf-8');
 
+  // visa_filter with an empty-string keyword or a non-boolean require_mention
+  // must be rejected (an empty keyword would match every description).
+  writeFileSync(badVisaFilterPath, `
+title_filter:
+  positive: ["AI"]
+visa_filter:
+  require_mention: "yes"
+  positive: ["h-1b", "   "]
+tracked_companies:
+  - name: "Acme"
+    careers_url: "https://jobs.lever.co/acme"
+`, 'utf-8');
+
   const validResult = run(NODE, ['validate-portals.mjs', '--file', validPath]);
   if (validResult !== null && validResult.includes('0 errors')) {
     pass('validate-portals accepts a minimal valid portals file');
@@ -886,6 +983,13 @@ tracked_companies:
     pass('validate-portals rejects empty content_filter keywords');
   } else {
     fail('validate-portals should reject empty content_filter keywords');
+  }
+
+  const badVisaFilterResult = run(NODE, ['validate-portals.mjs', '--file', badVisaFilterPath]);
+  if (badVisaFilterResult === null) {
+    pass('validate-portals rejects invalid visa_filter (empty keyword / non-boolean require_mention)');
+  } else {
+    fail('validate-portals should reject invalid visa_filter');
   }
 
   rmSync(tmp, { recursive: true, force: true });
@@ -1352,7 +1456,7 @@ try {
       timestamp: '2026-07-08T00:00:00.000Z', companies: 10, boards: 2, found: 50,
       filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredPostingAge: 7,
       filteredSalary: 0, filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29,
-      errors: 0, filteredBlacklist: 8,
+      errors: 0, filteredBlacklist: 8, filteredVisa: 2, filteredPostedDate: 1,
     }, runsFile);
     const content = readFileSync(runsFile, 'utf-8');
     const lines = content.trim().split('\n');
@@ -1362,7 +1466,10 @@ try {
       fail(`appendScanRunSummary header mismatch — got: ${lines[0]}`);
     }
     const cols = lines[1].split('\t');
-    if (cols.length === 16 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed' && cols[13] === '29' && cols[15] === '8') {
+    // filtered_blacklist/filtered_visa/filtered_posted_date land in the three
+    // trailing columns (16/17/18), per the header-name append-only contract.
+    if (cols.length === 18 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed'
+        && cols[13] === '29' && cols[15] === '8' && cols[16] === '2' && cols[17] === '1') {
       pass('appendScanRunSummary writes one tab-delimited row with the run counters');
     } else {
       fail(`appendScanRunSummary row shape wrong: ${JSON.stringify(cols)}`);
