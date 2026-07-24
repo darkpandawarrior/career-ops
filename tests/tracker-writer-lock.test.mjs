@@ -2,7 +2,7 @@
 // applications.md writer lock, ported from upstream career-ops a953da2 (#1912,
 // "serialize all tracker writers through the shared lock") into this fork's
 // tests/*.test.mjs convention. Upstream shipped its version as a top-level
-// tracker-writer-lock-tests.mjs with its own process.exit(); that file is not
+// tracker-writer-lock-tests.mjs with its own hard-exit call; that file is not
 // reintroduced here — the scenarios below run inside test-all.mjs's shared
 // pass/fail counters instead. Upstream's Go dashboard-side coverage is skipped
 // entirely: this fork has no dashboard/ (retired, gitignored prebuilt binary
