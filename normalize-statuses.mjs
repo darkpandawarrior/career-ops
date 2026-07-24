@@ -11,16 +11,17 @@
  * Run: node career-ops/normalize-statuses.mjs [--dry-run]
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { rebuildRow } from './tracker-utils.mjs';
+import { rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
+import { openTrackerTransaction } from './tracker-lock.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const { dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
-// Support both layouts: data/applications.md (boilerplate) and applications.md (original)
-const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
-  ? join(DATA_ROOT, 'data/applications.md')
-  : join(DATA_ROOT, 'applications.md');
+// Support both layouts: data/applications.md (boilerplate) and applications.md
+// (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
+// fixture so the real user tracker is never touched.
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure required directories exist (fresh setup)
@@ -93,7 +94,23 @@ if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to normalize.');
   process.exit(0);
 }
-const content = readFileSync(APPS_FILE, 'utf-8');
+
+// Dry-runs write nothing, so they can safely overlap with a real writer — only
+// the actual write needs the exclusive lock. Real runs read AFTER the lock is
+// acquired: reading first risks normalizing a stale snapshot and clobbering a
+// row another writer just changed.
+let trackerTransaction = null;
+if (!DRY_RUN) {
+  try {
+    trackerTransaction = await openTrackerTransaction(APPS_FILE);
+  } catch (err) {
+    console.error(`Cannot acquire tracker lock: ${err.message}`);
+    process.exit(1);
+  }
+  process.once('exit', () => { try { trackerTransaction.close(); } catch {} });
+}
+try {
+const content = trackerTransaction ? trackerTransaction.read() : readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 
 let changes = 0;
@@ -159,11 +176,15 @@ console.log(`\n📊 ${changes} statuses normalized`);
 
 if (!DRY_RUN && changes > 0) {
   // Backup first
-  copyFileSync(APPS_FILE, APPS_FILE + '.bak');
-  writeFileSync(APPS_FILE, lines.join('\n'));
-  console.log('✅ Written to applications.md (backup: applications.md.bak)');
+  const backupPath = `${APPS_FILE}.bak`;
+  copyFileSync(APPS_FILE, backupPath);
+  trackerTransaction.replace(lines.join('\n'));
+  console.log(`✅ Written to ${APPS_FILE} (backup: ${backupPath})`);
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
 } else {
   console.log('✅ No changes needed');
+}
+} finally {
+  trackerTransaction?.close();
 }

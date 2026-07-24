@@ -17,11 +17,12 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow } from './tracker-utils.mjs';
+import { rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
+import { openTrackerTransaction } from './tracker-lock.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_CANDIDATES_PATH = path.join(__dirname, 'data', 'reply-candidates.json');
-const APPS_FILE = path.join(__dirname, 'data', 'applications.md');
+const APPS_FILE = resolveTrackerPath(__dirname);
 const FOLLOWUPS_FILE = path.join(__dirname, 'data', 'follow-ups.md');
 
 // Helper to ask a question in the CLI
@@ -138,29 +139,77 @@ function loadFollowups() {
   return followups;
 }
 
-// Update the status of a specific row in the tracker markdown file
-function updateTrackerStatus(appNum, newStatus) {
-  const content = fs.readFileSync(APPS_FILE, 'utf-8');
-  const lines = content.split('\n');
-  const colmap = resolveColumns(lines);
+// Two replies can recommend the same application (e.g. an auto-ack followed
+// by a real rejection) — group by app so the batch applies one status change
+// per row, not a last-write-wins race between duplicate recommendations. Two
+// DIFFERENT target statuses for the same row is a genuine conflict: neither
+// wins automatically, it needs a human to look.
+function groupStatusRecommendations(recommendations) {
+  const byApplication = new Map();
+  for (const recommendation of recommendations) {
+    if (!byApplication.has(recommendation.num)) byApplication.set(recommendation.num, new Map());
+    const transitions = byApplication.get(recommendation.num);
+    const key = `${recommendation.oldStatus}\0${recommendation.newStatus}`;
+    const existing = transitions.get(key);
+    if (existing) existing.count++;
+    else transitions.set(key, { ...recommendation, count: 1 });
+  }
 
-  let updated = false;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const row = parseTrackerRow(line, colmap);
-    if (row && row.num === appNum) {
-      const parts = line.split('|').map(s => s.trim());
-      parts[colmap.status] = newStatus;
+  const updates = [];
+  const conflicts = [];
+  for (const [num, transitions] of byApplication) {
+    const choices = [...transitions.values()];
+    if (choices.length === 1) updates.push(choices[0]);
+    else conflicts.push({ num, choices });
+  }
+  return { updates, conflicts };
+}
+
+// Apply an approved batch in one locked read/modify/write transaction.
+// Reading only after the lock is held matters because the review prompt can
+// stay open for a while (waiting on the user's y/N) during which another
+// process may merge or update tracker rows — a pre-lock read would silently
+// clobber that change when this batch writes back.
+async function updateTrackerStatuses(updates) {
+  const trackerTransaction = await openTrackerTransaction(APPS_FILE);
+
+  try {
+    const content = trackerTransaction.read();
+    const lines = content.split('\n');
+    const colmap = resolveColumns(lines);
+    const updatesByNum = new Map(updates.map(update => [update.num, update]));
+    const applied = new Set();
+    const alreadyCurrent = new Set();
+    const conflicts = new Map();
+    const missing = new Set(updatesByNum.keys());
+
+    for (let i = 0; i < lines.length; i++) {
+      const row = parseTrackerRow(lines[i], colmap);
+      if (!row) continue;
+      const update = updatesByNum.get(row.num);
+      if (!update) continue;
+      missing.delete(update.num);
+      if (row.status === update.newStatus) {
+        alreadyCurrent.add(update.num);
+        continue;
+      }
+      if (row.status !== update.oldStatus) {
+        // The row moved since the recommendation was computed (another writer
+        // got there first) — do not overwrite a status change made mid-review.
+        conflicts.set(update.num, row.status);
+        continue;
+      }
+      const parts = lines[i].split('|').map(s => s.trim());
+      parts[colmap.status] = update.newStatus;
       lines[i] = rebuildRow(parts);
-      updated = true;
-      break;
+      applied.add(update.num);
     }
-  }
 
-  if (updated) {
-    fs.writeFileSync(APPS_FILE, lines.join('\n'), 'utf-8');
+    if (applied.size > 0) trackerTransaction.replace(lines.join('\n'));
+    return { applied, alreadyCurrent, conflicts, missing };
+  } finally {
+    trackerTransaction.close();
   }
-  return updated;
 }
 
 async function main() {
@@ -231,20 +280,43 @@ async function main() {
     }
   });
 
-  if (recommendations.length > 0) {
+  const grouped = groupStatusRecommendations(recommendations);
+  if (grouped.conflicts.length > 0) {
+    console.warn('Conflicting status recommendations require manual review:');
+    for (const conflict of grouped.conflicts) {
+      const summary = conflict.choices
+        .map(choice => `${choice.newStatus} (${choice.count} ${choice.count === 1 ? 'reply' : 'replies'})`)
+        .join(' vs ');
+      console.warn(`  #${conflict.num}: ${summary} — no automatic update`);
+    }
+    console.log('');
+  }
+
+  if (grouped.updates.length > 0) {
+    const updates = grouped.updates;
     console.log('Suggested status updates to apply:');
-    recommendations.forEach(r => {
-      console.log(`  #${r.num} ${r.company} (${r.role}): ${r.oldStatus} → ${r.newStatus}`);
+    updates.forEach(r => {
+      const count = r.count > 1 ? ` (${r.count} replies)` : '';
+      console.log(`  #${r.num} ${r.company} (${r.role}): ${r.oldStatus} → ${r.newStatus}${count}`);
     });
     console.log('');
 
-    const answer = await askQuestion('Apply recommended status updates to data/applications.md? (y/N): ');
+    const answer = await askQuestion(`Apply recommended status updates to ${APPS_FILE}? (y/N): `);
     if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
-      for (const r of recommendations) {
-        updateTrackerStatus(r.num, r.newStatus);
-        console.log(`Updated #${r.num} to ${r.newStatus}`);
+      const result = await updateTrackerStatuses(updates);
+      for (const r of updates) {
+        const count = r.count > 1 ? ` (${r.count} replies)` : '';
+        if (result.applied.has(r.num)) {
+          console.log(`Updated #${r.num} to ${r.newStatus}${count}`);
+        } else if (result.alreadyCurrent.has(r.num)) {
+          console.log(`No change for #${r.num}: already ${r.newStatus}${count}`);
+        } else if (result.conflicts.has(r.num)) {
+          console.warn(`Skipped #${r.num}: status changed from ${r.oldStatus} to ${result.conflicts.get(r.num)} during review`);
+        } else if (result.missing.has(r.num)) {
+          console.warn(`Skipped #${r.num}: row no longer exists in the tracker`);
+        }
       }
-      console.log('\n✅ All updates written to data/applications.md');
+      console.log('\n✅ Tracker review complete');
 
       // Sync tracker DB if tracker.mjs exists
       try {

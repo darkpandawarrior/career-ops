@@ -10,9 +10,10 @@
  * Run: node career-ops/dedup-tracker.mjs [--dry-run]
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { rebuildRow } from './tracker-utils.mjs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
+import { rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
+import { openTrackerTransaction } from './tracker-lock.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
@@ -20,11 +21,7 @@ const { dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
-const APPS_FILE = process.env.CAREER_OPS_TRACKER
-  ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(DATA_ROOT, 'data/applications.md'))
-    ? join(DATA_ROOT, 'data/applications.md')
-    : join(DATA_ROOT, 'applications.md');
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.
@@ -231,10 +228,27 @@ if (!existsSync(APPS_FILE)) {
   console.log('No applications.md found. Nothing to dedup.');
   process.exit(0);
 }
-const content = readFileSync(APPS_FILE, 'utf-8');
+
+// Dry-runs write nothing, so they can safely overlap with a real merge/dedup —
+// only the actual write needs the exclusive lock. Real runs read AFTER the
+// lock is acquired: reading first risks deduping against a stale snapshot and
+// clobbering a row another writer just added.
+let trackerTransaction = null;
+let COLMAP;
+if (!DRY_RUN) {
+  try {
+    trackerTransaction = await openTrackerTransaction(APPS_FILE);
+  } catch (err) {
+    console.error(`Cannot acquire tracker lock: ${err.message}`);
+    process.exit(1);
+  }
+  process.once('exit', () => { try { trackerTransaction.close(); } catch {} });
+}
+try {
+const content = trackerTransaction ? trackerTransaction.read() : readFileSync(APPS_FILE, 'utf-8');
 const lines = content.split('\n');
 // Header-aware column map (tolerates an inserted Location column, etc.).
-const COLMAP = resolveColumns(lines);
+COLMAP = resolveColumns(lines);
 
 // Parse all entries
 const entries = [];
@@ -350,11 +364,15 @@ for (const idx of sortedRemoveIndices) {
 console.log(`\n📊 ${removed} duplicates removed`);
 
 if (!DRY_RUN && removed > 0) {
-  copyFileSync(APPS_FILE, APPS_FILE + '.bak');
-  writeFileSync(APPS_FILE, lines.join('\n'));
-  console.log('✅ Written to applications.md (backup: applications.md.bak)');
+  const backupPath = `${APPS_FILE}.bak`;
+  copyFileSync(APPS_FILE, backupPath);
+  trackerTransaction.replace(lines.join('\n'));
+  console.log(`✅ Written to ${APPS_FILE} (backup: ${backupPath})`);
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
 } else {
   console.log('✅ No duplicates found');
+}
+} finally {
+  trackerTransaction?.close();
 }

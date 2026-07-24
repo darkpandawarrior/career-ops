@@ -27,7 +27,9 @@
  * If you change one side's protocol, change the other the same way.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync, realpathSync } from 'fs';
+import {
+  readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync, realpathSync, renameSync,
+} from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -138,6 +140,22 @@ function lockCanRecover(lockDir, staleMs) {
 }
 
 /**
+ * Compare two stat() results for the SAME lock directory identity, not just
+ * the same path spelling — dev+ino, falling back to birthtime when a
+ * filesystem/platform reports ino as 0. Guards release() against removing a
+ * lock directory that a different owner deleted and recreated between our
+ * last read and the actual rmSync call (see acquireTrackerLock's release()).
+ *
+ * @param {import('fs').Stats} left
+ * @param {import('fs').Stats} right
+ * @returns {boolean}
+ */
+function sameLockDirectory(left, right) {
+  return left.dev === right.dev && left.ino === right.ino
+    && (left.ino !== 0 || left.birthtimeMs === right.birthtimeMs);
+}
+
+/**
  * Acquire an exclusive filesystem lock for one tracker read-modify-write.
  *
  * @param {string} lockDir - Directory path used as the lock sentinel.
@@ -146,6 +164,7 @@ function lockCanRecover(lockDir, staleMs) {
  * @param {number} [options.retryMs=75] - Delay between acquisition attempts.
  * @param {number} [options.staleMs=600000] - Metadata-free stale-lock threshold.
  * @param {string} [options.tracker] - Tracker path recorded in owner.json (diagnostics only).
+ * @param {Function} [options.removeLock] - Release hook for deterministic fault tests.
  * @returns {Promise<{attempts:number,waitMs:number,staleRecovered:boolean,release:Function}>}
  */
 export async function acquireTrackerLock(lockDir, options = {}) {
@@ -169,18 +188,57 @@ export async function acquireTrackerLock(lockDir, options = {}) {
         tracker: options.tracker ?? null,
       }, null, 2));
 
+      let ownerVerified = false;
+      let verifiedDir = null;
       let released = false;
+      const removeLock = typeof options.removeLock === 'function'
+        ? options.removeLock
+        : path => rmSync(path, { recursive: true, force: true });
       return {
         attempts,
         waitMs: Date.now() - startedAt,
         staleRecovered,
+        // Ownership is verified once (owner.json token + directory identity),
+        // then that identity is re-checked before every actual removal — a
+        // stale handle whose lock dir was removed and recreated by a new
+        // owner must never delete the replacement (see sameLockDirectory()).
         release() {
           if (released) return;
-          released = true;
-          const owner = readLockOwner(lockDir);
-          if (owner?.token === token) {
-            rmSync(lockDir, { recursive: true, force: true });
+          if (ownerVerified) {
+            let currentDir;
+            try {
+              currentDir = statSync(lockDir);
+            } catch (err) {
+              if (err?.code === 'ENOENT') { released = true; return; }
+              throw err;
+            }
+            if (!sameLockDirectory(verifiedDir, currentDir)) { released = true; return; }
+            const owner = readLockOwner(lockDir);
+            if (owner && owner.token !== token) { released = true; return; }
+            if (!owner && existsSync(join(lockDir, 'owner.json'))) {
+              throw new Error(`Cannot verify tracker lock ownership at ${lockDir}`);
+            }
+          } else {
+            let beforeRead;
+            try {
+              beforeRead = statSync(lockDir);
+            } catch (err) {
+              if (err?.code === 'ENOENT') { released = true; return; }
+              throw err;
+            }
+            const owner = readLockOwner(lockDir);
+            if (owner?.token !== token) {
+              if (owner) released = true;
+              else throw new Error(`Cannot verify tracker lock ownership at ${lockDir}`);
+              return;
+            }
+            const afterRead = statSync(lockDir);
+            if (!sameLockDirectory(beforeRead, afterRead)) { released = true; return; }
+            ownerVerified = true;
+            verifiedDir = afterRead;
           }
+          removeLock(lockDir);
+          released = true;
         },
       };
     } catch (err) {
@@ -229,4 +287,74 @@ export function canonicalizeTrackerPath(path) {
   } catch {
     return absolutePath;
   }
+}
+
+// Atomic replace via a same-directory temp file + rename — mirrors the
+// per-script writeFileAtomic() duplicated across tracker.mjs, merge-tracker.mjs,
+// set-status.mjs, etc., so a reader can never observe a partially written file.
+function writeTrackerFileAtomic(filePath, content) {
+  const tmp = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    writeFileSync(tmp, content);
+    renameSync(tmp, filePath);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
+/**
+ * Open one serialized read/replace transaction for an applications tracker.
+ *
+ * Every root-level tracker writer (dedup-tracker.mjs, normalize-statuses.mjs,
+ * reply-watch.mjs, tracker.mjs) needs the same shape: acquire the shared lock,
+ * THEN read — a read taken before the lock risks silently clobbering a write
+ * that lands while this process is still waiting — mutate in memory, replace
+ * atomically, release. Centralizing that shape here means a writer can no
+ * longer read the tracker outside the lock by accident: the only read a
+ * caller can perform goes through this transaction's read(), which doesn't
+ * exist until the lock is held.
+ *
+ * @param {string} appsFile - Tracker path (raw; canonicalized internally).
+ * @param {object} [options] - Forwarded to acquireTrackerLock (lockDir override, timeouts, removeLock hook for tests).
+ * @returns {Promise<{path:string, read:Function, replace:Function, close:Function}>}
+ */
+export async function openTrackerTransaction(appsFile, options = {}) {
+  const trackerPath = canonicalizeTrackerPath(appsFile);
+  const { lockDir = lockDirFor(trackerPath, process.env.CAREER_OPS_TRACKER_LOCK), ...lockOptions } = options;
+  const lock = await acquireTrackerLock(lockDir, {
+    timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
+    retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+    staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: trackerPath,
+    ...lockOptions,
+  });
+  let closed = false;
+  let closeError = null;
+  const assertOpen = () => {
+    if (closed) throw new Error('Tracker transaction is already closed');
+  };
+  return {
+    path: trackerPath,
+    read() {
+      assertOpen();
+      return readFileSync(trackerPath, 'utf-8');
+    },
+    replace(content) {
+      assertOpen();
+      writeTrackerFileAtomic(trackerPath, content);
+    },
+    close() {
+      if (closed) return closeError;
+      try {
+        lock.release();
+      } catch (err) {
+        closeError = err;
+        console.error(`Warning: tracker transaction closed but lock cleanup failed at ${lockDir}: ${err.message}`);
+      } finally {
+        closed = true;
+      }
+      return closeError;
+    },
+  };
 }
