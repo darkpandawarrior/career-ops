@@ -77,7 +77,17 @@ async function runDiscovered(filter = null) {
     console.log(`  ❌ no test files matched${filter ? ` --only "${filter}"` : ''} under tests/`);
     process.exit(1);
   }
-  for (const f of files) await import(pathToFileURL(f).href);
+  for (const f of files) {
+    // Discovered suites run IN-PROCESS and share this suite's counters. A
+    // process.exit() inside one would terminate test-all mid-run with a forged
+    // exit code — every later section (and finish()) would silently never run.
+    // Refuse to import such a suite and fail loudly instead (#1916 regression).
+    if (/\bprocess\.exit\s*\(/.test(readFileSync(f, 'utf-8'))) {
+      fail(`${f.slice(ROOT.length + 1)} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
+      continue;
+    }
+    await import(pathToFileURL(f).href);
+  }
 }
 
 const onlyIdx = process.argv.indexOf('--only');
@@ -2981,6 +2991,44 @@ try {
   if (resolved !== null) pass('cv-templates.mjs resolve cv falls back to default without a profile'); else fail('cv-templates.mjs resolve cv crashed');
 } catch (e) {
   fail(`cv-templates resolver test crashed: ${e.message}`);
+}
+
+console.log('\n42. Headless evaluator prompt-cache wiring (#1709, #1842)');
+try {
+  // openai-eval.mjs, gemini-eval.mjs, and ollama-eval.mjs all parse argv and can
+  // process.exit() at module-top-level on import (no invokedDirectly guard like
+  // openrouter-runner.mjs has) — importing them in-process would kill this whole
+  // test run (the exact #1916/32dcee0 class of bug). Assert their wiring at the
+  // source level instead, same approach the upstream commits used.
+  const openaiSrc = readFileSync(join(ROOT, 'openai-eval.mjs'), 'utf-8');
+  const openaiGatesOff = /host === 'api\.openai\.com'\)\s*return\s*\{\s*role:\s*'system',\s*content:\s*prompt\s*\}/.test(openaiSrc);
+  const openaiSendsBreakpoint = /text:\s*prompt,\s*cache_control:\s*\{\s*type:\s*'ephemeral'\s*\}/.test(openaiSrc);
+  const openaiWiresIt = /buildSystemMessage\(systemPrompt,\s*endpointHost\)/.test(openaiSrc);
+  if (openaiGatesOff && openaiSendsBreakpoint && openaiWiresIt) {
+    pass('openai-eval host-gates the #1709 prompt-cache breakpoint and wires it into the request');
+  } else {
+    fail(`openai-eval prompt-cache wiring missing: gatesOff=${openaiGatesOff} sendsBreakpoint=${openaiSendsBreakpoint} wired=${openaiWiresIt}`);
+  }
+
+  const geminiSrc = readFileSync(join(ROOT, 'gemini-eval.mjs'), 'utf-8');
+  const geminiUsesSystemInstruction = /getGenerativeModel\(\{[\s\S]*?systemInstruction:\s*systemPrompt/.test(geminiSrc);
+  const geminiCarriesJdTurn = /generateContent\(`JOB DESCRIPTION TO EVALUATE/.test(geminiSrc);
+  if (geminiUsesSystemInstruction && geminiCarriesJdTurn) {
+    pass('gemini-eval moves the static prefix to systemInstruction and sends only the JD turn (#1709)');
+  } else {
+    fail(`gemini-eval systemInstruction wiring missing: sys=${geminiUsesSystemInstruction} jd=${geminiCarriesJdTurn}`);
+  }
+
+  const ollamaSrc = readFileSync(join(ROOT, 'ollama-eval.mjs'), 'utf-8');
+  const ollamaInOptions = /options:\s*\{\s*temperature:\s*0\.4[^}]*num_ctx/.test(ollamaSrc);
+  const ollamaNoTopLevel = !/\n\s*temperature:\s*0\.4,\s*\n\s*options:/.test(ollamaSrc);
+  if (ollamaInOptions && ollamaNoTopLevel) {
+    pass('ollama-eval sets temperature inside options (not silently ignored at the top level, #1842)');
+  } else {
+    fail(`ollama-eval temperature placement: inOptions=${ollamaInOptions} noTopLevel=${ollamaNoTopLevel}`);
+  }
+} catch (e) {
+  fail(`Headless evaluator prompt-cache wiring test crashed: ${e.message}`);
 }
 
 await runDiscovered();
