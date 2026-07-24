@@ -140,6 +140,9 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 ## G) İlan Meşruiyeti
 (Blok G'nin tam içeriği)
 
+## Risk Summary
+(her risk sinyali için tek satır, sabit sırayla — yukarıdaki Risk Summary bölümüne bakın)
+
 ## H) Başvuru Formu Taslak Yanıtları
 (yalnızca puan >= 4,5 ise — form alanları için taslak yanıtlar)
 
@@ -204,6 +207,12 @@ Ardından `node merge-tracker.mjs` çalıştır.
 - Bu, genellikle 4-6 haftada dolan yaygın bir rol mü?
 - Rol bu şirketin işine uygun mu?
 
+**6. Üçüncü Taraf Platform ile İşverenin Kendi İlanı Arasında Konum Etiketi Uyuşmazlığı** (koşullu — yalnızca her iki kaynak da mevcutsa):
+- Bu sinyal yalnızca hem üçüncü taraf bir platformda (örn. LinkedIn, Indeed) gösterilen konum, hem de işverenin kendi ilan sayfasındaki konum mevcutsa **ve** ikisinin de aynı ilan/iş ID'sine ait olduğu teyit edilebiliyorsa değerlendirilir — yalnızca aynı unvan veya şirket adı yeterli değildir, bu hâlâ iki farklı ilan olabilir.
+- İki konumu karşılaştır; yalnızca **farklı ülkeler** belirtiyorlarsa işaretle (aynı ülke içindeki farklı şehirler çok daha zayıf bir sinyaldir ve tetiklemez — birden fazla ofisi olan şirketlerde bu normaldir).
+- Yalnızca bir kaynak varsa, veya iki kaynağın aynı ilana ait olduğu teyit edilemiyorsa, bu sinyali tamamen atla.
+- Tetiklendiğinde: raporda iki konumu da belirten, adayı gerçek çalışma yerini işverenle doğrudan teyit etmeye yönlendiren, alarmist olmayan bir not ekle — bu genellikle çapraz yayın/etiketleme hatasıdır, kasıtlı yanıltma anlamına gelmez.
+
 ### Çıktı Formatı:
 
 **Değerlendirme:** Üç seviyeden biri:
@@ -229,6 +238,32 @@ Ardından `node merge-tracker.mjs` çalıştır.
 - **Erken aşama startup:** Rol henüz tam şekillenmemiş olduğundan ilanın muğlak yazılmış olması normaldir. İçerik belirsizliğine daha az ağırlık ver.
 - **Tarih bilgisi yok:** Yayın tarihi belirlenemiyorsa ve başka endişe verici sinyal yoksa varsayılan olarak "Dikkatli İlerle" kullan. Kanıt olmaksızın asla "Şüpheli" deme.
 - **Recruiter kaynağı (kamuya açık ilan yok):** Tazelik sinyali alınamaz. Aktif recruiter temasının kendisinin olumlu bir meşruiyet sinyali olduğunu not et.
+
+---
+
+## Risk Summary (Blok G'den sonra)
+
+Blok G'den sonra, Puanlama bölümünden önce `## Risk Summary` bloğuyla rapor gövdesini kapat — her risk sinyali için tek satır, sabit sırayla — böylece adayın asıl sorduğu soru ("bu şirkete katılmak güvenli mi?") tek ekranda yanıtlanır.
+
+**Yalnızca toplama, yeni bir yargı yok.** Her satır, kaynak sinyalin zaten ürettiği sonucu özetler; yeniden puanlama veya geçersiz kılma yapılmaz — bir satır yanlış görünüyorsa düzeltme kaynak sinyalde yapılır, burada değil.
+
+Her satır için üç durum: `✅ {net sonuç}` / `⚠️ {bulgu}` / `— not evaluated` (sinyal çalıştırılamadığında satırı atlamak yerine açıkça belirt).
+
+| Sinyal | Kaynak | Satır gösterimi |
+|--------|--------|-----------------|
+| Posting legitimacy | Blok G değerlendirme seviyesi | `✅ High Confidence`, veya Proceed with Caution / Suspicious için `⚠️ {tier} — {tek cümlelik gerekçe}` |
+| Location tag mismatch | Blok G sinyal 6 (konum etiketi uyuşmazlığı) | Kontrol çalıştı ve sorun bulunmadıysa `✅ clear`; işaret tetiklendiyse `⚠️ {iki konum}`; karşılaştırma için iki kaynak da yoksa `— not evaluated` |
+
+Blok formatı:
+
+```markdown
+## Risk Summary
+
+| Signal | Status |
+|--------|--------|
+| Posting legitimacy | ✅ High Confidence |
+| Location tag mismatch | — not evaluated |
+```
 
 ---
 
