@@ -77,7 +77,17 @@ async function runDiscovered(filter = null) {
     console.log(`  ❌ no test files matched${filter ? ` --only "${filter}"` : ''} under tests/`);
     process.exit(1);
   }
-  for (const f of files) await import(pathToFileURL(f).href);
+  for (const f of files) {
+    // Discovered suites run IN-PROCESS and share this suite's counters. A
+    // process.exit() inside one would terminate test-all mid-run with a forged
+    // exit code — every later section (and finish()) would silently never run.
+    // Refuse to import such a suite and fail loudly instead (#1916 regression).
+    if (/\bprocess\.exit\s*\(/.test(readFileSync(f, 'utf-8'))) {
+      fail(`${f.slice(ROOT.length + 1)} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
+      continue;
+    }
+    await import(pathToFileURL(f).href);
+  }
 }
 
 const onlyIdx = process.argv.indexOf('--only');
@@ -254,7 +264,7 @@ try {
   // pages script the goto/evaluate calls so we can exercise the wrapper without
   // launching a browser. checkUrlLiveness reads body text first, apply controls
   // second — the fake returns them in that order.
-  const { checkUrlLivenessWithFallback, isChallengeResult, jitteredDelayMs } =
+  const { checkUrlLiveness, checkUrlLivenessWithFallback, isChallengeResult, jitteredDelayMs } =
     await import(pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href);
 
   const disabled = jitteredDelayMs(0) === 0 && jitteredDelayMs(-1) === 0;
@@ -388,6 +398,89 @@ try {
     pass('SSRF guard rejects unsupported protocol');
   } else {
     fail(`SSRF guard let unsupported protocol through: ${protoCase?.code ?? 'allowed'}`);
+  }
+
+  // SSRF redirect routing tests — the static rejectPrivateOrInvalid check above
+  // only sees the URL passed to checkUrlLiveness. A page that passes that check
+  // and then redirects (or fetches a subresource from) a private IP used to
+  // sail through untouched; checkUrlLiveness now registers a page.route()
+  // interceptor that re-validates every request. These drive that interceptor
+  // directly with a fake Playwright page (no browser launched).
+  let routeCallback = null;
+  const mockPageInstance = {
+    _blockedByGuard: null,
+    async route(pattern, callback) {
+      routeCallback = callback;
+    },
+    async goto() {
+      if (routeCallback) {
+        let aborted = false;
+        const mockRoute = {
+          request: () => ({ url: () => 'http://127.0.0.1/sensitive-internal' }),
+          abort: async () => {
+            aborted = true;
+          },
+          continue: async () => {}
+        };
+        await routeCallback(mockRoute);
+        if (aborted) {
+          throw new Error('net::ERR_BLOCKED_BY_CLIENT');
+        }
+      }
+      return { status: () => 200 };
+    },
+    async waitForTimeout() {},
+    url() { return 'https://example.com/redirected'; },
+    async evaluate() { return 'body text'; }
+  };
+
+  const redirectResult = await checkUrlLiveness(mockPageInstance, 'https://example.com/public-landing');
+  if (redirectResult.result === 'uncertain' && redirectResult.code === 'blocked_host') {
+    pass('SSRF redirect guard blocks redirects/subresources to private IPs via routing');
+  } else {
+    fail(`SSRF redirect guard failed to block: ${JSON.stringify(redirectResult)}`);
+  }
+
+  let legitimateRouteCallback = null;
+  const mockPageLegitimate = {
+    _blockedByGuard: null,
+    async route(pattern, callback) {
+      legitimateRouteCallback = callback;
+    },
+    async goto() {
+      if (legitimateRouteCallback) {
+        let continued = false;
+        const mockRoute = {
+          request: () => ({ url: () => 'https://example.com/assets/logo.png' }),
+          abort: async () => {},
+          continue: async () => {
+            continued = true;
+          }
+        };
+        await legitimateRouteCallback(mockRoute);
+        if (!continued) {
+          throw new Error('Blocked legitimate request');
+        }
+      }
+      return { status: () => 200 };
+    },
+    async waitForTimeout() {},
+    url() { return 'https://example.com'; },
+    async evaluate(fn) {
+      // simulate evaluating body/controls
+      const fnStr = fn.toString();
+      if (fnStr.includes('body')) {
+        return 'legitimate page body';
+      }
+      return ['Apply'];
+    }
+  };
+
+  const legitimateResult = await checkUrlLiveness(mockPageLegitimate, 'https://example.com');
+  if (legitimateResult.result === 'active') {
+    pass('SSRF redirect guard allows legitimate subresource requests');
+  } else {
+    fail(`SSRF redirect guard blocked legitimate requests: ${JSON.stringify(legitimateResult)}`);
   }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
@@ -626,6 +719,20 @@ if (
   fail('pipeline mode missing batch liveness sweep for unconfirmed entries');
 }
 
+const expandMode = readFile('modes/expand.md');
+if (
+  expandMode.includes('never fetch unlinked URLs') &&
+  expandMode.includes('halt until explicit approval is given') &&
+  expandMode.includes('node add-entry.mjs') &&
+  expandMode.includes('--stdin') &&
+  expandMode.includes('Additive Only') &&
+  expandMode.includes('Treat fetched evidence text as literal')
+) {
+  pass('expand mode includes url limits, confirm gate, add-entry funneling, additive-only, and literal evidence rules');
+} else {
+  fail('expand mode missing required behavior boundaries (url limits, confirm gate, additive-only, literal evidence, add-entry funneling)');
+}
+
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────
 
 console.log('\n9. Local parser contract');
@@ -773,6 +880,7 @@ try {
   const emptyKeywordPath = join(tmp, 'empty-keyword.yml');
   const duplicateCompanyPath = join(tmp, 'duplicate-company.yml');
   const badContentFilterPath = join(tmp, 'bad-content-filter.yml');
+  const badVisaFilterPath = join(tmp, 'bad-visa-filter.yml');
 
   writeFileSync(validPath, `
 title_filter:
@@ -822,6 +930,19 @@ tracked_companies:
     careers_url: "https://jobs.lever.co/acme"
 `, 'utf-8');
 
+  // visa_filter with an empty-string keyword or a non-boolean require_mention
+  // must be rejected (an empty keyword would match every description).
+  writeFileSync(badVisaFilterPath, `
+title_filter:
+  positive: ["AI"]
+visa_filter:
+  require_mention: "yes"
+  positive: ["h-1b", "   "]
+tracked_companies:
+  - name: "Acme"
+    careers_url: "https://jobs.lever.co/acme"
+`, 'utf-8');
+
   const validResult = run(NODE, ['validate-portals.mjs', '--file', validPath]);
   if (validResult !== null && validResult.includes('0 errors')) {
     pass('validate-portals accepts a minimal valid portals file');
@@ -862,6 +983,13 @@ tracked_companies:
     pass('validate-portals rejects empty content_filter keywords');
   } else {
     fail('validate-portals should reject empty content_filter keywords');
+  }
+
+  const badVisaFilterResult = run(NODE, ['validate-portals.mjs', '--file', badVisaFilterPath]);
+  if (badVisaFilterResult === null) {
+    pass('validate-portals rejects invalid visa_filter (empty keyword / non-boolean require_mention)');
+  } else {
+    fail('validate-portals should reject invalid visa_filter');
   }
 
   rmSync(tmp, { recursive: true, force: true });
@@ -1328,7 +1456,7 @@ try {
       timestamp: '2026-07-08T00:00:00.000Z', companies: 10, boards: 2, found: 50,
       filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredPostingAge: 7,
       filteredSalary: 0, filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29,
-      errors: 0, filteredBlacklist: 8,
+      errors: 0, filteredBlacklist: 8, filteredVisa: 2, filteredPostedDate: 1,
     }, runsFile);
     const content = readFileSync(runsFile, 'utf-8');
     const lines = content.trim().split('\n');
@@ -1338,7 +1466,10 @@ try {
       fail(`appendScanRunSummary header mismatch — got: ${lines[0]}`);
     }
     const cols = lines[1].split('\t');
-    if (cols.length === 16 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed' && cols[13] === '29' && cols[15] === '8') {
+    // filtered_blacklist/filtered_visa/filtered_posted_date land in the three
+    // trailing columns (16/17/18), per the header-name append-only contract.
+    if (cols.length === 18 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed'
+        && cols[13] === '29' && cols[15] === '8' && cols[16] === '2' && cols[17] === '1') {
       pass('appendScanRunSummary writes one tab-delimited row with the run counters');
     } else {
       fail(`appendScanRunSummary row shape wrong: ${JSON.stringify(cols)}`);
@@ -1606,6 +1737,36 @@ try {
     pass('role matcher still uses short specialty acronyms for true overlaps');
   } else {
     fail('role matcher ignored a real short-acronym overlap');
+  }
+
+  // A sub-baseline qualifier on ONE side is a level disagreement, not a loose
+  // rewrite: the tokenizer drops seniority words as stopwords, so these pairs
+  // otherwise tokenize identically and scored a perfect Jaccard ratio, silently
+  // collapsing two genuinely different requisitions (#2009, PR #2107).
+  for (const [lower, bare] of [
+    ['Associate Product Manager, TeamName', 'Product Manager, TeamName'],
+    ['Junior Product Manager, TeamName', 'Product Manager, TeamName'],
+    ['Entry Level Data Engineer', 'Data Engineer'],
+  ]) {
+    if (!roleFuzzyMatch(lower, bare)) {
+      pass(`role matcher keeps "${lower}" distinct from the bare title (#2009)`);
+    } else {
+      fail(`role matcher collapsed "${lower}" into the bare title "${bare}"`);
+    }
+  }
+
+  // Direction must not matter — the lone qualifier can be on either side.
+  if (!roleFuzzyMatch('Product Manager, TeamName', 'Associate Product Manager, TeamName')) {
+    pass('role matcher applies the sub-baseline gate in both argument orders (#2009)');
+  } else {
+    fail('role matcher only applied the sub-baseline gate in one argument order');
+  }
+
+  // Both sides sub-baseline at the same level is still the same opening.
+  if (roleFuzzyMatch('Associate Product Manager, TeamName', 'Associate Product Manager, TeamName')) {
+    pass('role matcher still matches two same-level Associate reposts (#2009)');
+  } else {
+    fail('role matcher rejected a genuine Associate-level repost');
   }
 
   const dedupTmp = mkdtempSync(join(tmpdir(), 'career-ops-dedup-'));
@@ -2720,7 +2881,7 @@ try {
   fail(`LaTeX validator i18n test crashed: ${e.message}`);
 }
 
-// ── 21. CJK CV RENDERING (lang="ja" font fallback) ──────────────
+// ── 21. CJK CV RENDERING (Japanese + Simplified Chinese) ─────────
 
 console.log('\n21. CJK CV rendering (lang="ja" font fallback)');
 
@@ -2745,8 +2906,64 @@ try {
   } else {
     fail('lang="ja" rules do not name any CJK font family — CJK fallback will not work');
   }
+
+  for (const templateName of ['cv-template.html', 'resume-template.html']) {
+    const zhTemplate = readFileSync(join(ROOT, 'templates', templateName), 'utf-8');
+    const zhStart = zhTemplate.indexOf('html[lang="zh-CN"] body');
+    const zhBlock = zhStart >= 0 ? zhTemplate.slice(zhStart) : '';
+    const zhFonts = ['PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC'];
+
+    if (zhStart >= 0 && zhFonts.some((font) => zhBlock.includes(font))) {
+      pass(`${templateName} has concrete zh-CN font fallbacks`);
+    } else {
+      fail(`${templateName} is missing concrete zh-CN font fallbacks`);
+    }
+
+    if (/line-break:\s*strict/.test(zhBlock) && /overflow-wrap:\s*break-word/.test(zhBlock)) {
+      pass(`${templateName} applies strict Chinese line breaking without clipping long mixed tokens`);
+    } else {
+      fail(`${templateName} is missing zh-CN line-breaking safeguards`);
+    }
+
+    if (/html\[lang="zh-CN"\]\s+\.contact-row/.test(zhBlock)) {
+      pass(`${templateName} applies an explicit zh-CN fallback to contact details`);
+    } else {
+      fail(`${templateName} is missing an explicit zh-CN contact-row fallback`);
+    }
+  }
+
+  const resumeHtml = readFileSync(join(ROOT, 'templates', 'resume-template.html'), 'utf-8');
+  const resumeZhBlock = resumeHtml.slice(resumeHtml.indexOf('html[lang="zh-CN"] body'));
+  const headingGroup = resumeZhBlock.slice(resumeZhBlock.indexOf('html[lang="zh-CN"] .header h1'), resumeZhBlock.indexOf('html[lang="zh-CN"] .summary-text'));
+  if (!/\.competency-tag|\.skill-category/.test(headingGroup)) {
+    pass('resume-template.html keeps competency and skill labels out of the zh-CN heading-font group');
+  } else {
+    fail('resume-template.html assigns competency or skill labels to the zh-CN heading font');
+  }
 } catch (e) {
   fail(`CJK rendering test crashed: ${e.message}`);
+}
+
+// ── 21b. CV PHOTO STYLE (rounded/circle/square framing, #1991) ──
+
+console.log('\n21b. CV photo style framing');
+
+try {
+  for (const name of ['cv-template.html', 'resume-template.html']) {
+    const html = readFileSync(join(ROOT, 'templates', name), 'utf-8');
+    if (/\.cv-photo--square\s*\{[^}]*aspect-ratio:\s*1;[^}]*height:\s*80px;/s.test(html)) {
+      pass(`${name} square photo style enforces equal dimensions`);
+    } else {
+      fail(`${name} is missing the square cv-photo aspect-ratio rule`);
+    }
+    if (html.includes('.cv-photo--rounded') && html.includes('.cv-photo--circle')) {
+      pass(`${name} defines rounded and circle photo styles`);
+    } else {
+      fail(`${name} is missing rounded/circle cv-photo style rules`);
+    }
+  }
+} catch (e) {
+  fail(`CV photo style test crashed: ${e.message}`);
 }
 
 // ── 22. PROVIDERS — Jobstreet ──────────────────────────────────────
@@ -2981,6 +3198,44 @@ try {
   if (resolved !== null) pass('cv-templates.mjs resolve cv falls back to default without a profile'); else fail('cv-templates.mjs resolve cv crashed');
 } catch (e) {
   fail(`cv-templates resolver test crashed: ${e.message}`);
+}
+
+console.log('\n42. Headless evaluator prompt-cache wiring (#1709, #1842)');
+try {
+  // openai-eval.mjs, gemini-eval.mjs, and ollama-eval.mjs all parse argv and can
+  // process.exit() at module-top-level on import (no invokedDirectly guard like
+  // openrouter-runner.mjs has) — importing them in-process would kill this whole
+  // test run (the exact #1916/32dcee0 class of bug). Assert their wiring at the
+  // source level instead, same approach the upstream commits used.
+  const openaiSrc = readFileSync(join(ROOT, 'openai-eval.mjs'), 'utf-8');
+  const openaiGatesOff = /host === 'api\.openai\.com'\)\s*return\s*\{\s*role:\s*'system',\s*content:\s*prompt\s*\}/.test(openaiSrc);
+  const openaiSendsBreakpoint = /text:\s*prompt,\s*cache_control:\s*\{\s*type:\s*'ephemeral'\s*\}/.test(openaiSrc);
+  const openaiWiresIt = /buildSystemMessage\(systemPrompt,\s*endpointHost\)/.test(openaiSrc);
+  if (openaiGatesOff && openaiSendsBreakpoint && openaiWiresIt) {
+    pass('openai-eval host-gates the #1709 prompt-cache breakpoint and wires it into the request');
+  } else {
+    fail(`openai-eval prompt-cache wiring missing: gatesOff=${openaiGatesOff} sendsBreakpoint=${openaiSendsBreakpoint} wired=${openaiWiresIt}`);
+  }
+
+  const geminiSrc = readFileSync(join(ROOT, 'gemini-eval.mjs'), 'utf-8');
+  const geminiUsesSystemInstruction = /getGenerativeModel\(\{[\s\S]*?systemInstruction:\s*systemPrompt/.test(geminiSrc);
+  const geminiCarriesJdTurn = /generateContent\(`JOB DESCRIPTION TO EVALUATE/.test(geminiSrc);
+  if (geminiUsesSystemInstruction && geminiCarriesJdTurn) {
+    pass('gemini-eval moves the static prefix to systemInstruction and sends only the JD turn (#1709)');
+  } else {
+    fail(`gemini-eval systemInstruction wiring missing: sys=${geminiUsesSystemInstruction} jd=${geminiCarriesJdTurn}`);
+  }
+
+  const ollamaSrc = readFileSync(join(ROOT, 'ollama-eval.mjs'), 'utf-8');
+  const ollamaInOptions = /options:\s*\{\s*temperature:\s*0\.4[^}]*num_ctx/.test(ollamaSrc);
+  const ollamaNoTopLevel = !/\n\s*temperature:\s*0\.4,\s*\n\s*options:/.test(ollamaSrc);
+  if (ollamaInOptions && ollamaNoTopLevel) {
+    pass('ollama-eval sets temperature inside options (not silently ignored at the top level, #1842)');
+  } else {
+    fail(`ollama-eval temperature placement: inOptions=${ollamaInOptions} noTopLevel=${ollamaNoTopLevel}`);
+  }
+} catch (e) {
+  fail(`Headless evaluator prompt-cache wiring test crashed: ${e.message}`);
 }
 
 await runDiscovered();

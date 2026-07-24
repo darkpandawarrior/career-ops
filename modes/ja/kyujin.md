@@ -144,6 +144,12 @@ Job posting を分析し、real, active opening かどうかを示す signals �
 - Role が company business に合っているか
 - Seniority level が長く open になりやすい type か
 
+**6. Third-Party Platform Location Tag Mismatch**（conditional -- 両方の source が揃っている場合のみ）:
+- LinkedIn や Indeed などの third-party platform 上の displayed location と、employer 自身の job page の stated location が**両方**揃っており、かつ同一 requisition/job ID（求人番号など）であると確認できる場合のみ、この signal を評価する。Title や company が同じだけでは不十分 -- 別の requisition の可能性がある
+- 両方揃っている場合、2 つの location を比較する。**country が異なる場合のみ** flag する（同じ country 内の city の違いは弱い signal なので flag しない -- multi-office companies では普通に起こり得る）
+- 片方しか揃っていない場合、または同一 requisition/job ID か確認できない場合は、この signal を skip する
+- Trigger した場合: 両方の location を引用し、実際の勤務地を employer に直接確認するよう候補者に促す non-alarmist な note を report に追記する。Cross-posting/tagging error であって、必ずしも deceptive とは限らないと明記する
+
 ### Output format:
 
 **Assessment:** One of three tiers:
@@ -162,6 +168,32 @@ Job posting を分析し、real, active opening かどうかを示す signals �
 - **Startup / pre-revenue:** Early-stage companies は role が genuinely undefined で JD が vague なことがある。Description vagueness の重みを下げる。
 - **No date available:** Posting age が判断できず、他に concerning signals がない場合、limited data の note 付きで default to "Proceed with Caution"。Evidence なしで "Suspicious" にしない。
 - **Recruiter-sourced (no public posting):** Freshness signals unavailable。Active recruiter contact 自体を positive legitimacy signal として note。
+
+---
+
+## Risk Summary (Block G の後)
+
+Block G の後、Cover Letter Draft の前に `## Risk Summary` block で report body を締めくくる -- risk signal ごとに 1 行、順序固定。候補者が本当に聞きたい質問（"この会社に入って安全か"）を 1 画面で答えられるようにする。
+
+**Aggregation のみ、新しい判断はしない。** 各行は source signal がすでに出した結論を引用するだけ。Risk Summary 自体が re-score や re-weight をすることはない -- 行がおかしいと感じたら、直すべきは source signal の方。
+
+各行 3 つの state: `✅ {明確な結論}` / `⚠️ {finding}` / `— not evaluated`（signal が実行できなかった場合は省略せず明示する）。
+
+| Signal | Source | Row rendering |
+|--------|--------|---------------|
+| Posting legitimacy | Block G の assessment tier | `✅ High Confidence`、または Proceed with Caution / Suspicious の場合 `⚠️ {tier} -- {one-line reason}` |
+| Location tag mismatch | Block G の signal 6（location tag mismatch） | Check が実行され異常なしの場合 `✅ clear`；flag が trigger した場合 `⚠️ {two locations}`；比較できる source が両方揃わなかった場合 `— not evaluated` |
+
+Block format:
+
+```markdown
+## Risk Summary
+
+| Signal | Status |
+|--------|--------|
+| Posting legitimacy | ✅ High Confidence |
+| Location tag mismatch | — not evaluated |
+```
 
 ---
 
@@ -268,6 +300,9 @@ Full evaluation を `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` に保存す�
 
 ## G) Posting Legitimacy
 (full content of block G)
+
+## Risk Summary
+(risk signal ごとに 1 行、順序固定 -- 上記の Risk Summary section 参照)
 
 ## H) Draft Application Answers
 (only if score >= 4.5 -- draft answers for the application form)

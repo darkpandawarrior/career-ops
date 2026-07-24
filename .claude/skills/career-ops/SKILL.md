@@ -4,7 +4,7 @@ description: AI job search command center -- evaluate offers, generate CVs, scan
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | deep | pdf | latex | cover | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview/redflag | patterns | followup | update | email-sweep | email | add | expand]"
+argument-hint: "[scan | deep | pdf | latex | cover | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview/redflag | interview-redflag | patterns | followup | update | email-sweep | email | reply-watch | add | expand]"
 license: MIT
 ---
 
@@ -48,6 +48,7 @@ Determine the mode from `$mode`:
 | `interview/practice` | `interview/practice` |
 | `interview/debrief` | `interview/debrief` |
 | `interview/redflag` | `interview/redflag` |
+| `interview-redflag` | `interview-redflag` |
 | `pdf` | `pdf` |
 | `latex` | `latex` |
 | `training` | `training` |
@@ -61,6 +62,7 @@ Determine the mode from `$mode`:
 | `batch` | `batch` |
 | `email-sweep` | `email-sweep` |
 | `email` | `email` |
+| `reply-watch` | `reply-watch` |
 | `add` | `add` |
 | `expand` | `expand` |
 | `ko` | `ko` (Korean locale pack — see `modes/ko/README.md`) |
@@ -108,6 +110,7 @@ Available commands:
   /career-ops interview/practice → Practice interview, one question at a time with feedback
   /career-ops interview/debrief → Post-interview debrief: close gaps, predict next round
   /career-ops interview/redflag → Structural red-flag check on a company from interview transcript signal
+  /career-ops interview-redflag → Interviewer-side company red-flag detector (None/Caution/Warning) from session transcripts
   /career-ops pdf       → PDF only, ATS-optimized CV
   /career-ops latex     → Export CV as LaTeX/Overleaf .tex
   /career-ops cover     → Cover letter: standalone JD paste or /career-ops cover {slug}
@@ -120,6 +123,7 @@ Available commands:
   /career-ops batch     → Batch processing with parallel workers
   /career-ops email-sweep → Scan Gmail for application-status changes (rejections, interviews, offers) and merge into tracker
   /career-ops email     → Draft a formal outbound application email (draft-only, never sends — distinct from email-sweep)
+  /career-ops reply-watch → Classify employer reply emails against the tracker and print a review digest
   /career-ops add       → Fetch a project/paper/role URL into cv.md / article-digest.md
   /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops patterns  → Analyze rejection patterns and improve targeting
@@ -144,7 +148,7 @@ Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `contacto`, `apply`, `p
 ### Standalone modes (only their mode file):
 Read `modes/{mode}.md`
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `interview/redflag`, `latex`, `training`, `project`, `patterns`, `followup`, `cover`, `email-sweep`, `email`, `add`, `expand`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `interview/redflag`, `interview-redflag`, `latex`, `training`, `project`, `patterns`, `followup`, `cover`, `email-sweep`, `email`, `reply-watch`, `add`, `expand`
 
 ### Modes delegated to subagent:
 For `scan`, `apply` (with Playwright), `pipeline` (3+ URLs), and `email-sweep`: launch as a worker/subagent with the content of `modes/{mode}.md` injected into the worker prompt (`email-sweep` does not need `_shared.md` — it has no scoring logic). If your CLI exposes an `Agent(...)` primitive, the call looks like this:

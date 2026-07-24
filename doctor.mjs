@@ -257,7 +257,7 @@ function checkPrereq({ path, severity, fix }) {
   if (severity === 'setup') {
     return { pass: false, severity, label: `${path} not found (run onboarding to create it)`, fix };
   }
-  return { pass: false, label: `${path} not found`, fix };
+  return { warn: true, label: `${path} not found (user setup required)`, fix };
 }
 
 function checkFonts() {

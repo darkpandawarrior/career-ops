@@ -125,7 +125,7 @@ try {
 }
 
 // Canonical states and aliases
-const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Rejected', 'Discarded', 'SKIP'];
+const CANONICAL_STATES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
 /**
  * Convert raw addition status text into one canonical tracker state.
@@ -154,6 +154,7 @@ function validateStatus(status) {
     'respondido': 'Responded',
     'entrevista': 'Interview',
     'oferta': 'Offer',
+    'contratado': 'Hired', 'contratada': 'Hired', 'accepted': 'Hired', 'accept': 'Hired',
     'rechazado': 'Rejected', 'rechazada': 'Rejected',
     'descartado': 'Discarded', 'descartada': 'Discarded', 'cerrada': 'Discarded', 'cancelada': 'Discarded',
     'no aplicar': 'SKIP', 'no_aplicar': 'SKIP', 'skip': 'SKIP', 'monitor': 'SKIP',
