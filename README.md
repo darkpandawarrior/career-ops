@@ -6,7 +6,7 @@
 
 ---
 
-![engine version](https://img.shields.io/badge/engine-career--ops_v1.18.0-6366f1?style=flat-square)
+![engine version](https://img.shields.io/badge/engine-career--ops_v1.22.0-6366f1?style=flat-square)
 ![dashboard version](https://img.shields.io/badge/dashboard-web_v0.3.0-22d3ee?style=flat-square)
 ![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
@@ -243,7 +243,7 @@ flowchart TD
     I --> J[job-search-runner.mjs]
 
     J --> K1["scan.mjs + scan-ats-full.mjs<br/>(zero-token ATS feeds)"]
-    J --> K2["62 provider modules"]
+    J --> K2["69 provider modules"]
     J --> K3["pipeline entries + scan history"]
     J --> K4["search leads"]
 
@@ -292,7 +292,7 @@ data/
   applications.md         career-ops tracker
   pipeline.md             pending job URLs
   job-dashboard.json      generated dashboard cache
-providers/                62 job-board provider modules (docs/SUPPORTED_JOB_BOARDS.md)
+providers/                69 job-board provider modules (docs/SUPPORTED_JOB_BOARDS.md)
 docs/
   SCRIPTS.md              Full script/npm-alias reference
   SUPPORTED_JOB_BOARDS.md  Every scanner provider, by ATS/API/parser type
@@ -381,7 +381,7 @@ quirks (rate limits, latency floors, pagination caps) are tuned locally in
 each file; Ashby, for example, carries a 30s timeout and a jittered retry
 because its public posting-api has a ~10s+ server-side latency floor that
 races the scanner's global 10s default. See
-[`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) for all 62,
+[`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) for all 69,
 and [`docs/local-parser-cookbook.md`](docs/local-parser-cookbook.md) to add one.
 
 ### Multi-profile resolution
@@ -421,7 +421,7 @@ HireSignal is not a separate job-search engine bolted next to career-ops. It is 
 | career-ops capability | How HireSignal uses it |
 |----------------------|----------------------|
 | Data contract | Candidate data kept in user-layer files: `cv.md`, `config/profile.yml`, `config/job-search.yml`, `modes/_profile.md`, `portals.yml`, `data/`, `reports/`, `output/` |
-| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, 62 provider modules ([`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md)), scan history, and pipeline conventions — no hosted service needed |
+| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, 69 provider modules ([`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md)), scan history, and pipeline conventions — no hosted service needed |
 | Tracker model | `data/applications.md`, `data/pipeline.md`, status normalization, deduplication, and report links remain career-ops compatible |
 | Modes and templates | Role evaluation prompts, profile narrative, resume templates, and PDF generation flow remain available for agent-assisted review |
 | Liveness and quality rules | Job links checked, low-fit roles discouraged, no automatic submission |
@@ -506,7 +506,10 @@ kirklazar-android/hiresignal --state merged`.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **career-ops v1.18.0 · web v0.3.0** (current) | 2026-07-08 → 07-10 | Via-channel (agency vs. direct) tracker column; pre-submit `verify-application-match.mjs` gate; TypeScript 7 + Electron 43 dependency/CVE hardening; desktop packaging fixes |
+| **career-ops v1.22.0 · web v0.3.0** (current) | 2026-07-24 | 5 new job-board providers (Alibaba, Jobvite, Gem, Welcome to the Jungle, Agentic Engineering Jobs); token-usage tracking (`utils/token-tracker.mjs`); tracker writer-lock race-condition fix; CV/PDF page-overflow guard + shared `cv-sections-core.mjs` + Chinese-minimal CV template; SSRF hardening in Playwright liveness checks; in-process DNS cache for scan reliability; Block G location-tag-mismatch fraud signal |
+| career-ops v1.20.0 + v1.21.0 | 2026-07-18 | Oracle Recruiting Cloud provider; scan trust-signal persistence + portal-health tracking; Workday liveness rung; atomic report-number allocation; per-round salary comparison; oferta Risk Summary + benefits-mismatch signal |
+| career-ops v1.19.0 | 2026-07-11 | Config-selectable LaTeX CV templates; `upskill` + `latex-tex` modes; Traditional Chinese (zh-TW) modes; Serper/TheirStack provider plugins; do-not-apply blacklist (data-safety) |
+| career-ops v1.18.0 | 2026-07-08 → 07-10 | Via-channel (agency vs. direct) tracker column; pre-submit `verify-application-match.mjs` gate; TypeScript 7 + Electron 43 dependency/CVE hardening; desktop packaging fixes |
 | career-ops v1.17.0 | 2026-07-05 | Absorbed upstream origin delta; retired legacy `dashboard-web/`, consolidated engine into `web/src/lib/` |
 | web v0.2.0 — "HireSignal 2.0 fusion" | 2026-07-01 | Ground-up dashboard rewrite: multi-profile, in-process scoring, resume onboarding, scored board, HireSignal branding (Phases 0–5) |
 | career-ops v1.16.0 | 2026-07-03/04 | Email-sweep mode; fixed a desktop-app crash loop |
@@ -521,7 +524,7 @@ kirklazar-android/hiresignal --state merged`.
 | Doc | Covers |
 |-----|--------|
 | [`docs/SCRIPTS.md`](docs/SCRIPTS.md) | Every engine script — npm alias (or `node` invocation) and purpose |
-| [`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) | All 62 scanner provider modules, by ATS/API/parser type |
+| [`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) | All 69 scanner provider modules, by ATS/API/parser type |
 | [`docs/MULTI_PROFILE.md`](docs/MULTI_PROFILE.md) | Multi-profile registry, migration, deploy |
 | [`docs/PORTFOLIO.md`](docs/PORTFOLIO.md) | The standalone portfolio-site generator |
 | [`docs/PLUGINS.md`](docs/PLUGINS.md) | Optional external-integration plugin system |

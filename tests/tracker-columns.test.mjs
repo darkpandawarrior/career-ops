@@ -181,7 +181,10 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
 {
   const { loadSeenCompanyRoles } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
   const sb = makeSandbox(HEADER_10);
-  const seen = loadSeenCompanyRoles(sb.tracker);
+  const seen = loadSeenCompanyRoles(sb.tracker, undefined, {
+    scanHistoryPath: join(sb.dir, 'scan-history.tsv'),
+    pipelinePath: join(sb.dir, 'pipeline.md'),
+  });
   if (seen.has('acme::engineer')) pass('scan.mjs: seen-set keys company::role on 10-col tracker');
   else fail(`scan.mjs: seen-set on 10-col tracker — got [${[...seen].join(', ')}]`);
   if (![...seen].some(k => k.includes('remote') || k.includes('4.0/5'))) {
@@ -221,7 +224,10 @@ const TSV_NO_LOCATION = '2\t2026-02-02\tGlobex\tManager\tApplied\tN/A\t✅\t—\
   }
 
   const { loadSeenCompanyRoles } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
-  const seen = loadSeenCompanyRoles(sb.tracker);
+  const seen = loadSeenCompanyRoles(sb.tracker, undefined, {
+    scanHistoryPath: join(sb.dir, 'scan-history.tsv'),
+    pipelinePath: join(sb.dir, 'pipeline.md'),
+  });
   if (seen.has('acme::engineer') && seen.size === 1) {
     pass('contract: scan.mjs seen-set skips an unknown extra column');
   } else {
