@@ -262,7 +262,7 @@ try {
   }
 
   if (
-    redflagFlat.includes('never edits `portals.yml`, `modes/_profile.md`, or `data/applications.md`') &&
+    redflagFlat.includes('never edits `portals.yml`, `modes/_profile.md`, `data/applications.md`, or `data/blacklist.md`') &&
     redflagMode.includes('Advisory only') &&
     redflagMode.includes('Nothing leaves the machine')
   ) {

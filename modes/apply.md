@@ -68,6 +68,12 @@ Read the entire page/form to scan for knock-out questions BEFORE generating full
 2. If the name is not available, check the tracker for `?` rows with the same Via + a similar role (the same agency re-blasting one listing) and for similar-role rows at plausible-match companies; surface anything close.
 3. Then STOP and require explicit candidate acknowledgment before the agency is authorized: "The end employer is unknown, so I cannot verify you haven't already applied to this company directly. Authorize anyway?" Never proceed on silence — the reveal-time check only catches damage after the fact.
 
+**Repeat-application ATS profile check (#1920):** count the visible company's rows in `data/applications.md` (the same company-name match Step 2 already uses to search `reports/`). If this submission would be the 2nd or later application to that company, surface a reminder before drafting — this is separate from the Ashby email-dedup quirk below (that one is about the *current* submission getting silently merged; this one is about *older* submissions, possibly predating the candidate's current resume-generation workflow, resurfacing and contradicting the current materials):
+
+> "You've applied to {Company} {N} times before. Some ATS platforms (Workday in particular) retain and cross-reference a candidate's full application history. Before submitting, consider checking your candidate profile/application history in their portal for consistency with your current materials — especially if any earlier applications predate your current resume-generation workflow."
+
+This is a reminder, not a gate — surface it and continue drafting immediately; do not wait for the candidate to acknowledge it first. The candidate can review their ATS profile/application history manually before they submit. Never scrape or log into the employer's ATS portal on the candidate's behalf; this check only counts rows already in the candidate's own tracker.
+
 ## Step 1 — Detect the job
 
 **With Playwright:** Take a snapshot of the active page. Read title, URL, and visible content.
@@ -180,6 +186,12 @@ If the candidate confirms that they submitted the application:
 3. Refresh the report's `## Application Answers` section with the final field values and `**State:** submitted`
 4. Suggest next step: run the `contacto` mode (`/career-ops contacto` where available) for LinkedIn outreach
 
+**Confirmed resume-verification failure at this vendor? Check the rest of the pipeline (#1870).** If the candidate confirms the ATS silently dropped or altered resume content that they had submitted (see the SuccessFactors-family quirk below), don't treat it as a one-off. Tracker rows in `data/applications.md` don't carry a canonical ATS-vendor field, so don't grep the tracker text for a vendor name — it will miss rows silently. Instead, resolve the vendor per row from its linked report's `**URL:**` field:
+- For clean-fingerprint vendors (Greenhouse, Lever, Ashby, Workday), match the URL's hostname the same way `detectVendor()` in `analyze-patterns.mjs` does — reuse that function/pattern rather than re-deriving it, so the two stay in sync.
+- White-labeled ATS (SuccessFactors, iCIMS, UKG, Dayforce, and similar) are **not** detectable from the URL alone — the very vendor family this quirk was confirmed on falls in this bucket. For those, don't guess from the domain: ask the candidate directly which other in-flight rows (`Applied`, `Responded`, `Interview`) went through the same portal, since neither the tracker nor the URL structurally exposes it.
+
+Once the same-vendor rows are identified (by URL match or candidate confirmation), surface that list and prompt the candidate to spot-check each one via that portal's preview/profile step if one exists. One confirmed silent-truncation case at a vendor raises the prior that it happened elsewhere in-flight through the same vendor too.
+
 ## Scroll handling
 
 If the form has more questions than the visible ones:
@@ -220,3 +232,9 @@ Field-tested across ~12 Playwright-driven applications (Ashby, Greenhouse, Lever
 - **Symptom:** Country, university, or field-of-study dropdowns contain thousands of `<option>` entries. Snapshotting them floods context and stalls the agent.
 - **Agent:** Use `select_option` directly by value or visible label. Never snapshot the full option list. If the exact label is unknown, ask the candidate for the value instead of dumping options into context.
 - **Candidate:** Provides the correct label when the agent cannot infer it from `config/profile.yml`.
+
+### SuccessFactors-family — uploaded resume can silently diverge from the stored profile (#1870)
+
+- **Symptom:** Some ATS portals (SuccessFactors-family confirmed; likely others) parse and store an uploaded resume once and don't reliably re-parse it on a later re-upload or profile edit. The portal's internal record can silently drift from the file the candidate believes they submitted — especially for work-history entries added *after* the initial profile was created. There is no error, no warning, and no diff shown to the candidate; the loss surfaces only if someone downstream (a recruiter reading the stored profile back on a call, for example) notices the gap.
+- **Agent:** After a submission through one of these portals, if the portal exposes any "preview my profile," "view submitted resume," or "review application" step, surface it to the candidate as a **required check** before closing out the apply flow — don't stop at confirming the upload succeeded. If the candidate later confirms a truncation or mismatch at a given vendor, flag it in the report and prompt them to spot-check other still-active applications through that same vendor (see the resume-verification check in Step 9 above) — one confirmed case raises the prior for the rest of that vendor's in-flight applications.
+- **Candidate:** If a profile/resume preview step exists, use it and compare against your actual work history before considering the application done. If no preview step exists, there is currently no way to verify what the portal actually stored — treat this as a known blind spot rather than assuming silence means success.

@@ -22,9 +22,10 @@
  *   Smaller models (llama3.2:3b, phi3) may produce incomplete evaluations.
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 
 try {
   const { config } = await import('dotenv');
@@ -137,19 +138,18 @@ function readFile(path, label) {
 }
 
 /**
- * Determine the next zero-padded report number based on existing files in reports/.
- * Scans for files whose name starts with one or more digits followed by a hyphen,
- * then returns max + 1 padded to at least 3 digits. Supports report counts above 999
- * without resetting or colliding (avoids the fixed-3-digit slice assumption).
+ * Atomically reserve the next report number via reserve-report-num.mjs, so two
+ * concurrent runs (batch workers, parallel windows) never collide on the same
+ * slot — see reserve-report-num.mjs for the O_CREAT|O_EXCL sentinel mechanism.
  * @returns {string} Zero-padded report number string, e.g. "042" or "1001".
  */
-function nextReportNumber() {
-  if (!existsSync(PATHS.reports)) return '001';
-  const files = readdirSync(PATHS.reports)
-    .map(f => { const m = f.match(/^(\d+)-/); return m ? parseInt(m[1], 10) : NaN; })
-    .filter(n => !isNaN(n));
-  if (files.length === 0) return '001';
-  return String(Math.max(...files) + 1).padStart(3, '0');
+function reserveReportNumber() {
+  return execFileSync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
+}
+
+/** Release the sentinel for a previously-reserved report number. */
+function releaseReportNumber(num) {
+  execFileSync(process.execPath, [join(ROOT, 'reserve-report-num.mjs'), '--release', num]);
 }
 
 // ---------------------------------------------------------------------------
@@ -336,12 +336,14 @@ if (summaryMatch) {
 // Save report
 // ---------------------------------------------------------------------------
 if (saveReport) {
+  let reservedNum = null;
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
     }
 
-    const num         = nextReportNumber();
+    reservedNum       = reserveReportNumber();
+    const num         = reservedNum;
     const today       = new Date().toISOString().split('T')[0];
     const companySlug = company.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const filename    = `${num}-${companySlug}-${today}.md`;
@@ -368,6 +370,14 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
     console.log(`    | ${num} | ${today} | ${company} | ${role} | ${score}/5 | Evaluated | ❌ | [${num}](reports/${filename}) |`);
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
+  } finally {
+    if (reservedNum) {
+      try {
+        releaseReportNumber(reservedNum);
+      } catch (err) {
+        console.warn(`⚠️   Could not release report reservation: ${err.message}`);
+      }
+    }
   }
 }
 

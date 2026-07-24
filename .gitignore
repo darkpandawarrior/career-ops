@@ -6,6 +6,7 @@ data/applications.db
 data/pipeline.md
 data/scan-history.tsv
 data/scan-runs.tsv
+data/portal-health.tsv
 data/apply-queue.md
 data/follow-ups.md
 data/salary-observations.tsv

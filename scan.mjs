@@ -53,7 +53,9 @@ import * as yaml from 'js-yaml';
 // ---------------------------------------------------------------------------
 try {
   const { config } = await import('dotenv');
-  config();
+  // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
+  // single JSON object (#1906).
+  config({ quiet: true });
 } catch {
   // dotenv is optional — fall back to process.env if not installed
 }
@@ -77,6 +79,7 @@ const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(_SCAN_DATA_ROOT
 const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(_SCAN_DATA_ROOT, 'config/profile.yml');
 const SCAN_HISTORY_PATH = path.join(_SCAN_DATA_ROOT, 'data/scan-history.tsv');
 const SCAN_RUNS_PATH = path.join(_SCAN_DATA_ROOT, 'data/scan-runs.tsv');
+const PORTAL_HEALTH_PATH = path.join(_SCAN_DATA_ROOT, 'data/portal-health.tsv');
 const PIPELINE_PATH = path.join(_SCAN_DATA_ROOT, 'data/pipeline.md');
 const APPLICATIONS_PATH = path.join(_SCAN_DATA_ROOT, 'data/applications.md');
 const PROVIDERS_DIR = path.resolve(_SCAN_ENGINE, 'providers');
@@ -927,6 +930,31 @@ export function formatCompensation(salary) {
   return sanitizeMarkdownField(currency ? `${range} ${currency}` : range);
 }
 
+// Trust/legitimacy signal (#1743): the scanner sets offer.trustScore (0-100) +
+// offer.trustFlags on every job (see buildTrustValidator). Surface it only when
+// it's meaningful — a score below 100 means the validator penalized the posting
+// (e.g. missing_apply_url, invalid_url, suspicious_domain). A clean posting
+// (score 100) or a scan without trust_filter configured stays byte-identical
+// (empty), exactly like the posted:/note: segments.
+export function trustIsFlagged(offer) {
+  return typeof offer.trustScore === 'number' && Number.isFinite(offer.trustScore) && offer.trustScore < 100;
+}
+
+function trustFlagList(offer) {
+  return Array.isArray(offer.trustFlags)
+    ? offer.trustFlags.filter((f) => typeof f === 'string' && f.trim())
+    : [];
+}
+
+// Labeled pipeline segment, e.g. `trust: 60 missing_apply_url,suspicious_domain`.
+// '' when the posting isn't flagged, so an unflagged offer produces no segment.
+export function formatTrustSegment(offer) {
+  if (!trustIsFlagged(offer)) return '';
+  const flags = trustFlagList(offer);
+  const body = flags.length ? `${offer.trustScore} ${flags.join(',')}` : String(offer.trustScore);
+  return sanitizeMarkdownField(`trust: ${body}`);
+}
+
 export function formatPipelineOffer(offer) {
   const url = sanitizePipelineUrl(offer.url);
   const company = sanitizeMarkdownField(offer.company);
@@ -948,6 +976,11 @@ export function formatPipelineOffer(offer) {
   // 1/3/4/5-column contract in modes/pipeline.md intact.
   const posted = postedAtIsoDate(offer.postedAt);
   if (posted) line = `${line} | posted: ${posted}`;
+  // Labeled trust/legitimacy segment (#1743) — rides like posted:/note:, emitted
+  // only when the scanner flagged the posting (score < 100). Ordered after
+  // posted:, before note:, for a stable serialization.
+  const trust = formatTrustSegment(offer);
+  if (trust) line = `${line} | ${trust}`;
   // Optional free-text ranking signal (e.g. a curated-list flag an importer
   // attaches). Labeled — not positional like location/compensation — so it can
   // ride on any row shape (bare URL, 3-, 4-, or 5-column) without a reader
@@ -980,6 +1013,12 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     // New trailing column: posting date. Existing readers index by position up to
     // col 7, so appending col 8 is backward-compatible.
     postedAtIsoDate(offer.postedAt),
+    // Trust/legitimacy signal (#1743): score (only when the scanner flagged the
+    // posting, i.e. < 100) + comma-joined flags. Trailing cols 9-10, so existing
+    // index-based readers (fingerprint@7, postedAt@8) are unaffected; a clean
+    // posting or a scan without trust_filter leaves both empty.
+    trustIsFlagged(offer) ? String(offer.trustScore) : '',
+    trustIsFlagged(offer) ? trustFlagList(offer).join(',') : '',
   ].map(sanitizeTsvField).join('\t');
 }
 
@@ -1157,6 +1196,53 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     c.filteredBlacklist ?? 0,
   ].join('\t') + '\n';
   appendFileSync(filePath, row, 'utf-8');
+}
+
+// ── Portal health persistence (#1744) ───────────────────────────────
+//
+// One row per target per scan run: did it resolve? Lets stats.mjs tell a
+// portal that's been down 3 runs in a row ("fix the slug") apart from one
+// that just had a blip. Append-only, same guard pattern as scan-runs.tsv —
+// never written on --dry-run.
+
+export const PORTAL_HEALTH_HEADER = 'timestamp\tcompany\tstatus\n';
+
+export function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH_PATH) {
+  if (!existsSync(filePath)) writeFileSync(filePath, PORTAL_HEALTH_HEADER, 'utf-8');
+  let lines = '';
+  for (const r of healthRecords) {
+    lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
+  }
+  if (lines) appendFileSync(filePath, lines, 'utf-8');
+}
+
+export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
+  if (!existsSync(filePath)) return [];
+  const lines = readFileSync(filePath, 'utf-8').split('\n');
+  const records = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const parts = line.split('\t');
+    if (parts.length >= 3) records.push({ timestamp: parts[0], company: parts[1], status: parts[2] });
+  }
+  return records;
+}
+
+// Consecutive slug_gone/network streak per company; reset by any
+// reachable/empty result. Mirrors stats.mjs's computePortalStats — duplicated
+// there (not imported) so stats.mjs stays a pure reader with no dependency on
+// the scanner's write path.
+export function computeConsecutiveFailures(healthRecords) {
+  const streaks = new Map();
+  for (const r of healthRecords) {
+    if (r.status === 'slug_gone' || r.status === 'network') {
+      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
+    } else if (r.status === 'reachable' || r.status === 'empty') {
+      streaks.set(r.company, 0);
+    }
+  }
+  return streaks;
 }
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
@@ -1819,16 +1905,58 @@ async function main() {
   const networkTargets = errors.filter((e) => e.kind === 'network');
   const otherErrors = errors.filter((e) => e.kind !== 'slug_gone' && e.kind !== 'network');
 
-  if (unreachableTargets.length > 0) {
-    const names = unreachableTargets.map((e) => e.company).join(', ');
-    console.log(`\n⚠️  ${unreachableTargets.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
+  // Portal health (#1744) — classify this run's outcome per target, then fold
+  // in past runs (data/portal-health.tsv) to tell a persistent outage (fix
+  // the slug) apart from a one-off blip (already covered by the messages
+  // below). Streak threshold configurable via portals.yml `portal_health_threshold`.
+  const STREAK_THRESHOLD = config.portal_health_threshold || 3;
+  const nowStr = new Date().toISOString();
+  const healthRecords = targets.map((t) => {
+    let status = 'reachable';
+    if (unreachableTargets.some((e) => e.company === t.name)) status = 'slug_gone';
+    else if (networkTargets.some((e) => e.company === t.name)) status = 'network';
+    else if (emptyTargets.includes(t.name)) status = 'empty';
+    return { timestamp: nowStr, company: t.name, status };
+  });
+
+  const currentStreaks = computeConsecutiveFailures(loadPortalHealth());
+  for (const r of healthRecords) {
+    if (r.status === 'slug_gone' || r.status === 'network') {
+      currentStreaks.set(r.company, (currentStreaks.get(r.company) || 0) + 1);
+    } else if (r.status === 'reachable' || r.status === 'empty') {
+      currentStreaks.set(r.company, 0);
+    }
+  }
+
+  const persistentlyDead = [];
+  const newlyDeadSlug = [];
+  const newlyDeadNetwork = [];
+  for (const e of [...unreachableTargets, ...networkTargets]) {
+    const streak = currentStreaks.get(e.company) || 1;
+    if (streak >= STREAK_THRESHOLD) {
+      if (!persistentlyDead.includes(e.company)) persistentlyDead.push(e.company);
+    } else if (e.kind === 'slug_gone') {
+      if (!newlyDeadSlug.some((x) => x.company === e.company)) newlyDeadSlug.push(e);
+    } else {
+      newlyDeadNetwork.push(e);
+    }
+  }
+
+  if (persistentlyDead.length > 0) {
+    console.log(`\n🚨 FIX NEEDED: ${persistentlyDead.length} target(s) have been unreachable for ${STREAK_THRESHOLD}+ runs:`);
+    console.log(`   ${persistentlyDead.join(', ')}`);
+    console.log(`   Run: node verify-portals.mjs to check if the ATS migrated, or update their board slugs.`);
+  }
+  if (newlyDeadSlug.length > 0) {
+    const names = newlyDeadSlug.map((e) => e.company).join(', ');
+    console.log(`\n⚠️  ${newlyDeadSlug.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
   }
   if (emptyTargets.length > 0) {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
   }
-  if (networkTargets.length > 0) {
-    console.log(`\nNetwork errors (${networkTargets.length}):`);
-    for (const e of networkTargets) {
+  if (newlyDeadNetwork.length > 0) {
+    console.log(`\nNetwork errors (${newlyDeadNetwork.length}):`);
+    for (const e of newlyDeadNetwork) {
       console.log(`  ✗ ${e.company}: ${e.error}`);
     }
   }
@@ -1858,6 +1986,7 @@ async function main() {
   // Persist this run's counters (#1604) — guarded exactly like the other
   // writes; a --dry-run must leave no trace.
   if (!dryRun) {
+    appendPortalHealth(healthRecords);
     appendScanRunSummary({
       timestamp: new Date().toISOString(), status: 'completed',
       companies: summaryCompanies, boards: summaryBoards, found: totalFound,

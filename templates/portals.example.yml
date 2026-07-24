@@ -506,6 +506,9 @@ search_queries:
 #   workday         <tenant>.<instance>.myworkdayjobs.com/<site>  (or api: field for a branded custom domain)
 #   successfactors  <slug>.successfactors.(eu|com) / jobs2web.com  (or provider: successfactors + api: for a branded RMK site)
 #   avature         <slug>.avature.net                  (or provider: avature + api: for a branded custom domain)
+#   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud.com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
+#                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
+#                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:)
 #   amazon          amazon.jobs                         (or api: field)
 #   dassault        3ds.com / *.3ds.com                  (or api: field)
 #   keka            <tenant>.keka.com                    (or api: field pointing at the careers page)
@@ -596,6 +599,24 @@ search_queries:
 #   careers_url: https://jobs.exampleco.com                # branded RMK career site
 #   provider: successfactors
 #   api: https://jobs.exampleco.com                        # RMK origin (often same as careers_url)
+#   enabled: true
+#
+# - name: Example Oracle Recruiting Cloud Co
+#   # Oracle Recruiting Cloud / Fusion Candidate Experience. Auto-detects any
+#   # <tenant>.fa[.<region>][.ocs].oraclecloud.com host and derives siteNumber
+#   # from the /sites/<siteNumber>/ path segment (default CX_1).
+#   careers_url: https://exampleco.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs
+#   max_pages: 25          # optional page cap (200 jobs/page, default 25 ≈ 5000 jobs, max 25)
+#   enabled: true
+#
+# - name: JPMorgan Chase                    # worked override example
+#   # Override form: pin the host + siteNumber explicitly (useful when the public
+#   # careers link is branded or the /sites/<n>/ segment isn't in the URL you have).
+#   careers_url: https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1002/jobs
+#   provider: oraclecloud
+#   siteNumber: CX_1002    # the site number after /sites/ (JPMC's external site)
+#   # locationId: 300000000123456   # optional — some tenants (BNY, Amex) need it to scope results
+#   max_pages: 25
 #   enabled: true
 #
 # - name: Example Avature Co

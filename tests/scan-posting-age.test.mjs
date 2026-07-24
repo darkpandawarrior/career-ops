@@ -57,10 +57,10 @@ try {
   const datedHistory = formatScanHistoryRow(datedOffer, '2026-07-09').split('\t');
   const noDateHistory = formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09').split('\t');
   if (
-    datedHistory.length === 9 &&
-    datedHistory[8] === '2026-06-18' && // epoch ms → YYYY-MM-DD in the trailing column
-    noDateHistory.length === 9 &&
-    noDateHistory[8] === '' // missing postedAt → empty trailing column, never a bogus date
+    datedHistory.length === 11 &&
+    datedHistory[8] === '2026-06-18' && // epoch ms → YYYY-MM-DD in the postedAt column (trust cols 9-10 trail it)
+    noDateHistory.length === 11 &&
+    noDateHistory[8] === '' // missing postedAt → empty column, never a bogus date
   ) {
     pass('scan-history writer appends postedAt as an ISO trailing column (empty when absent)');
   } else {
