@@ -40,7 +40,7 @@ import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
-import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
+import { canonicalizeTrackerPath, openTrackerTransaction } from './tracker-lock.mjs';
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
 const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
@@ -438,36 +438,51 @@ async function history(args) {
 // applications.md unless explicitly asked to via --out.
 
 async function exportMd(args) {
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  ensureFresh(db, loadStates());
-  const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
-  const out = [
-    '# Applications Tracker',
-    '',
-    HEADER,
-    SEPARATOR,
-    ...rows.map(rowToMarkdown),
-    '',
-  ].join('\n');
-
   const outPath = flagValue(args, '--out');
-  if (!outPath) {
-    process.stdout.write(out);
-    return;
-  }
-  if (existsSync(outPath) && statSync(outPath).isDirectory()) {
+  if (outPath && existsSync(outPath) && statSync(outPath).isDirectory()) {
     console.error(`Error: --out ${outPath} is a directory — pass a file path.`);
     process.exit(1);
   }
-  mkdirSync(dirname(outPath) || '.', { recursive: true });
-  // Never silently clobber — whatever was there is backed up first.
-  if (existsSync(outPath)) {
-    copyFileSync(outPath, outPath + '.bak');
-    console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+
+  // --out can target applications.md itself (a repair round-trip). Only that
+  // case needs the shared tracker lock — an export to any other path is a
+  // read-only snapshot and must not block on (or be blocked by) another
+  // writer.
+  const trackerPath = canonicalizeTrackerPath(MD_PATH);
+  const writesTracker = outPath ? canonicalizeTrackerPath(outPath) === trackerPath : false;
+  const trackerTransaction = writesTracker ? await openTrackerTransaction(trackerPath) : null;
+
+  try {
+    const DatabaseSync = await loadSqlite();
+    const db = openDb(DatabaseSync);
+    ensureFresh(db, loadStates());
+    const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
+    const out = [
+      '# Applications Tracker',
+      '',
+      HEADER,
+      SEPARATOR,
+      ...rows.map(rowToMarkdown),
+      '',
+    ].join('\n');
+
+    if (!outPath) {
+      process.stdout.write(out);
+      return;
+    }
+    mkdirSync(dirname(outPath) || '.', { recursive: true });
+    // Never silently clobber — whatever was there is backed up first.
+    const writeTarget = writesTracker ? trackerPath : outPath;
+    if (existsSync(writeTarget)) {
+      copyFileSync(writeTarget, writeTarget + '.bak');
+      console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+    }
+    if (trackerTransaction) trackerTransaction.replace(out);
+    else writeFileAtomic(outPath, out);
+    console.error(`Exported ${rows.length} applications to ${outPath}`);
+  } finally {
+    trackerTransaction?.close();
   }
-  writeFileSync(outPath, out, 'utf-8');
-  console.error(`Exported ${rows.length} applications to ${outPath}`);
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -487,11 +502,12 @@ function writeFileAtomic(filePath, content) {
 
 // `delete --num N` removes one application row from applications.md and rebuilds
 // the derived index. The markdown stays the source of truth: callers (incl. the
-// web) orchestrate this script rather than editing applications.md directly, so
-// the write-gate holds. The write is atomic AND, for the real (non-dry-run) path,
-// serialized under the SAME cross-process lock merge-tracker.mjs/set-status.mjs
-// use (tracker-lock.mjs) — a batch merge and a row delete can no longer race each
-// other into a corrupted/half-written applications.md.
+// web) orchestrate this script rather than editing applications.md directly.
+// The read and atomic replacement share the same cross-process lock
+// merge-tracker.mjs/set-status.mjs use (tracker-lock.mjs, via
+// openTrackerTransaction) — a batch merge and a row delete can no longer race
+// each other into a corrupted/half-written applications.md, and reading only
+// after the lock is held means a delete can never act on a stale pre-lock copy.
 async function deleteApp(args) {
   const num = flagValue(args, '--num');
   if (!num) {
@@ -503,50 +519,52 @@ async function deleteApp(args) {
     process.exit(1);
   }
   const dryRun = args.includes('--dry-run');
-  // Dry-runs write nothing, so they can safely overlap with a real merge/delete —
-  // only the actual write needs the exclusive lock.
-  let trackerLock;
-  if (!dryRun) {
-    const lockDir = lockDirFor(canonicalizeTrackerPath(MD_PATH), process.env.CAREER_OPS_TRACKER_LOCK);
-    try {
-      trackerLock = await acquireTrackerLock(lockDir, {
-        timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 10_000,
-        retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
-        staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
-        tracker: MD_PATH,
-      });
-      process.once('exit', () => trackerLock?.release());
-    } catch (err) {
-      console.error(`Error: ${err.message}`);
-      process.exit(1);
-    }
-  }
-  try {
-    const { removed, removedCount, report, newContent } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
+  if (dryRun) {
+    // Dry-runs write nothing, so they can safely overlap with a real
+    // merge/delete — only the actual write needs the exclusive lock.
+    const { removed, removedCount, report } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
     if (!removed) {
       console.error(`No application numbered ${num} in ${MD_PATH}.`);
       process.exit(1);
     }
-    if (dryRun) {
-      console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
-      if (report) console.error(`(report file would be orphaned: ${report})`);
+    console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
+    if (report) console.error(`(report file would be orphaned: ${report})`);
+    return;
+  }
+
+  let trackerTransaction;
+  try {
+    trackerTransaction = await openTrackerTransaction(MD_PATH);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+
+  let removal;
+  try {
+    removal = removeRowByNum(trackerTransaction.read(), num);
+    if (!removal.removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exitCode = 1;
       return;
     }
-    writeFileAtomic(MD_PATH, newContent);
-    // Rebuild the derived SQLite index from the now-updated markdown.
-    try {
-      const states = loadStates();
-      const DatabaseSync = await loadSqlite();
-      const db = openDb(DatabaseSync);
-      syncIndex(db, states);
-    } catch (e) {
-      console.error(`(row removed; index resync skipped: ${e.message})`);
-    }
-    console.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH} and reindexed.`);
-    if (report) console.error(`Note: report file may now be orphaned — ${report}`);
+    trackerTransaction.replace(removal.newContent);
   } finally {
-    trackerLock?.release();
+    trackerTransaction.close();
   }
+
+  const { removedCount, report } = removal;
+  // Rebuild the derived SQLite index from the now-updated markdown.
+  try {
+    const states = loadStates();
+    const DatabaseSync = await loadSqlite();
+    const db = openDb(DatabaseSync);
+    syncIndex(db, states);
+  } catch (e) {
+    console.error(`(row removed; index resync skipped: ${e.message})`);
+  }
+  console.error(`Removed application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH} and reindexed.`);
+  if (report) console.error(`Note: report file may now be orphaned — ${report}`);
 }
 
 const COMMANDS = { sync, query, history, export: exportMd, delete: deleteApp };

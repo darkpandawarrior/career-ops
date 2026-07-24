@@ -366,6 +366,8 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 
 **Report link normalization:** The TSV always carries a **root-relative** `[num](reports/...)` link. `merge-tracker.mjs` rewrites it so the link is relative to the tracker file's own directory before writing it into the tracker — `../reports/...` when the tracker is at `data/applications.md`, or `reports/...` at the root layout. This keeps links clickable from the tracker (markdown links resolve relative to the file that contains them). Normalization is idempotent. To fix links in an existing tracker, run `node merge-tracker.mjs --migrate` (see #760).
 
+**Req/posting ID in notes disambiguates same-title postings (#1524, #2009):** when a company posts two genuinely different requisitions whose titles fuzzy-match (e.g. a leveled variant and its bare title, or two sibling team roles), put the req/job/posting ID in the **notes** column on both rows. `merge-tracker.mjs` reads it (`REQ_NUMBER_RE`) and treats rows carrying *different* recognizable IDs as distinct openings, overriding fuzzy title matching. Recognized forms are a `job id` / `posting id` / `requisition` / `req` / `jr` / `job` / `posting` / `ref` / `r_` label followed by an alphanumeric ID containing at least one digit — e.g. `req JR-10423`, `job id 88214`, `ref R_2291`. Prefer this whenever the JD exposes an ID; it is the only signal that survives near-identical titles.
+
 ### Pipeline Integrity
 
 1. **NEVER edit applications.md to ADD new entries** -- Write TSV in `batch/tracker-additions/` and `merge-tracker.mjs` handles the merge.
