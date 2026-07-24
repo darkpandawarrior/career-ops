@@ -125,10 +125,78 @@ export function rejectPrivateOrInvalid(url) {
   return null;
 }
 
+// Static regex checks (rejectPrivateOrInvalid) only see the URL a caller
+// hands in — they can't catch a hostname that resolves to a private/internal
+// IP at request time. That's the redirect-SSRF gap: a page can pass the
+// initial static check, then 30x (or issue a subresource request) to a host
+// whose DNS answer is 127.0.0.1 / 169.254.169.254 / an internal range, and
+// Chromium happily follows it. resolveDnsCached + validateUrlSecurity below
+// close that gap by resolving and re-checking every request the page makes,
+// not just the one URL passed to checkUrlLiveness.
+const dnsCache = new Map();
+
+async function resolveDnsCached(hostname) {
+  if (dnsCache.has(hostname)) {
+    return dnsCache.get(hostname);
+  }
+  const dns = await import('dns/promises');
+  const addresses = await dns.resolve(hostname).catch(() => []);
+  const lookupRes = await dns.lookup(hostname).catch(() => null);
+  if (lookupRes) addresses.push(lookupRes.address);
+  dnsCache.set(hostname, addresses);
+  return addresses;
+}
+
+async function validateUrlSecurity(urlString) {
+  const url = new URL(urlString.endsWith('.') ? urlString.slice(0, -1) : urlString);
+  const hostname = url.hostname;
+  const host = normalizeHost(hostname);
+  const addresses = await resolveDnsCached(host);
+  for (const ip of addresses) {
+    const norm = normalizeHost(ip);
+    const mapped = extractMappedIPv4(norm);
+    const candidates = mapped ? [norm, mapped] : [norm];
+    for (const candidate of candidates) {
+      if (PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(candidate))) {
+        throw new Error(`Access denied: Egress guard blocked private target IP ${ip}`);
+      }
+    }
+  }
+}
+
 export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
   const guardError = rejectPrivateOrInvalid(url);
   if (guardError) {
     return { result: 'uncertain', code: guardError.code, reason: guardError.reason };
+  }
+  if (page) {
+    page._blockedByGuard = null;
+  }
+  // Registered once per page (checkUrlLivenessWithFallback reuses a page
+  // across the headless→headed retry): every request the page issues —
+  // redirects, XHR/fetch, images, iframes, not just the top-level navigation
+  // — is re-validated against both the static guard (fast path) and a live
+  // DNS lookup (catches a hostname that only resolves to a private IP at
+  // request time). Anything blocked is aborted before it reaches the network.
+  if (page && typeof page.route === 'function' && !page._routeInterceptorRegistered) {
+    page._routeInterceptorRegistered = true;
+    await page.route('**/*', async (route) => {
+      const requestUrl = route.request().url();
+      const errGuard = rejectPrivateOrInvalid(requestUrl);
+      if (errGuard) {
+        console.warn(`Blocked request to restricted destination: ${requestUrl}`);
+        page._blockedByGuard = errGuard;
+        return route.abort('blockedbyclient');
+      }
+      try {
+        await validateUrlSecurity(requestUrl);
+        return route.continue();
+      } catch (err) {
+        console.warn(`Blocked request to restricted destination (DNS): ${requestUrl} - ${err.message}`);
+        page._blockedByGuard = { code: 'blocked_host', reason: err.message };
+        return route.abort('blockedbyclient');
+      }
+    });
   }
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATE_TIMEOUT_MS });
@@ -175,6 +243,12 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0 } = {}) {
 
     return classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
   } catch (err) {
+    // A route.abort() on the top-level navigation surfaces here as a generic
+    // Playwright navigation error (net::ERR_BLOCKED_BY_CLIENT) — report the
+    // real SSRF-guard code/reason instead of the misleading navigation_error.
+    if (page && page._blockedByGuard) {
+      return { result: 'uncertain', code: page._blockedByGuard.code, reason: page._blockedByGuard.reason };
+    }
     // Transient failures (timeout, DNS, TLS, 5xx) shouldn't be treated as expired —
     // doing so would cause scan --verify to drop the URL and write it to scan-history,
     // permanently filtering it out on subsequent scans.
