@@ -773,6 +773,7 @@ try {
   const emptyKeywordPath = join(tmp, 'empty-keyword.yml');
   const duplicateCompanyPath = join(tmp, 'duplicate-company.yml');
   const badContentFilterPath = join(tmp, 'bad-content-filter.yml');
+  const badVisaFilterPath = join(tmp, 'bad-visa-filter.yml');
 
   writeFileSync(validPath, `
 title_filter:
@@ -822,6 +823,19 @@ tracked_companies:
     careers_url: "https://jobs.lever.co/acme"
 `, 'utf-8');
 
+  // visa_filter with an empty-string keyword or a non-boolean require_mention
+  // must be rejected (an empty keyword would match every description).
+  writeFileSync(badVisaFilterPath, `
+title_filter:
+  positive: ["AI"]
+visa_filter:
+  require_mention: "yes"
+  positive: ["h-1b", "   "]
+tracked_companies:
+  - name: "Acme"
+    careers_url: "https://jobs.lever.co/acme"
+`, 'utf-8');
+
   const validResult = run(NODE, ['validate-portals.mjs', '--file', validPath]);
   if (validResult !== null && validResult.includes('0 errors')) {
     pass('validate-portals accepts a minimal valid portals file');
@@ -862,6 +876,13 @@ tracked_companies:
     pass('validate-portals rejects empty content_filter keywords');
   } else {
     fail('validate-portals should reject empty content_filter keywords');
+  }
+
+  const badVisaFilterResult = run(NODE, ['validate-portals.mjs', '--file', badVisaFilterPath]);
+  if (badVisaFilterResult === null) {
+    pass('validate-portals rejects invalid visa_filter (empty keyword / non-boolean require_mention)');
+  } else {
+    fail('validate-portals should reject invalid visa_filter');
   }
 
   rmSync(tmp, { recursive: true, force: true });
@@ -1328,7 +1349,7 @@ try {
       timestamp: '2026-07-08T00:00:00.000Z', companies: 10, boards: 2, found: 50,
       filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredPostingAge: 7,
       filteredSalary: 0, filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29,
-      errors: 0, filteredBlacklist: 8,
+      errors: 0, filteredBlacklist: 8, filteredVisa: 2, filteredPostedDate: 1,
     }, runsFile);
     const content = readFileSync(runsFile, 'utf-8');
     const lines = content.trim().split('\n');
@@ -1338,7 +1359,10 @@ try {
       fail(`appendScanRunSummary header mismatch — got: ${lines[0]}`);
     }
     const cols = lines[1].split('\t');
-    if (cols.length === 16 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed' && cols[13] === '29' && cols[15] === '8') {
+    // filtered_blacklist/filtered_visa/filtered_posted_date land in the three
+    // trailing columns (16/17/18), per the header-name append-only contract.
+    if (cols.length === 18 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed'
+        && cols[13] === '29' && cols[15] === '8' && cols[16] === '2' && cols[17] === '1') {
       pass('appendScanRunSummary writes one tab-delimited row with the run counters');
     } else {
       fail(`appendScanRunSummary row shape wrong: ${JSON.stringify(cols)}`);
