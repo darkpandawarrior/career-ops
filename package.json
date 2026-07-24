@@ -1,6 +1,6 @@
 {
   "name": "hiresignal",
-  "version": "1.21.0",
+  "version": "1.22.0",
   "description": "HireSignal: a local-first AI career dashboard for resume onboarding, job discovery, and fit scoring",
   "private": true,
   "scripts": {
