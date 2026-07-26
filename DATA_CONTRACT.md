@@ -31,6 +31,10 @@ These files contain your personal data, customizations, and work product. Update
 | `data/apply-queue.md` | Your ranked apply queue (generated from your pipeline + profile) |
 | `data/salary-observations.tsv` | Your append-only compensation observation log (desired/advertised/actual pay per application; read by `salary-gap.mjs`) |
 | `data/blacklist.md` | Your do-not-apply list (companies to skip; read by `scan.mjs`, opt-in via `--include-blacklisted`) |
+| `data/hq/` | Your personal HQ page (`hq.html`, served at `/hq` by the dashboard) and its progress state (`state.json`, read/written by `/api/hq-state`) |
+| `profiles.json` | Root profile registry — candidate name / email / owner handle per profile. Same class as `profiles.yml` |
+| `profiles.yml.bak-*` | Timestamped backups written by `migrate-profile.mjs`; carry the same per-candidate private config as `profiles.yml` |
+| `index.db` | Root SQLite index used by the web dashboard. **Most sensitive file in this table** — alongside `applications` / `status_events` / `pipeline_inbox` / `scan_history` it holds `auth_users` and `auth_sessions` (dashboard credentials and live session tokens). Derived and regenerable; safe to delete. Never commit — this repo pushes PRs to a public upstream |
 | `writing-samples/*` | Your personal writing samples for style calibration (except `writing-samples/README.md`, which is system-owned documentation delivered by updates) |
 | `reports/*` | Your evaluation reports |
 | `output/*` | Your generated PDFs |
