@@ -16,6 +16,7 @@ data/parser-output/**/*.json
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
 data/cache/ats-companies/
+data/hq/
 reports/*.md
 !reports/.gitkeep
 output/*
@@ -67,7 +68,20 @@ modes/_custom.md
 /profiles/
 /sync/
 /profiles.yml
+# profiles.yml gets timestamped .bak copies by migrate-profile.mjs — those carry the same
+# per-candidate private config as the original, so ignore the whole family, not just the file.
+/profiles.yml.bak-*
+# Root profile registry: candidate name/email/owner handle per profile. Same class as
+# /profiles.yml — added 2026-07-26, it was untracked-but-committable until then.
+/profiles.json
 /automation/
+
+# Root SQLite index (web/dashboard). Same class as data/applications.db, and MORE sensitive:
+# alongside applications/status_events/pipeline_inbox/scan_history it holds `auth_users` and
+# `auth_sessions` — dashboard credentials and live session tokens. This repo pushes PRs to a
+# PUBLIC upstream, so committing it would leak both personal history and auth material.
+# Derived + regenerable; safe to delete. Added 2026-07-26.
+/index.db
 
 # Per-candidate web runtime + private/transient artifacts — never commit.
 /.career-ops-web/
