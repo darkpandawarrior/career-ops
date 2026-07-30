@@ -141,6 +141,11 @@ const scripts = [
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-latex.mjs --test', expectExit: 0 },
+  // career-ops v1.23.0 sync: new standalone tools with inline self-tests.
+  { name: 'discover-ats.mjs --self-test', expectExit: 0 },
+  { name: 'contacts.mjs --self-test', expectExit: 0 },
+  { name: 'company-history.mjs --self-test', expectExit: 0 },
+  { name: 'seed-fixture.mjs --self-test', expectExit: 0 },
   // Root-level standalone suites: they call process.exit / use node:test, so
   // they must run as subprocesses, not be imported by tests/ discovery.
   { name: 'invite-match.test.mjs', expectExit: 0 },
@@ -149,6 +154,10 @@ const scripts = [
   { name: 'reply-matcher.test.mjs', expectExit: 0 },
   { name: 'verify-application-match.test.mjs', expectExit: 0 },
   { name: 'cv-templates.test.mjs', expectExit: 0 },
+  { name: 'discover-ats.test.mjs', expectExit: 0 },
+  { name: 'contacts.test.mjs', expectExit: 0 },
+  { name: 'company-history.test.mjs', expectExit: 0 },
+  { name: 'lib/context-budget.test.mjs', expectExit: 0 },
   // tracker-columns coverage lives at tests/tracker-columns.test.mjs
   // (auto-discovered) since the header-aware parsing port.
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
