@@ -18,6 +18,7 @@ Interactive mode for when the candidate is filling out an application form in Ch
 4. LOAD        → Read full report + Section H / Application Answers (if they exist)
 5. PREFLIGHT   → Confirm posting liveness + company/role match before drafting
 5b. PRE-SCAN   → Scan page for knock-out questions (degree, experience, work authorization/visa, sponsorship, salary floors)
+5c. PROHIBITED → Warn if a form field asks for content the candidate's jurisdiction prohibits (warn-only; candidate decides)
 6. ANALYZE     → Identify ALL visible form questions
 7. GENERATE    → For each question, generate a personalized response
 8. PRESENT     → Show formatted responses for copy-paste
@@ -73,6 +74,24 @@ Read the entire page/form to scan for knock-out questions BEFORE generating full
 > "You've applied to {Company} {N} times before. Some ATS platforms (Workday in particular) retain and cross-reference a candidate's full application history. Before submitting, consider checking your candidate profile/application history in their portal for consistency with your current materials — especially if any earlier applications predate your current resume-generation workflow."
 
 This is a reminder, not a gate — surface it and continue drafting immediately; do not wait for the candidate to acknowledge it first. The candidate can review their ATS profile/application history manually before they submit. Never scrape or log into the employer's ATS portal on the candidate's behalf; this check only counts rows already in the candidate's own tracker.
+
+## Step 5c — Jurisdiction-prohibited content check (#2018)
+
+Application forms are where legally prohibited questions most often live — salary-history questions in particular appear in forms far more often than in JD text. While scanning the form (this can run in the same pass as Step 5b):
+
+1. Read `templates/jurisdiction-prohibited-content.yml` — a jurisdiction-keyed table of content employers are prohibited from asking for, each entry carrying a legal basis, effective date, and sources.
+2. Derive the candidate's jurisdiction key from `config/profile.yml` → `location` (e.g. Ontario, Canada → `CA-ON`; California, USA → `US-CA`). No entry for the candidate's jurisdiction → skip this step silently.
+3. For each form field, judge whether it asks for content matching an entry per that entry's `matching` guidance. Agent-judged, never naive keyword matching: a salary-*expectations* field (handled by Step 5b as a knock-out area) is not a salary-*history* field, and fraud-warning boilerplate ("we will never ask for...") must not fire.
+
+If a field matches, warn the candidate BEFORE generating or filling an answer for that field:
+
+⚠️ **Prohibited-content warning:** [Render in {language.output}: a factual statement that the form field "{field label}" asks for {the matched content}, which {jurisdiction_name}'s {legal_basis} has prohibited employers from seeking since {effective date} — cite the entry's `legal_basis` and `effective` fields verbatim as data tokens; note that the candidate is generally not obligated to answer, that exemptions exist which cannot be verified from the form, and that this is informational only and not legal advice. Ask the candidate how they want to handle the field.]
+
+**Hard rules for this step:**
+
+- **Warn-only.** Never auto-answer the field, never auto-skip it, never block or discourage the application because of it — the candidate decides how to handle the field, and their decision is final.
+- **Phrasing discipline:** describe the form field and what the jurisdiction's law prohibits — never assert that the employer is breaking the law or committing a violation; exemptions and scope are not verifiable from the form.
+- This step adds a warning before the answer is drafted; it changes nothing about the existing prepare-don't-submit flow, the Step 6 `needs_candidate_confirmation` contract, or the Step 5b knock-out handling.
 
 ## Step 1 — Detect the job
 
