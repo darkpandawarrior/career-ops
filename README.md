@@ -6,8 +6,8 @@
 
 ---
 
-![engine version](https://img.shields.io/badge/engine-career--ops_v1.22.0-6366f1?style=flat-square)
-![dashboard version](https://img.shields.io/badge/dashboard-web_v0.3.0-22d3ee?style=flat-square)
+![engine version](https://img.shields.io/badge/engine-career--ops_v1.23.0-6366f1?style=flat-square)
+![dashboard version](https://img.shields.io/badge/dashboard-web_v0.4.0-22d3ee?style=flat-square)
 ![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript_7-3178C6?style=flat-square&logo=typescript&logoColor=white)
@@ -506,7 +506,8 @@ kirklazar-android/hiresignal --state merged`.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **career-ops v1.22.0 · web v0.3.0** (current) | 2026-07-24 | 5 new job-board providers (Alibaba, Jobvite, Gem, Welcome to the Jungle, Agentic Engineering Jobs); token-usage tracking (`utils/token-tracker.mjs`); tracker writer-lock race-condition fix; CV/PDF page-overflow guard + shared `cv-sections-core.mjs` + Chinese-minimal CV template; SSRF hardening in Playwright liveness checks; in-process DNS cache for scan reliability; Block G location-tag-mismatch fraud signal |
+| **career-ops v1.23.0 + unreleased main · web v0.4.0** (current) | 2026-07-30 | role-matcher.mjs fixes (MTS-prefix stripping, accent-folding, exact-title short-circuit, `product`/CI/CD-acronym handling); new standalone tools — `discover-ats.mjs`, `skill-extract.mjs`, `contacts.mjs`, `company-history.mjs`, `batch-tailor.mjs`, `fix-slugs.mjs`, `check-table-freshness.mjs`; iCIMS provider; jurisdiction-prohibited-content table + `apply.md` Step 5c form warning; Hired canonical status wired into dashboard fallback + pipeline tabs; dependency refresh (Next.js 16.2.12, React 19.2.8, Playwright 1.62, `@testing-library/jest-dom` 7, `js-yaml` 5.2.2) |
+| career-ops v1.22.0 · web v0.3.0 | 2026-07-24 | 5 new job-board providers (Alibaba, Jobvite, Gem, Welcome to the Jungle, Agentic Engineering Jobs); token-usage tracking (`utils/token-tracker.mjs`); tracker writer-lock race-condition fix; CV/PDF page-overflow guard + shared `cv-sections-core.mjs` + Chinese-minimal CV template; SSRF hardening in Playwright liveness checks; in-process DNS cache for scan reliability; Block G location-tag-mismatch fraud signal |
 | career-ops v1.20.0 + v1.21.0 | 2026-07-18 | Oracle Recruiting Cloud provider; scan trust-signal persistence + portal-health tracking; Workday liveness rung; atomic report-number allocation; per-round salary comparison; oferta Risk Summary + benefits-mismatch signal |
 | career-ops v1.19.0 | 2026-07-11 | Config-selectable LaTeX CV templates; `upskill` + `latex-tex` modes; Traditional Chinese (zh-TW) modes; Serper/TheirStack provider plugins; do-not-apply blacklist (data-safety) |
 | career-ops v1.18.0 | 2026-07-08 → 07-10 | Via-channel (agency vs. direct) tracker column; pre-submit `verify-application-match.mjs` gate; TypeScript 7 + Electron 43 dependency/CVE hardening; desktop packaging fixes |
