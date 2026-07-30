@@ -24,6 +24,7 @@ const FALLBACK: CanonicalState[] = [
   { id: "responded", label: "Responded", aliases: ["respondido"], description: "Company has responded (not yet interview)", group: "responded" },
   { id: "interview", label: "Interview", aliases: ["entrevista"], description: "Active interview process", group: "interview" },
   { id: "offer", label: "Offer", aliases: ["oferta"], description: "Offer received", group: "offer" },
+  { id: "hired", label: "Hired", aliases: ["contratado", "contratada", "hired", "accepted", "accept"], description: "Offer accepted, job landed!", group: "hired" },
   { id: "rejected", label: "Rejected", aliases: ["rechazado", "rechazada"], description: "Rejected by company", group: "rejected" },
   { id: "discarded", label: "Discarded", aliases: ["descartado", "descartada", "cerrada", "cancelada"], description: "Discarded by candidate or offer closed", group: "discarded" },
   { id: "skip", label: "SKIP", aliases: ["no_aplicar", "no aplicar", "skip", "monitor"], description: "Doesn't fit, don't apply", group: "skip" },
