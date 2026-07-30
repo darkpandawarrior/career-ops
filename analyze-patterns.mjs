@@ -48,6 +48,9 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'via',
   'company_confidential',
   'risk_summary',
+  // Work-authorization / visa-sponsorship tier from Block A (report + Machine
+  // Summary only). Allowlisted so it round-trips; no consumer logic yet.
+  'work_auth',
 ]);
 
 // --- CLI args ---
@@ -115,6 +118,37 @@ const ADVANCED_STATUSES = new Set(['responded', 'interview', 'offer', 'hired']);
 // Print order for the CONVERSION FUNNEL summary. A status absent here is
 // silently omitted from the printed funnel, so this must track states.yml.
 const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
+
+// --- Tech-stack-gap extraction (shared by the analysis pass and the self-test) ---
+// Canonical display spelling keyed by lowercased alias, so "react native" /
+// "NODEJS" collapse into one bucket rather than one per case variant.
+const TECH_CANONICAL = new Map([
+  'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Java', 'Go', 'Rust',
+  'React Native', 'React', 'Angular', 'Django', 'Flask', 'Rails', 'PHP',
+  'Laravel', 'Symfony', 'Kotlin', 'Swift', 'C++', 'C#', '.NET', 'MongoDB',
+  'MySQL', 'PostgreSQL', 'Redis', 'GraphQL', 'REST', 'AWS', 'GCP', 'Azure',
+  'Docker', 'Kubernetes', 'Terraform', 'Supabase', 'Inngest',
+].map(t => [t.toLowerCase(), t]));
+TECH_CANONICAL.set('node.js', 'Node.js').set('nodejs', 'Node.js');
+TECH_CANONICAL.set('vue.js', 'Vue.js').set('vuejs', 'Vue.js');
+
+// (?<!\w) / (?!\w) lookarounds, NOT \b: a trailing \b never matches after a
+// symbol edge, so "C++", "C#" and ".NET" — three of the most common stacks —
+// were silently never extracted, vanishing from the tech-gap rollup and the
+// "filter out roles requiring X" recommendation. Ordered longest-first
+// (React Native before React) so the specific alternative wins at a position.
+const TECH_MENTION_RE = /(?<!\w)(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React Native|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest)(?!\w)/gi;
+
+/**
+ * Canonical tech names mentioned in a gap description.
+ * @param {string} description
+ * @returns {string[]} Canonical tech names, one entry per mention (may repeat).
+ */
+function extractTechMentions(description) {
+  const matches = String(description ?? '').match(TECH_MENTION_RE);
+  if (!matches) return [];
+  return matches.map(m => TECH_CANONICAL.get(m.toLowerCase()) || m);
+}
 
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
@@ -502,7 +536,11 @@ function classifyRemote(raw) {
   if (/\b(us[- ]?only|canada[- ]?only|residents only|usa only|us residents|canada residents)\b/.test(lower)) return 'geo-restricted';
   if (/\bargentina\s+remote\s+only\b/.test(lower)) return 'geo-restricted';
   if (/\b(hybrid|on-?site|office|columbus|cape town|relocat)\b/.test(lower)) return 'hybrid/onsite';
-  if (/\b(global|anywhere|worldwide|no restrict|70\+|work from anywhere)\b/.test(lower)) return 'global remote';
+  // (?<!\w)/(?!\w) not \b: the "70+" signal ends in "+", and a trailing \b
+  // never matches after a symbol edge, so "remote in 70+ countries" fell
+  // through to the weaker 'regional remote' bucket. Word alternatives behave
+  // identically under either boundary, so this only rescues the "70+" case.
+  if (/(?<!\w)(global|anywhere|worldwide|no restrict|70\+|work from anywhere)(?!\w)/.test(lower)) return 'global remote';
   if (/\b(remote|latam|americas|brazil|fully remote)\b/.test(lower)) return 'regional remote';
   return 'unknown';
 }
@@ -793,31 +831,13 @@ function analyze() {
   };
 
   // --- Tech stack gaps (from negative + self_filtered outcomes) ---
-  // Canonical spellings keyed by lowercased match — the /i regex below returns
-  // the source casing ("react native", "NODEJS"), and without this map each
-  // case variant of the same tech lands in its own techStackGaps bucket.
-  // Keys cover the optional-dot regex variants (node.js/nodejs, vue.js/vuejs).
-  const TECH_CANONICAL = new Map([
-    'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Java', 'Go', 'Rust',
-    'React Native', 'React', 'Angular', 'Django', 'Flask', 'Rails', 'PHP',
-    'Laravel', 'Symfony', 'Kotlin', 'Swift', 'C++', 'C#', '.NET', 'MongoDB',
-    'MySQL', 'PostgreSQL', 'Redis', 'GraphQL', 'REST', 'AWS', 'GCP', 'Azure',
-    'Docker', 'Kubernetes', 'Terraform', 'Supabase', 'Inngest',
-  ].map(t => [t.toLowerCase(), t]));
-  TECH_CANONICAL.set('node.js', 'Node.js').set('nodejs', 'Node.js');
-  TECH_CANONICAL.set('vue.js', 'Vue.js').set('vuejs', 'Vue.js');
   const stackGapCounts = new Map();
   for (const e of enriched) {
     if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
     if (!e.report?.gaps) continue;
     for (const gap of e.report.gaps) {
-      // Extract tech keywords from gap descriptions
-      const techs = gap.description.match(/\b(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React Native|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest)\b/gi);
-      if (techs) {
-        for (const tech of techs) {
-          const normalized = TECH_CANONICAL.get(tech.toLowerCase()) || tech;
-          stackGapCounts.set(normalized, (stackGapCounts.get(normalized) || 0) + 1);
-        }
+      for (const tech of extractTechMentions(gap.description)) {
+        stackGapCounts.set(tech, (stackGapCounts.get(tech) || 0) + 1);
       }
     }
   }

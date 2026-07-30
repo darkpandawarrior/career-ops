@@ -10,6 +10,9 @@ data/portal-health.tsv
 data/apply-queue.md
 data/follow-ups.md
 data/salary-observations.tsv
+# Status-transition ledger written by set-status.mjs's --on-aware append (synced from
+# upstream career-ops v1.23.0+); same personal-data class as applications.md.
+data/status-log.tsv
 data/blacklist.md
 data/pdf-index.tsv
 data/parser-output/**/*.json
