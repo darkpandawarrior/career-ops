@@ -146,6 +146,10 @@ const scripts = [
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-history.mjs --self-test', expectExit: 0 },
   { name: 'seed-fixture.mjs --self-test', expectExit: 0 },
+  // career-ops follow-up sync (2026-07-30): check-table-freshness.mjs ships
+  // its own fixture-driven --self-test (discovery shapes, expired/review-due
+  // semantics, date-math boundaries).
+  { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   // Root-level standalone suites: they call process.exit / use node:test, so
   // they must run as subprocesses, not be imported by tests/ discovery.
   { name: 'invite-match.test.mjs', expectExit: 0 },
@@ -164,6 +168,12 @@ const scripts = [
   // Bare run: no portals.yml in the repo, so it must exit 0 gracefully (and hit
   // no network). The probe logic itself is unit-tested below with a mock.
   { name: 'verify-portals.mjs', expectExit: 0 },
+  // fix-slugs.mjs has no --self-test flag (unlike its siblings above) — its
+  // own testable surface is verify-portals.mjs's probe/suggestion logic,
+  // which is network-dependent. Same graceful-on-no-portals.yml smoke check
+  // as the bare verify-portals.mjs run directly above: confirms the module
+  // loads and its default-path guard exits cleanly without touching network.
+  { name: 'fix-slugs.mjs', expectExit: 0 },
 ];
 
 for (const { name, allowFail, skipIfMissing } of scripts) {

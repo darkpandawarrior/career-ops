@@ -32,6 +32,7 @@
     "find": "node find.mjs",
     "patterns": "node analyze-patterns.mjs",
     "reposts": "node detect-reposts.mjs",
+    "freshness": "node check-table-freshness.mjs",
     "gemini:eval": "node gemini-eval.mjs",
     "ollama:eval": "node ollama-eval.mjs",
     "openai:eval": "node openai-eval.mjs",
