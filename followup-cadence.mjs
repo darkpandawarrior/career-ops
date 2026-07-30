@@ -152,9 +152,15 @@ function parseTracker() {
 }
 
 // --- Parse follow-ups.md ---
-function parseFollowups() {
-  if (!existsSync(FOLLOWUPS_FILE)) return [];
-  const content = readFileSync(FOLLOWUPS_FILE, 'utf-8');
+// Pure function of `content` (matching career-ops upstream's signature) so
+// callers like company-history.mjs can parse an already-read buffer; falls
+// back to reading FOLLOWUPS_FILE itself when no content is passed, preserving
+// this module's own zero-arg call site below.
+export function parseFollowups(content) {
+  if (content === undefined) {
+    if (!existsSync(FOLLOWUPS_FILE)) return [];
+    content = readFileSync(FOLLOWUPS_FILE, 'utf-8');
+  }
   const entries = [];
   for (const line of content.split('\n')) {
     if (!line.startsWith('|')) continue;

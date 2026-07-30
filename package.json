@@ -32,6 +32,7 @@
     "find": "node find.mjs",
     "patterns": "node analyze-patterns.mjs",
     "reposts": "node detect-reposts.mjs",
+    "freshness": "node check-table-freshness.mjs",
     "gemini:eval": "node gemini-eval.mjs",
     "ollama:eval": "node ollama-eval.mjs",
     "openai:eval": "node openai-eval.mjs",
@@ -50,9 +51,9 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
-    "js-yaml": "^5.1.0",
+    "js-yaml": "^5.2.2",
     "pdfjs-dist": "^6.0.227",
-    "playwright": "1.61.1"
+    "playwright": "1.62.0"
   }
 }
 
