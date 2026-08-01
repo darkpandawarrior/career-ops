@@ -12,6 +12,8 @@ When the user asks to prep for an interview at a specific company+role, or when 
 6. **Recruiter-side risk map** from the evaluation/PDF/application flow if present — use `modes/heuristics/recruiter-side.md` for the risk categories the interview process must resolve
 7. **Coffee chat notes** for this company, if the user has any (optional — see "Coffee Chat Cross-Reference" below)
 8. **Prior stated compensation** — if the tracker# is known, run `node salary-gap.mjs --stated-for <tracker#>` (zero tokens). Any prior `stated` observation is a number already committed to a specific interviewer in an earlier round — surface it in the Process Overview (Step 2) or Recruiter/HR pack (Step 4) as a "already discussed" reminder so the candidate stays consistent.
+9. **Company-specific DSA drill list** (optional) — for `peer-tech` rounds with a coding component, if `$CAREER_OPS_DSA_INDEX` is set and points at a local drill index, run `node "$CAREER_OPS_DSA_INDEX/query.mjs" company {company-slug} --top 25` (zero tokens) and fold the top-ranked problems into Step 4/Step 6. Skip this input silently when the variable is unset — it is a local convenience, not a requirement, and nothing downstream depends on it.
+10. **System design source material** (optional) — for `peer-tech` rounds with a system-design component, if `$CAREER_OPS_PREP_MATERIALS` is set, ground Step 4/Step 6 answers in `SYSTEM_DESIGN_MOBILE.md` (mobile/Android framework — prefer this one) and `SYSTEM_DESIGN_BACKEND.md` (distributed-systems vocabulary) under that directory, rather than inventing depth. Skip silently when unset.
 
 ## Coffee Chat Cross-Reference (optional, North America-specific)
 
