@@ -32,6 +32,20 @@ const { acquireTrackerLock, openTrackerTransaction } =
 const CONCURRENT_ROW = '| 99 | 2026-01-03 | ConcurrentCo | Keeper | 4.3/5 | Applied | ❌ | [99](reports/099-concurrent.md) | preserve me |';
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// How long the HARNESS waits for a spawned Node process to start, print, or
+// exit. This is not a value under test: it encodes only how fast the machine
+// is, and every other suite that spawns a child budgets 30s for the same work
+// (tests/helpers.mjs's run(), followup-seed). A CI runner under load routinely
+// needs more than the 2s this file used to allow, which made a correctness
+// test fail for want of a faster host.
+//
+// Every SEMANTIC timeout stays exactly as it was: the argument to
+// launchWriter() is the child's CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS, and
+// timeoutMs / staleMs / retryMs are the lock's own parameters. Those are what
+// the tests assert on, so widening them would change what is being tested.
+const HARNESS_WAIT_MS = 30_000;
+
+
 function trackerTable(rows) {
   return `# Applications Tracker
 
@@ -106,7 +120,7 @@ async function runWhileLocked({
   });
 
   const probe = launchWriter(200);
-  const probeResult = await waitForWriter(probe, 2_000);
+  const probeResult = await waitForWriter(probe, HARNESS_WAIT_MS);
   const probeOutput = probe.output();
   if (!probeResult.timedOut && probeResult.code !== 0
       && `${probeOutput.stdout}${probeOutput.stderr}`.includes('Timed out waiting for tracker')
@@ -120,7 +134,7 @@ async function runWhileLocked({
 
   try {
     if (beforeMutationOutput) {
-      const deadline = Date.now() + 2_000;
+      const deadline = Date.now() + HARNESS_WAIT_MS;
       while (!run.output().stdout.includes(beforeMutationOutput) && Date.now() < deadline) {
         await sleep(10);
       }
@@ -139,7 +153,7 @@ async function runWhileLocked({
     lock.release();
   }
 
-  const result = await waitForWriter(run, 5_000);
+  const result = await waitForWriter(run, HARNESS_WAIT_MS);
   const { stdout, stderr } = run.output();
   const after = existsSync(tracker) ? readFileSync(tracker, 'utf-8') : '';
   if (!result.timedOut && result.code === 0 && verify(after)
