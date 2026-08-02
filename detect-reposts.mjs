@@ -26,9 +26,13 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const SCAN_HISTORY_PATH = join(CAREER_OPS_DATA, 'data/scan-history.tsv');
 const DEFAULT_WINDOW_DAYS = 90;
 
 // --- CLI args ---

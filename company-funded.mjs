@@ -14,8 +14,12 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use ROOT_DATA, never ROOT.
+const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
 const DEFAULT_LIMIT = 20;
 const DEFAULT_MONTHS = 3;
 const DEFAULT_SORT = 'date';
@@ -859,8 +863,8 @@ export function renderReport(result) {
 }
 
 function writeArtifacts(result) {
-  const outDir = join(ROOT, 'output');
-  const reportDir = join(ROOT, 'reports');
+  const outDir = join(ROOT_DATA, 'output');
+  const reportDir = join(ROOT_DATA, 'reports');
   mkdirSync(outDir, { recursive: true });
   mkdirSync(reportDir, { recursive: true });
   const jsonPath = join(outDir, `funded-companies-${result.generated_at}.json`);

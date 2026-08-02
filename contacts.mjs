@@ -44,10 +44,14 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstat
 import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash } from 'crypto';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const CONTACTS_PATH = join(CAREER_OPS, 'data/contacts.tsv');
-const DEFAULT_VCF = join(CAREER_OPS, 'output/contacts.vcf');
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const CONTACTS_PATH = join(CAREER_OPS_DATA, 'data/contacts.tsv');
+const DEFAULT_VCF = join(CAREER_OPS_DATA, 'output/contacts.vcf');
 
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');

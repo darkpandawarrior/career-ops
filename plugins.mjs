@@ -29,10 +29,13 @@ import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor
 import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
 import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs';
 import { appendToPipeline } from './scan.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const APPLICATIONS_PATH = path.join(ROOT, 'data', 'applications.md');
-const PIPELINE_PATH = path.join(ROOT, 'data', 'pipeline.md');
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT). Data paths must use ROOT_DATA, never ROOT.
+const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
+const APPLICATIONS_PATH = path.join(ROOT_DATA, 'data', 'applications.md');
+const PIPELINE_PATH = path.join(ROOT_DATA, 'data', 'pipeline.md');
 
 // A misbehaving plugin's stray rejection should be attributed and not silently
 // crash the host (the engine's per-hook try/catch handles the common case; this
@@ -191,13 +194,13 @@ function findManifest(id) {
 // Write enabled:true/false into config/plugins.yml, merging (never clobbering
 // the user's other plugins or non-secret settings).
 function setEnabled(id, on, settings) {
-  const file = path.join(ROOT, 'config', 'plugins.yml');
+  const file = path.join(ROOT_DATA, 'config', 'plugins.yml');
   let cfg = {};
   if (existsSync(file)) { try { cfg = yaml.load(readFileSync(file, 'utf8')) || {}; } catch {} }
   if (!cfg.plugins || typeof cfg.plugins !== 'object') cfg.plugins = {};
   const prev = (cfg.plugins[id] && typeof cfg.plugins[id] === 'object') ? cfg.plugins[id] : {};
   cfg.plugins[id] = { ...prev, ...(settings || {}), enabled: on };
-  mkdirSync(path.join(ROOT, 'config'), { recursive: true });
+  mkdirSync(path.join(ROOT_DATA, 'config'), { recursive: true });
   writeFileSync(file, '# career-ops plugin activation — see config/plugins.example.yml\n' + yaml.dump(cfg), 'utf8');
 }
 

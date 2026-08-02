@@ -25,8 +25,12 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, rea
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeReportLink } from './tracker-links.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const DRY_RUN = process.argv.includes('--dry-run');
 
 if (process.argv.includes('-h') || process.argv.includes('--help')) {
@@ -48,7 +52,11 @@ function resolveInsideRepo(inputPath, fallbackPath, flag) {
   const abs = resolve(inputPath || fallbackPath);
   let repoReal, targetReal;
   try {
-    repoReal = realpathSync(CAREER_OPS);
+    // Anchored on the DATA root, not the engine checkout: under the
+    // multi-profile setup the pipeline/batch files legitimately live outside
+    // the engine directory, and anchoring on the engine would reject every
+    // real path while still allowing traversal within it.
+    repoReal = realpathSync(CAREER_OPS_DATA);
     // The target may not exist yet (e.g. a fresh --pipeline path); fall back to
     // its parent directory so the symlink-resolved boundary check still applies.
     targetReal = existsSync(abs) ? realpathSync(abs) : realpathSync(dirname(abs));
@@ -70,12 +78,12 @@ function resolveInsideRepo(inputPath, fallbackPath, flag) {
   return abs;
 }
 
-const defaultPipeline = existsSync(join(CAREER_OPS, 'data/pipeline.md'))
-  ? join(CAREER_OPS, 'data/pipeline.md')
+const defaultPipeline = existsSync(join(CAREER_OPS_DATA, 'data/pipeline.md'))
+  ? join(CAREER_OPS_DATA, 'data/pipeline.md')
   : join(CAREER_OPS, 'pipeline.md');
 const PIPELINE_FILE = resolveInsideRepo(argValue('--pipeline'), defaultPipeline, '--pipeline');
-const STATE_FILE = resolveInsideRepo(argValue('--state'), join(CAREER_OPS, 'batch/batch-state.tsv'), '--state');
-const REPORTS_DIR = join(CAREER_OPS, 'reports');
+const STATE_FILE = resolveInsideRepo(argValue('--state'), join(CAREER_OPS_DATA, 'batch/batch-state.tsv'), '--state');
+const REPORTS_DIR = join(CAREER_OPS_DATA, 'reports');
 
 // ---- guards ----
 if (!existsSync(STATE_FILE)) {

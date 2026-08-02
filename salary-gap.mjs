@@ -31,10 +31,14 @@ import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const OBS_PATH = join(CAREER_OPS, 'data/salary-observations.tsv');
-const REPORTS_DIR = join(CAREER_OPS, 'reports');
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const OBS_PATH = join(CAREER_OPS_DATA, 'data/salary-observations.tsv');
+const REPORTS_DIR = join(CAREER_OPS_DATA, 'reports');
 
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
@@ -570,7 +574,7 @@ function collectSources() {
 }
 
 function loadProfileDesired() {
-  const profilePath = join(CAREER_OPS, 'config/profile.yml');
+  const profilePath = join(CAREER_OPS_DATA, 'config/profile.yml');
   if (!existsSync(profilePath)) return null;
   try {
     const profile = yaml.load(readFileSync(profilePath, 'utf-8'));

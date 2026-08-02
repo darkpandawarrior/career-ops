@@ -28,13 +28,17 @@ import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { extractSkills } from './skill-extract.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
-const CV_FILE = join(CAREER_OPS, 'cv.md');
-const PROFILE_FILE = join(CAREER_OPS, 'config/profile.yml');
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+  ? join(CAREER_OPS_DATA, 'data/applications.md')
+  : join(CAREER_OPS_DATA, 'applications.md');
+const CV_FILE = join(CAREER_OPS_DATA, 'cv.md');
+const PROFILE_FILE = join(CAREER_OPS_DATA, 'config/profile.yml');
 
 // Bump when extraction rules change in a way that would make gap lists from
 // older runs non-comparable. The upskill mode's diff-vs-previous section only
