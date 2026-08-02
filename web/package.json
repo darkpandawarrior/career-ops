@@ -14,7 +14,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:engine": "node --test src/lib/onboarding/*.test.mjs src/lib/search/*.test.mjs src/lib/scoring/*.test.mjs"
+    "test:engine": "node --test src/lib/*.test.mjs src/lib/onboarding/*.test.mjs src/lib/search/*.test.mjs src/lib/scoring/*.test.mjs"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.77",

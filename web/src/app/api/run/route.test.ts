@@ -201,7 +201,7 @@ describe("POST /api/run — checkout / prerequisite gates", () => {
     fs.mkdirSync(ROOT, { recursive: true });
     const { res, events } = await run({ kind: "research", input: "my portfolio", cliId: "claude" }, (child) => {
       child.stdout.emit("data", Buffer.from(delta("looks strong")));
-      child.emit("close");
+      child.emit("close", 0);
     });
     expect(res.status).toBe(200);
     expect(events).toContainEqual({ type: "text", text: "looks strong" });
@@ -212,7 +212,7 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
   it("maps content_block_delta text into {type:'text'} events", async () => {
     const { res, events } = await run({ kind: "research", input: "https://x.test/job", cliId: "claude" }, (child) => {
       child.stdout.emit("data", Buffer.from(delta("Hello") + delta(" world")));
-      child.emit("close");
+      child.emit("close", 0);
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
@@ -225,7 +225,7 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
       JSON.stringify({ type: "stream_event", event: { type: "content_block_start", content_block: { type: "tool_use", name: "WebFetch" } } }) + "\n";
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
       child.stdout.emit("data", Buffer.from(toolStart + delta("done")));
-      child.emit("close");
+      child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "tool", name: "WebFetch" });
   });
@@ -235,7 +235,7 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
     const resultLine = JSON.stringify({ type: "result" }) + "\n";
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
       child.stdout.emit("data", Buffer.from(initLine + delta("hi") + resultLine));
-      child.emit("close");
+      child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "status", label: "Agent ready" });
     expect(events).toContainEqual({ type: "done", tokens: 0, costUsd: null });
@@ -250,7 +250,7 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
       }) + "\n";
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
       child.stdout.emit("data", Buffer.from(delta("hi") + resultLine));
-      child.emit("close");
+      child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "done", tokens: 160, costUsd: 0.0042 });
   });
@@ -261,7 +261,7 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
       child.stdout.emit("data", Buffer.from(line.slice(0, cut)));
       child.stdout.emit("data", Buffer.from(line.slice(cut)));
-      child.emit("close");
+      child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "text", text: "buffered text" });
   });
