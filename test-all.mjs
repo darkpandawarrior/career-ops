@@ -1187,6 +1187,8 @@ console.log('\n15. Location filter — always_allow tier');
 try {
   const {
     buildLocationFilter,
+    titleSignalsRemote,
+    locationHintFromUrl,
     buildContentFilter,
     shouldDedupScanHistoryRow,
     formatPipelineOffer,
@@ -1312,6 +1314,202 @@ try {
   // step rather than being silently dropped here.
   if (filter(42) === true) pass('non-string locations are passed through to downstream evaluation, not silently dropped');
   else fail('non-string locations should pass through');
+
+
+  // Case 16: URL location hint — rolled-up display strings ("5 Locations") hide the
+  // real location, which the Workday URL still names. Motivating real case: Kyndryl
+  // postings that render as "5 Locations" with a .../job/Hyderabad-Telangana-India/... URL.
+  const urlFilter = buildLocationFilter({
+    always_allow: ['united states'],
+    block: ['india', 'hyderabad', 'germany'],
+  });
+  if (urlFilter('5 Locations', 'https://kyndryl.wd5.myworkdayjobs.com/careers/job/Hyderabad-Telangana-India/Network-Engineer_R-65193-1') === false) {
+    pass('URL hint rejects a rolled-up "5 Locations" row whose canonical URL is India');
+  } else {
+    fail('"5 Locations" + Hyderabad URL should be rejected via the URL location hint');
+  }
+
+  // Case 17: always_allow still wins over a blocked URL hint — a genuinely US role is
+  // never dropped because of what its URL happens to contain.
+  if (urlFilter('New York, United States', 'https://x.wd5.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/Eng_R1') === true) {
+    pass('always_allow on the display string beats a blocked URL hint');
+  } else {
+    fail('an explicit "United States" location must survive a blocked URL hint');
+  }
+
+  // Case 18: providers without the /job/{location}/ convention are unaffected
+  if (
+    locationHintFromUrl('https://jobs.ashbyhq.com/snowflake/4fe8d816') === '' &&
+    locationHintFromUrl('https://boards.greenhouse.io/acme/jobs/12345') === '' &&
+    locationHintFromUrl('not a url') === '' &&
+    locationHintFromUrl('') === '' &&
+    locationHintFromUrl(null) === ''
+  ) {
+    pass('locationHintFromUrl yields no hint for non-Workday, malformed, and empty URLs');
+  } else {
+    fail('locationHintFromUrl should return "" for URLs without a /job/{location}/ segment');
+  }
+
+  // Case 19: hint normalization — separators become spaces so multi-word keywords match
+  if (
+    locationHintFromUrl('https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/Eng_R1') === 'hyderabad telangana india' &&
+    locationHintFromUrl('https://x.wd1.myworkdayjobs.com/c/job/USA---El-Segundo-CA/Eng_R1') === 'usa el segundo ca'
+  ) {
+    pass('URL hint normalizes separators to spaces and lowercases');
+  } else {
+    fail(`URL hint normalization wrong: got "${locationHintFromUrl('https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/Eng_R1')}"`);
+  }
+
+  // Case 20: omitting the url argument preserves the original location-only behaviour
+  if (urlFilter('Bengaluru, India') === false && urlFilter('Austin, TX') === true) {
+    pass('calling the filter without a url keeps original location-only semantics');
+  } else {
+    fail('single-argument calls must behave exactly as before the url-hint change');
+  }
+
+  // Case 21: keywords match on word boundaries, not raw substrings. Blocking "india"
+  // must NOT reject the US locations Indian Head MD, Indiana, or Indianapolis — the
+  // substring bug that silently dropped real US roles from every scan.
+  const boundaryFilter = buildLocationFilter({ block: ['india', 'china', 'uk -'] });
+  if (
+    boundaryFilter('Indian Head, MD') === true &&
+    boundaryFilter('Indianapolis, IN') === true &&
+    boundaryFilter('West Lafayette, Indiana') === true &&
+    boundaryFilter('Chinatown, San Francisco') === true &&
+    boundaryFilter('Truck - Depot') === true
+  ) {
+    pass('block keywords honour word boundaries (Indiana/Indian Head/Indianapolis/Chinatown not rejected)');
+  } else {
+    fail('word-boundary matching failed — a substring match is silently dropping US locations');
+  }
+
+  // Case 22: ...while the genuine country matches still get blocked
+  if (
+    boundaryFilter('Hyderabad, India') === false &&
+    boundaryFilter('India') === false &&
+    boundaryFilter('Beijing, China') === false &&
+    boundaryFilter('UK - London') === false
+  ) {
+    pass('word-boundary matching still blocks the real country/region hits');
+  } else {
+    fail('word-boundary matching must not weaken genuine block hits');
+  }
+
+  // Case 23: boundary matching applies to the URL hint too
+  if (
+    boundaryFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/Eng_R1') === false &&
+    boundaryFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Indianapolis-Indiana/Eng_R1') === true
+  ) {
+    pass('URL hint is boundary-matched as well (Indianapolis URL survives, India URL does not)');
+  } else {
+    fail('URL hint must use the same word-boundary matching as the location string');
+  }
+
+  // Case 24: a remote marker in the TITLE satisfies `allow` when the location
+  // names only a city/state. Radancy/TalentBrew tenants (Optum, Kaiser) report
+  // the hiring office as the location and state remoteness in the title, so a
+  // country/region `allow` list rejected genuinely remote US roles. Measured
+  // live on careers.unitedhealthgroup.com: 14 PM-family postings, 0 passed.
+  const remoteTitleFilter = buildLocationFilter({
+    allow: ['remote', 'united states', 'usa', 'us', 'new york'],
+    block: ['india', 'united kingdom', 'london'],
+  });
+  if (
+    remoteTitleFilter('Costa Mesa, California', undefined, 'Sr. PBM Client Implementation Project Manager - Remote') === true &&
+    remoteTitleFilter('Las Vegas, Nevada', undefined, 'Program Manager - Remote') === true &&
+    remoteTitleFilter('St Louis, Missouri', undefined, 'Clinical Program Manager (Case Management) - Remote in MO') === true &&
+    remoteTitleFilter('Phoenix, Arizona', undefined, 'Project Manager (Remote)') === true &&
+    remoteTitleFilter('Dallas, Texas', undefined, 'IT Program Manager, Remote - US') === true
+  ) {
+    pass('a remote marker in the title satisfies allow when the location is city-only');
+  } else {
+    fail('title-stated remote roles are still being rejected for a city-only location');
+  }
+
+  // Case 25: the rescue must NOT widen `block`. It runs after the block tier, so
+  // a remote title can never pull in an excluded country.
+  if (
+    remoteTitleFilter('Bengaluru, Karnataka, India', undefined, 'Program Manager - Remote') === false &&
+    remoteTitleFilter('London, United Kingdom', undefined, 'Project Manager - Remote') === false &&
+    remoteTitleFilter('5 Locations', 'https://x.wd1.myworkdayjobs.com/c/job/Hyderabad-Telangana-India/PM_R1', 'Program Manager - Remote') === false
+  ) {
+    pass('a remote title never rescues a blocked location (block still wins, URL hint included)');
+  } else {
+    fail('remote-title rescue must not override the block tier');
+  }
+
+  // Case 26: only a work-arrangement marker counts. "Remote Sensing" is a GIS
+  // domain compound — Esri, a tracked company, posts on-site roles with exactly
+  // that phrase, so a bare /remote/ test would silently admit them.
+  if (
+    remoteTitleFilter('Redlands, California', undefined, 'Remote Sensing Program Manager') === false &&
+    remoteTitleFilter('Austin, Texas', undefined, 'Remote Monitoring Project Manager') === false &&
+    titleSignalsRemote('Remote Sensing Analyst') === false &&
+    titleSignalsRemote('Program Manager - Remote') === true &&
+    titleSignalsRemote('Telremote Engineer') === false
+  ) {
+    pass('remote-title detection ignores domain compounds (Remote Sensing/Monitoring) and mid-word hits');
+  } else {
+    fail('remote-title detection must not fire on "Remote Sensing"-style compounds');
+  }
+
+  // Case 27a: an explicit negation must lose. "Non-Remote"/"Not Remote" satisfy
+  // REMOTE_TITLE_RE on their own — the delimiter clears the lookbehind and the
+  // trailing position clears the lookahead — so without a negation guard an
+  // explicitly on-site role would bypass a non-empty `allow` list.
+  if (
+    titleSignalsRemote('Project Manager - Non-Remote') === false &&
+    titleSignalsRemote('Project Manager - Not Remote') === false &&
+    titleSignalsRemote('Office Manager (Non-Remote)') === false &&
+    titleSignalsRemote('Program Manager - NonRemote') === false &&
+    titleSignalsRemote('Program Manager - No Remote') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Project Manager - Non-Remote') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Project Manager - Not Remote') === false
+  ) {
+    pass('an explicit negation ("Non-Remote"/"Not Remote") never counts as a remote marker');
+  } else {
+    fail('negated remote titles are being admitted — an on-site role can bypass allow');
+  }
+
+  // Case 27b: the negation guard must not over-reach. `[\s-]*` spans only spaces
+  // and hyphens, so a word-initial "non"/"not" in an unrelated token cannot
+  // reach across to "remote".
+  if (
+    titleSignalsRemote('Nonprofit Program Manager - Remote') === true &&
+    titleSignalsRemote('Not-for-Profit Program Manager - Remote') === true &&
+    titleSignalsRemote('Nordic Program Manager - Remote') === true &&
+    titleSignalsRemote('Notary Operations Manager - Remote') === true
+  ) {
+    pass('the negation guard does not misfire on Nonprofit/Not-for-Profit/Nordic/Notary titles');
+  } else {
+    fail('negation guard is over-rejecting legitimate remote titles');
+  }
+
+  // Case 27c: the negation separator must be at least as broad as the marker's
+  // own delimiter lookahead. An ASCII-only [\s-] let every non-ASCII dash through
+  // — en dash, em dash, non-breaking hyphen, figure dash and minus all still read
+  // as remote, trivially sidestepping the guard.
+  const negatedDashes = ['-', '–', '—', '‑', '‒', '−', '', ' ', '/'];
+  if (negatedDashes.every((d) => titleSignalsRemote(`Project Manager - Non${d}Remote`) === false)) {
+    pass('the negation guard survives Unicode dash variants (en/em/non-breaking/figure/minus)');
+  } else {
+    const leak = negatedDashes.filter((d) => titleSignalsRemote(`Project Manager - Non${d}Remote`) !== false);
+    fail(`negated titles leak through with separator(s): ${JSON.stringify(leak)}`);
+  }
+
+  // Case 27: unchanged behavior — on-site city-only roles with no remote marker
+  // stay rejected, and malformed/absent titles are inert.
+  if (
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 'Senior Project Manager I') === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, undefined) === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, 42) === false &&
+    remoteTitleFilter('Eden Prairie, Minnesota', undefined, '   ') === false &&
+    remoteTitleFilter('United States', undefined, 'Program Manager') === true
+  ) {
+    pass('on-site city-only roles stay rejected; non-string/blank titles are inert');
+  } else {
+    fail('remote-title rescue changed behavior for non-remote or malformed titles');
+  }
 
   if (
     shouldDedupScanHistoryRow({ firstSeen: '2026-06-01', status: 'added' }, { recheckAfterDays: 30, today: '2026-06-10' }) === true &&
