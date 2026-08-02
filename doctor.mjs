@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
+import dotenv from 'dotenv';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -24,6 +25,13 @@ const projectRoot =
     ? argv[targetIdx + 1]
     : process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : __dirname;
 const JSON_OUT = argv.includes('--json');
+// CLI resolution inputs. This fork ships config dirs for more CLIs than
+// upstream (.agents, .antigravitycli, .cursor, .opencode), so knowing WHICH
+// one is active is what makes the MCP check meaningful rather than
+// Claude-only.
+const VALID_CLIS = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini'];
+const cliIdx = argv.indexOf('--cli');
+const cliFlag = cliIdx !== -1 ? argv[cliIdx + 1] : null;
 // --strict adds a live ATS-slug probe of portals.yml (network). Opt-in so the
 // default `npm run doctor` stays fast and fully offline.
 const STRICT = argv.includes('--strict');
@@ -154,23 +162,64 @@ async function checkPlaywright() {
 // instead of letting it fail invisibly.
 const PLAYWRIGHT_MCP_WARNING = 'Playwright MCP tools not detected';
 
-function playwrightMcpConfigured(root) {
-  const configFiles = ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'];
-  for (const rel of configFiles) {
+// Per-CLI MCP config registry. The old detector hardcoded Claude's files, so on
+// any other CLI it reported "not detected" no matter how the MCP was set up.
+const MCP_CONFIGS = [
+  { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'] },
+  { cli: 'opencode', files: ['opencode.json'] },
+];
+
+// Server qualifies if its definition references the @playwright/mcp package.
+// Matching the package rather than the bare word "playwright" stops an
+// unrelated server whose name merely contains it from counting.
+function isPlaywrightServer(server) {
+  if (!server || typeof server !== 'object') return false;
+  const blob = JSON.stringify(server).toLowerCase();
+  return blob.includes('@playwright/mcp');
+}
+
+function isPlaywrightMcpConfigured(root, activeCli) {
+  const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
+  if (!entry) return false; // known CLI but no MCP file mapping; caller warns
+  return entry.files.some((rel) => {
     const file = join(root, ...rel.split('/'));
-    if (!existsSync(file)) continue;
+    if (!existsSync(file)) return false;
     try {
-      const servers = JSON.parse(readFileSync(file, 'utf8'))?.mcpServers;
-      if (servers && typeof servers === 'object') {
-        for (const server of Object.values(servers)) {
-          if (JSON.stringify(server ?? '').toLowerCase().includes('playwright')) return true;
-        }
-      }
+      const cfg = JSON.parse(readFileSync(file, 'utf8')) ?? {};
+      const buckets = [cfg.mcpServers, cfg.mcp].filter((b) => b && typeof b === 'object');
+      return buckets.some((servers) => Object.values(servers).some(isPlaywrightServer));
     } catch {
-      // Malformed config — keep scanning the other locations; never crash doctor on it.
+      // Malformed config — treat as unconfigured, keep silent.
     }
+    return false;
+  });
+}
+
+// CLI resolution: --cli flag > $CAREER_OPS_CLI > .env (CAREER_OPS_CLI=...) >
+// default ('claude'). An unknown value at ANY level returns the sentinel
+// 'unknown' and produces no output — CLI-dependent checks are silently skipped.
+function resolveActiveCli() {
+  if (cliFlag !== undefined && cliFlag !== null) {
+    if (!VALID_CLIS.includes(cliFlag)) {
+      return { cli: 'unknown', source: 'flag', warning: `Unknown --cli "${cliFlag}". Valid: ${VALID_CLIS.join(', ')}.` };
+    }
+    return { cli: cliFlag, source: 'flag' };
   }
-  return false;
+  if (process.env.CAREER_OPS_CLI) {
+    if (!VALID_CLIS.includes(process.env.CAREER_OPS_CLI)) {
+      return { cli: 'unknown', source: 'env', warning: `CAREER_OPS_CLI="${process.env.CAREER_OPS_CLI}" is not a recognized CLI. Valid: ${VALID_CLIS.join(', ')}.` };
+    }
+    return { cli: process.env.CAREER_OPS_CLI, source: 'env' };
+  }
+  // .env is best-effort: missing file → fall through to default.
+  dotenv.config({ path: join(projectRoot, '.env'), quiet: true });
+  if (process.env.CAREER_OPS_CLI) {
+    if (!VALID_CLIS.includes(process.env.CAREER_OPS_CLI)) {
+      return { cli: 'unknown', source: '.env', warning: `CAREER_OPS_CLI in .env is not a recognized CLI. Valid: ${VALID_CLIS.join(', ')}.` };
+    }
+    return { cli: process.env.CAREER_OPS_CLI, source: '.env' };
+  }
+  return { cli: 'claude', source: 'default' };
 }
 
 // Report which scan/JD extractor is active (config/profile.yml → scan.extractor).
@@ -192,17 +241,35 @@ function checkScanExtractor(root) {
   return { pass: true, label: 'Scan extractor: mcp (default)' };
 }
 
-function checkPlaywrightMcp(root) {
-  if (playwrightMcpConfigured(root)) {
-    return { pass: true, label: 'Playwright MCP server configured' };
+function checkPlaywrightMcp(root, activeCli) {
+  // Unknown CLI (typo / not in VALID_CLIS): stay silent rather than warn about
+  // a config we have no basis to look for.
+  if (activeCli === 'unknown') return null;
+
+  const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
+  if (!entry) {
+    return {
+      warn: true,
+      label: `Playwright MCP check skipped for CLI: ${activeCli}`,
+      fix: [
+        `doctor doesn't scan MCP configs for "${activeCli}". Verify your Playwright MCP setup manually for that CLI.`,
+        `CLIs with scanning today: ${MCP_CONFIGS.map((c) => c.cli).join(', ')}.`,
+      ],
+    };
+  }
+  if (isPlaywrightMcpConfigured(root, activeCli)) {
+    return { pass: true, label: `Playwright MCP server configured (${activeCli})` };
   }
   return {
     warn: true,
-    label: PLAYWRIGHT_MCP_WARNING,
+    label: `${PLAYWRIGHT_MCP_WARNING} (active CLI: ${activeCli})`,
     fix: [
       'Browser-driven JD fetching and liveness checks (scan / pipeline / apply) need the',
-      'Playwright MCP server. No project-level MCP config was detected in `.mcp.json`',
-      'or `.claude/settings*.json`, so SPA job boards may return empty or stale content.',
+      `Playwright MCP server. No project-level MCP config was detected for ${activeCli},`,
+      'so SPA job boards may return empty or stale content.',
+      activeCli === 'opencode'
+        ? 'Add the Playwright MCP server to opencode.json, or pass --cli <name> if you actually run a different CLI.'
+        : `Add the Playwright MCP server to your ${activeCli} config.`,
       'Tracking: https://github.com/kirklazar-android/hiresignal/issues',
     ],
   };
@@ -399,7 +466,7 @@ async function main() {
     checkDependencies(),
     checkWebDependencies(),
     await checkPlaywright(),
-    checkPlaywrightMcp(projectRoot),
+    checkPlaywrightMcp(projectRoot, resolveActiveCli().cli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
@@ -476,7 +543,23 @@ function onboardingState(root) {
   const missing = USER_LAYER_PREREQS
     .filter(({ path }) => !prereqPresent(root, path))
     .map(({ path }) => path);
-  const warnings = playwrightMcpConfigured(root) ? [] : [PLAYWRIGHT_MCP_WARNING];
+  const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
+
+  // The machine-readable state derives from the SAME checkPlaywrightMcp() the
+  // human checklist renders, so the two can't disagree about whether the MCP is
+  // configured. The warning carries the check's own fix text, which is what
+  // makes it actionable in /api/doctor rather than a bare label.
+  const mcpCheck = checkPlaywrightMcp(root, activeCli);
+  const warnings = [
+    ...(cliWarning ? [cliWarning] : []),
+    ...(mcpCheck?.warn ? [`${mcpCheck.label}\n→ ${[].concat(mcpCheck.fix || []).join('\n  ')}`] : []),
+  ];
+
+  // Keyed by CLI, not a bare boolean: a consumer has to know WHICH CLI the
+  // verdict is about, and `{}` says "no verdict" without lying either way.
+  const playwrightMcp = activeCli !== 'unknown' && MCP_CONFIGS.find((c) => c.cli === activeCli)
+    ? { [activeCli]: mcpCheck?.pass === true }
+    : {};
   let plugins = [];
   try {
     const cfg = readPluginConfigSync(root);
@@ -485,7 +568,12 @@ function onboardingState(root) {
       return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };
     });
   } catch { plugins = []; }
-  return { onboardingNeeded: missing.length > 0, missing, warnings, autoCopied, plugins };
+  return {
+    onboardingNeeded: missing.length > 0, missing, warnings, autoCopied, plugins,
+    playwright_mcp: playwrightMcp,
+    active_cli: activeCli,
+    cli_source: cliSource,
+  };
 }
 
 if (JSON_OUT) {

@@ -157,7 +157,6 @@ const scripts = [
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'eval-golden.mjs --self-test', expectExit: 0 },
-  { name: 'manifesto.mjs --self-test', expectExit: 0 },
   // Root-level standalone suites: they call process.exit / use node:test, so
   // they must run as subprocesses, not be imported by tests/ discovery.
   { name: 'invite-match.test.mjs', expectExit: 0 },

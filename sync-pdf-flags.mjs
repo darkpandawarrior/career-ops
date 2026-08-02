@@ -17,7 +17,10 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow, resolveTrackerPath, openTrackerTransaction } from './tracker-utils.mjs';
+import { rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
+// Upstream keeps openTrackerTransaction in tracker-utils.mjs; this fork's lock
+// primitives live in tracker-lock.mjs (same split as acquireTrackerLock).
+import { openTrackerTransaction } from './tracker-lock.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
