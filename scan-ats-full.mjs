@@ -36,7 +36,7 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
-import { dnsPacingStats } from './providers/_dns-cache.mjs';
+import { dnsPacingStats, isResolverFailure } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
@@ -430,6 +430,12 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls) {
 // one company, not freeze a worker slot for the rest of a 12k-company sweep.
 const COMPANY_TIMEOUT_MS = 5 * 60_000;
 
+// A dead board and a dead resolver look identical one at a time; only a long
+// CONSECUTIVE run of resolver-level failures tells them apart. At that point
+// every further request is just more of the traffic that is being refused, so
+// the sweep stops rather than hammering a rate-limited resolver (#2229).
+const RESOLVER_FAILURE_LIMIT = 50;
+
 export function withTimeout(promise, ms, label) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -438,12 +444,15 @@ export function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-export async function parallelEach(items, limit, fn, onItemDone = null) {
+export async function parallelEach(items, limit, fn, onItemDone = null, shouldStop = null) {
   let next = 0;
   let done = 0;
   const inFlight = new Set();
   async function worker() {
     while (next < items.length) {
+      // Checked before claiming an index, so a stopped run leaves `next` where
+      // the unclaimed work starts and onItemDone's resumeAt stays truthful.
+      if (shouldStop && shouldStop()) return;
       const idx = next++;
       inFlight.add(idx);
       try {
@@ -652,12 +661,15 @@ async function main() {
 
     let errors = 0;
     const truncated = [];
+    let consecutiveResolverFailures = 0;
+    let resolverOutage = false;
     await parallelEach(entries, CONCURRENCY, async (entry) => {
       try {
         // The whole per-company unit — fetch AND processJobs — runs inside one
         // watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
         await withTimeout((async () => {
           const jobs = await source.provider.fetch(entry, ctx);
+          consecutiveResolverFailures = 0;
           if (jobs.workdayTruncated) truncated.push(entry);
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
           await processJobs(jobs, name);
@@ -666,6 +678,13 @@ async function main() {
         // Mostly defunct boards in the public dataset — expected noise, so the
         // default stays quiet; --verbose surfaces per-board failures.
         errors++;
+        // Any NON-resolver outcome resets the run: the breaker fires only on an
+        // uninterrupted streak, so a scattering of dead boards can never trip it.
+        if (isResolverFailure(err)) {
+          if (++consecutiveResolverFailures >= RESOLVER_FAILURE_LIMIT) resolverOutage = true;
+        } else {
+          consecutiveResolverFailures = 0;
+        }
         if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: ${err.message}`);
       }
     }, ({ done, resumeAt }) => {
@@ -687,11 +706,13 @@ async function main() {
           },
         });
       }
-    });
+    }, () => resolverOutage);
     // Second chance for boards the parallel sweep truncated: retry alone on a
     // quiet line. Re-processing the full board is safe — seenUrls already
     // holds every match from the partial first pass.
-    if (truncated.length) {
+    // Skipped entirely under a resolver outage: retrying boards one by one is
+    // more of exactly the traffic the breaker just stopped.
+    if (truncated.length && !resolverOutage) {
       log(`\n  ↻ retrying ${truncated.length} truncated board(s) sequentially...`);
       for (const entry of truncated) {
         try {
@@ -783,7 +804,7 @@ async function main() {
       mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
       writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
     }
-    appendToPipeline(offers);
+    await appendToPipeline(offers);
     appendToScanHistory(offers, date);
     saved = true;
     log(`\nResults saved to ${PIPELINE_PATH} and data/scan-history.tsv`);

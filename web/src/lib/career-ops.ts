@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseReport } from "@/lib/format";
+import { loadHeaderAliases } from "@/lib/tracker-table.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling
@@ -118,12 +119,19 @@ export type Application = {
   via?: string;
 };
 
-/** Header text (lowercased) → canonical field name. Mirrors tracker-parse.mjs's HEADER_ALIASES. */
-const HEADER_ALIASES: Record<string, string> = {
-  "#": "n", num: "n", date: "date", company: "company", empresa: "company",
-  via: "via", role: "role", puesto: "role", score: "score", status: "status",
-  pdf: "pdf", report: "report", notes: "notes",
-};
+/**
+ * Header text (lowercased) → canonical field name, loaded at RUNTIME from
+ * tracker-aliases.json — the same single source tracker-parse.mjs reads.
+ *
+ * This used to be a hardcoded copy "mirroring" tracker-parse.mjs, and it had
+ * already drifted: the shared file lists `location`, the copy didn't, so the
+ * Location column this function's own docblock promises to detect was invisible
+ * to the dashboard while the CLI handled it fine. A mirror that has to be
+ * hand-synced is a mirror that eventually isn't one.
+ */
+function headerAliases(root: string): Record<string, string> {
+  return loadHeaderAliases(root);
+}
 
 /**
  * Scan the table for a header row and build a field-name → cell-index map,
@@ -132,13 +140,14 @@ const HEADER_ALIASES: Record<string, string> = {
  * a fixed position. Returns null when no header with the essential columns
  * is found, so the caller falls back to the legacy fixed order.
  */
-function detectColumns(lines: string[]): Record<string, number> | null {
+function detectColumns(lines: string[], root: string): Record<string, number> | null {
+  const aliases = headerAliases(root);
   for (const line of lines) {
     const cells = line.split("|").slice(1, -1).map((c) => c.trim().toLowerCase());
     if (!cells.includes("company") || !cells.includes("role")) continue;
     const map: Record<string, number> = {};
     cells.forEach((c, i) => {
-      if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i;
+      if (aliases[c] != null) map[aliases[c]] = i;
     });
     if (["n", "company", "role", "score", "status"].every((k) => map[k] != null)) return map;
   }
@@ -156,7 +165,7 @@ export function readApplications(root: string = careerOpsRoot()): Application[] 
   const md = read("data/applications.md", root);
   if (!md) return [];
   const lines = md.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("|"));
-  const colmap = detectColumns(lines);
+  const colmap = detectColumns(lines, root);
 
   const rows: Application[] = [];
   for (const line of lines) {
