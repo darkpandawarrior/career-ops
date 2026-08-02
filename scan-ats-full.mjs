@@ -36,6 +36,7 @@ import path from 'path';
 import * as yaml from 'js-yaml';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
+import { dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
@@ -315,7 +316,10 @@ export function filterBlacklistedOffers(offers, blacklist, { includeBlacklisted 
 // order in two places for the caller that doesn't need per-stage counts.
 export function passesFilters(job, { titleFilter, locationFilter, contentFilter, titleFilterConfig }) {
   if (!titleFilter(job.title)) return false;
-  if (!locationFilter(job.location)) return false;
+  // job.url is passed so the location filter can fall back to the URL's own
+  // location segment when the provider reports a rolled-up "N Locations" string;
+  // job.title so a title-stated remote role survives a city-only location.
+  if (!locationFilter(job.location, job.url, job.title)) return false;
   if (contentFilter && !contentFilter(job.description, matchedTitleKeywords(job.title, titleFilterConfig))) return false;
   return true;
 }
@@ -601,7 +605,10 @@ async function main() {
       if (dateClass === 'stale') continue;
       if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
       if (!titleFilter(job.title)) continue;
-      if (!locationFilter(job.location)) continue;
+      // job.url is passed so the location filter can fall back to the URL's own
+      // location segment when the provider reports a rolled-up "N Locations" string;
+      // job.title so a title-stated remote role survives a city-only location.
+      if (!locationFilter(job.location, job.url, job.title)) continue;
       if (!contentFilter(job.description, matchedTitleKeywords(job.title, config?.title_filter))) { droppedContent++; continue; }
       const dedupUrl = normalizeUrlForDedup(job.url);
       if (seenUrls.has(dedupUrl)) continue;
@@ -733,6 +740,12 @@ async function main() {
   log(`${'━'.repeat(45)}`);
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
+  // A paced sweep is slower on purpose. Say so, or the operator reads the
+  // wall-clock time as a hang (#2229).
+  const pacing = dnsPacingStats();
+  if (pacing.delayed > 0) {
+    log(`DNS pacing:         ${pacing.delayed} lookup${pacing.delayed === 1 ? '' : 's'} delayed, ${Math.round(pacing.waitedMs / 1000)}s total wait (CAREER_OPS_DNS_LOOKUPS_PER_MIN to tune, 0 disables)`);
+  }
   // noDateSkipJobs is a subset of droppedNoDate, not a separate pool: every
   // no-postedOn workday posting counted here also hits the per-job undated
   // filter in the scan loop above and gets dropped there too. Report it as
@@ -818,6 +831,7 @@ async function main() {
       postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
       postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
+      dnsPacing: { delayed: pacing.delayed, waitedMs: Math.round(pacing.waitedMs) },
       saved,
       offers: offers.map(o => ({
         company: o.company,

@@ -27,6 +27,11 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via `np
 | `node salary-gap.mjs` | `salary-gap.mjs` | Desired vs. advertised vs. actual compensation gap analysis |
 | `node stats.mjs` | `stats.mjs` | Lifetime pipeline stats aggregator (tracker, scanner, portals, follow-ups, runs) |
 | `npm run freshness` | `check-table-freshness.mjs` | Staleness validator for jurisdiction data tables (`as_of` / `next_effective` watchdog) |
+| `npm run jd:similarity` | `jd-similarity.mjs` | Compare a new JD with a previous JD/CV and recommend reuse, edits, or regeneration |
+| `npm run company:funded` | `company-funded.mjs` | Review-first discovery of recently funded companies |
+| `npm run application:init` | `application-artifacts.mjs` | Initialize one versioned application-scoped JD/CV/PDF artifact bundle |
+| `node fix-slugs.mjs` | `fix-slugs.mjs` | Write `verify-portals.mjs`'s suggested ATS slug fixes back to portals.yml (dry run by default, `--fix` to write) |
+| `npm run digest` | `weekly-digest.mjs` | Weekly interview digest — per-company rounds, recurring competency tags, recurring gaps |
 
 ---
 
@@ -259,6 +264,26 @@ node scan-ats-full.mjs --md-out notes/scans    # also write a dated markdown dig
 
 ---
 
+### DNS pacing
+
+A full sweep resolves one hostname per Workday and iCIMS tenant — 13,889 distinct hostnames across the current datasets (3,781 Workday + 10,108 iCIMS), against 3 for Greenhouse, Lever and Ashby combined. Those lookups are irreducible (nothing to cache: every hostname is distinct), and issued unpaced they trip the per-client rate limit on a resolver like Pi-hole, which then refuses queries for the whole machine — the scan reports thousands of misleading `fetch failed` lines while the boards themselves are fine (#2229).
+
+Uncached, non-coalesced lookups are therefore paced at **400 per minute** by default. The token is spent *before* `dns.lookup()` runs, so a name answered locally — from `/etc/hosts`, say — still costs one; the ceiling meters what the process asks to resolve, not what leaves the machine.
+
+How many upstream queries that becomes depends on the OS resolver: `dns.lookup()` delegates to `getaddrinfo`, which may answer without any query at all, but on a typical glibc host with `autoSelectFamily` it emits an A **and** an AAAA query — roughly 800 queries/minute, measured against a Pi-hole. That is under a stock Pi-hole's 1,000/minute with headroom for the rest of the machine; size it against your own resolver's limit.
+
+Cache hits and lookups that coalesce onto an in-flight one are free, so only uncached, non-coalesced lookup keys count against the ceiling — a hostname not in the cache, or a cached one requested with different resolver options (the cache key is hostname plus `family`/`all`/`hints`/`verbatim`).
+
+```bash
+CAREER_OPS_DNS_LOOKUPS_PER_MIN=800 npm run scan:full   # raise the ceiling
+CAREER_OPS_DNS_LOOKUPS_PER_MIN=0 npm run scan:full     # no pacing (pre-#2229 behaviour)
+CAREER_OPS_NO_DNS_CACHE=1 npm run scan:full            # no DNS cache AND no pacing
+```
+
+The cost is real: a full Workday + iCIMS sweep becomes DNS-bound at roughly 35 minutes. Raise the ceiling if your resolver has the budget — but if you see `fetch failed` in bulk from one ATS section, suspect the resolver before the boards.
+
+---
+
 ## tracker
 
 SQLite **derived index** for the applications tracker (RFC #918, phase 1). `data/applications.md` stays the source of truth; `data/applications.db` is built from it by `sync` and is safe to delete at any time — it regenerates on the next sync. All writes keep going to the markdown exactly as today (`merge-tracker.mjs`, `set-status.mjs`, hand edits); the index is read-only infrastructure.
@@ -363,6 +388,76 @@ Portals:    — no data (portals.yml missing)
 Follow-ups: — no data (data/follow-ups.md missing)
 Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)
 ```
+
+---
+
+As the project is in continuous development, to parse for a stat we recommend doing it by column header instead of position.
+
+---
+
+## fix-slugs
+
+Write-side twin of `verify-portals.mjs` (#1703). `verify-portals` already probes every tracked company's ATS slug and, for a failing Greenhouse/Ashby/Lever entry, cross-probes slug variants across all three ATSes and attaches `suggested: { ats, slug }` when one resolves. That tool is read-only; this one patches the matching `tracked_companies` entry in `portals.yml`. It imports the same probe and suggestion logic rather than re-implementing it, so the two can never disagree about what a broken slug is (network, like `verify-portals`).
+
+**It is a dry run by default: writing requires an explicit `--fix` (or its alias `--apply`).** A bare `node fix-slugs.mjs` prints the diff it *would* apply and changes nothing, so the safe invocation is also the shortest one. `--dry-run` exists only to say that out loud.
+
+Only entries `verify-portals` classifies as `missing` **and** for which it found a `suggested` alternate are touched. Live entries, empty entries, and entries whose slug genuinely could not be resolved are left completely alone.
+
+The file is edited as text — line-level surgery inside the matching company's block — rather than through a YAML parse-and-dump round trip, because `portals.yml` carries hand-written comments and documentation blocks that `yaml.dump()` would silently discard.
+
+```bash
+node fix-slugs.mjs                            # dry run (default, safe): print the diff, write nothing
+node fix-slugs.mjs --dry-run                  # same as above, explicit
+node fix-slugs.mjs --fix                      # write the resolved slugs back to portals.yml
+node fix-slugs.mjs --apply                    # alias for --fix
+node fix-slugs.mjs --file templates/portals.example.yml
+```
+
+The default path is `portals.yml`, overridable with `--file` or the `CAREER_OPS_PORTALS` environment variable. A missing portals file is reported and treated as nothing to do, not as an error.
+
+**Exit codes:** `0` on every normal run, `1` only if the run itself fails. Unlike `check-table-freshness`, pending fixes in a dry run do **not** fail the run, so this is a maintenance tool rather than a CI gate.
+
+---
+
+---
+
+## weekly-digest
+
+Rolls up `interview-prep/sessions/*.md` — the structured, machine-readable transcripts `interview/debrief` and `interview/practice` already write (schema in `interview-prep/sessions/README.md`) — into a single digest for a date range (default: the current ISO week, Monday–Sunday). Groups sessions by company/role into a per-company round rollup (round type + date per round), counts `<!-- competency: tag[, tag...] -->` annotations across all sessions in range and flags any tag appearing 2+ times as recurring, and — best-effort, since `interview-prep/question-bank.md` has no fixed schema — attributes 🔴-tagged lines to whichever in-range company's heading they fall under. Purely mechanical: front-matter parsing, date filtering, and tag counting, no LLM judgment calls.
+
+```bash
+node weekly-digest.mjs                                   # JSON, current ISO week
+node weekly-digest.mjs --summary                          # human-readable digest
+node weekly-digest.mjs --from 2026-07-13 --to 2026-07-19  # explicit date range
+node weekly-digest.mjs --dir path/to/sessions             # override sessions dir (test isolation)
+node weekly-digest.mjs --self-test
+```
+
+`interview-prep/sessions/` is gitignored, and session content contains real interviewer names and companies — see the "Privacy — important" section of `interview-prep/sessions/README.md` for the source of that statement. A fresh clone or a week with no interviews reports "no interviews recorded in this range" and exits `0`, never an error.
+
+**Exit codes:** `0` always (missing sessions dir/question bank, or an empty range, produce an explanatory empty result), `1` invalid `--from`/`--to` or self-test failure.
+
+---
+
+## company:funded
+
+Review-first discovery for companies that recently raised funding. It reads structured public RSS/API sources and prints a candidate report for manual review. It never edits `portals.yml` and does not probe company websites.
+
+```bash
+npm run company:funded -- --dry-run --limit 20
+npm run company:funded -- --dry-run --limit 20 --months 3 --json
+npm run company:funded -- --dry-run --sort score --limit 20
+npm run company:funded -- --sources techcrunch,prnewswire,guardian,hn
+npm run company:funded -- --self-test
+```
+
+Defaults: last 3 months, `--sort date`, sources `techcrunch,prnewswire,guardian,hn`. `--sort score` ranks by source and funding-detail confidence instead.
+
+Runs without `--dry-run` write JSON under `output/` and a Markdown report under `reports/`.
+
+Source diagnostics are included in JSON output and surfaced in human output when a source has errors, is blocked, returns no items, or when no candidates are found.
+
+**Exit codes:** `0` discovery completed, `1` invalid arguments or fatal runtime error.
 
 ---
 

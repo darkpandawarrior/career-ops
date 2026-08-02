@@ -144,14 +144,14 @@ After the user reviews and says they've sent a follow-up, record it:
    ```
 
 2. Append a row with:
-   - `#` = next sequential number in the follow-ups table
-   - `App#` = application number from tracker
-   - `Date` = today's date
-   - `Company` = company name
-   - `Role` = role title
-   - `Channel` = Email / LinkedIn / Other
-   - `Contact` = who it was sent to
-   - `Notes` = brief note (e.g., "First follow-up, referenced Barbeiro.app")
+   - `num` = next sequential number in the follow-ups table
+   - `appNum` = application number from tracker
+   - `date` = today's date (YYYY-MM-DD)
+   - `company` = company name
+   - `role` = role title
+   - `channel` = Email / LinkedIn / Phone / Other
+   - `contact` = who it was sent to
+   - `notes` = brief note (e.g., "First follow-up, referenced Barbeiro.app")
 
 3. Optionally update the Notes column in `data/applications.md` with "Follow-up {N} sent {YYYY-MM-DD}"
 

@@ -307,19 +307,55 @@ export function readAgentInbox(root: string = careerOpsRoot()): AgentInboxItem[]
 
 export type ReportData = { content: string; file: string };
 
-/** Locate the evaluation report for an application number
- *  (reports/{n}-{slug}-{date}.md; the leading number may be zero-padded). */
+/** Locate the evaluation report for an application number.
+ *  The tracker row's own report link is authoritative: report FILE numbers can
+ *  differ from application numbers (e.g. app #309 → reports/308-…), so
+ *  resolving only by leading filename number misses those. Links are
+ *  normalized relative to the tracker file's directory (see #760). Falls back
+ *  to the filename scan (reports/{n}-{slug}-{date}.md, possibly zero-padded)
+ *  for rows without a parseable link.
+ *
+ *  `root` stays an explicit parameter in this fork: callers resolve the ACTIVE
+ *  profile's data root, which is not necessarily careerOpsRoot(). */
 export function findReportFile(n: string, root: string = careerOpsRoot()): string | null {
   const target = parseInt(n, 10);
   if (Number.isNaN(target)) return null;
+  const app = readApplications(root).find((a) => parseInt(a.n, 10) === target);
+  const linked = app?.report.match(/\]\(([^)]+)\)/)?.[1];
+  if (linked) {
+    const p = path.resolve(root, "data", linked);
+    // Containment: a hand-edited link must not resolve outside the project.
+    if (p.endsWith(".md") && containedRealpath(p, root)) return p;
+  }
   let files: string[];
   try {
     files = fs.readdirSync(path.join(root, "reports"));
   } catch {
     return null;
   }
-  const match = files.find((f) => f.endsWith(".md") && parseInt(f, 10) === target);
-  return match ? path.join(root, "reports", match) : null;
+  // Skip `{n}-RESERVED.md` placeholders. reserve-report-num.mjs writes an empty
+  // NNN-RESERVED.md sentinel to claim a report number before a worker has written
+  // the report; it's normally deleted once the real report lands (or GC'd after
+  // 4h if abandoned). But "RESERVED" sorts before nearly every real slug, so a
+  // sentinel that outlives its report — a worker driven directly instead of
+  // through the orchestrator that owns cleanup — would win this .find() and make
+  // the report body and the Apply/PDF-ready checks disappear.
+  const match = files.find(
+    (f) => f.endsWith(".md") && !/^\d+-RESERVED\.md$/.test(f) && parseInt(f, 10) === target,
+  );
+  if (!match) return null;
+  const p = path.join(root, "reports", match);
+  return containedRealpath(p, root) ? p : null;
+}
+
+/** True containment check: resolves symlinks before comparing, so a link
+ *  planted under data/ or reports/ can't leak files outside the project. */
+function containedRealpath(p: string, root: string): boolean {
+  try {
+    return fs.realpathSync(p).startsWith(fs.realpathSync(root) + path.sep);
+  } catch {
+    return false; // missing file or unresolvable link — treat as not found
+  }
 }
 
 export function readReport(n: string, root: string = careerOpsRoot()): ReportData | null {
