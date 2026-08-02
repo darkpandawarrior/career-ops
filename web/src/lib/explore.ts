@@ -92,27 +92,12 @@ export type ScanEvent =
   | { kind: "error"; message: string }
   | { kind: "done"; count: number; offers: DiscoveredOffer[]; cost?: { tokens: number; usd: number } };
 
-const CHIP_CAP = 16;
-
-/** Trim, drop empties, de-dupe case-insensitively, cap length. */
-export function cleanChips(v: unknown): string[] {
-  if (v == null) return [];
-  const arr = Array.isArray(v) ? v : [v];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of arr) {
-    if (typeof item !== "string") continue;
-    const k = item.trim();
-    if (!k) continue;
-    if (!/[\p{L}\p{N}]/u.test(k)) continue; // drop punctuation-only junk ("*", "---", "...")
-    const key = k.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(k);
-    if (out.length >= CHIP_CAP) break;
-  }
-  return out;
-}
+// cleanChips lives in clean-chips.mjs (plain JS) so clean-chips.test.mjs can
+// import the REAL implementation under node --test — a .ts copy here could
+// pass its own tests while the shipped behaviour drifted. Re-exported so every
+// existing caller keeps importing it from this module.
+import { cleanChips } from "./clean-chips.mjs";
+export { cleanChips };
 
 function clampNum(v: unknown, lo: number, hi: number, fallback: number): number {
   const n = Number(v);

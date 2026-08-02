@@ -82,6 +82,51 @@ describe("readApplications", () => {
     expect(apps[1]).toMatchObject({ n: "2", company: "Globex", status: "Evaluated" });
   });
 
+  it("detects a Location column via the SHARED tracker-aliases.json, not a hardcoded copy", () => {
+    // The web reader used to carry its own hand-synced HEADER_ALIASES copy, and it
+    // had drifted: tracker-aliases.json lists `location`, the copy didn't, so a
+    // Location column the CLI parsed fine was invisible here. Seeding the real
+    // alias file into the fixture root proves the web path reads that file.
+    write("tracker-aliases.json", JSON.stringify({
+      "#": "n", num: "n", date: "date", company: "company", empresa: "company",
+      via: "via", role: "role", puesto: "role", location: "location",
+      score: "score", status: "status", pdf: "pdf", report: "report", notes: "notes",
+    }));
+    write(
+      "data/applications.md",
+      [
+        "| # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |",
+        "|---|------|---------|------|----------|-------|--------|-----|--------|-------|",
+        "| 1 | 2026-06-01 | Acme | PM | Pune | 4.5 | Applied | yes | r1.md | strong |",
+      ].join("\n"),
+    );
+    const apps = readApplications(ROOT);
+    expect(apps).toHaveLength(1);
+    // Score/Status resolve by HEADER position, not the legacy fixed offset — the
+    // extra Location column would have shifted them under the fallback path.
+    expect(apps[0]).toMatchObject({ n: "1", company: "Acme", role: "PM", score: "4.5", status: "Applied" });
+  });
+
+  it("an alias added to tracker-aliases.json reaches the dashboard with no code change", () => {
+    // The whole point of reading the shared file at runtime: a new header alias
+    // is picked up by both the CLI and the dashboard from one edit.
+    write("tracker-aliases.json", JSON.stringify({
+      "#": "n", num: "n", date: "date", empresa: "company", puesto: "role",
+      score: "score", status: "status", pdf: "pdf", report: "report", notes: "notes",
+      company: "company", role: "role",
+    }));
+    write(
+      "data/applications.md",
+      [
+        "| # | Date | Empresa | Puesto | Score | Status | PDF | Report | Notes |",
+        "|---|------|---------|--------|-------|--------|-----|--------|-------|",
+        "| 7 | 2026-06-01 | Iniciativa | Ingeniero | 4.1 | Applied | yes | r7.md |  |",
+      ].join("\n"),
+    );
+    const apps = readApplications(ROOT);
+    expect(apps[0]).toMatchObject({ n: "7", company: "Iniciativa", role: "Ingeniero", status: "Applied" });
+  });
+
   it("tolerates an 8-column (no Notes) legacy row", () => {
     write(
       "data/applications.md",
