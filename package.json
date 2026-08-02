@@ -17,6 +17,7 @@
     "reconcile": "node reconcile-pipeline.mjs",
     "pdf": "node generate-pdf.mjs",
     "jd:similarity": "node jd-similarity.mjs",
+    "jd:skill-gap": "node jd-skill-gap.mjs",
     "cover-letter": "node generate-cover-letter.mjs --payload",
     "sync-check": "node cv-sync-check.mjs",
     "liveness": "node check-liveness.mjs",

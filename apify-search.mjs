@@ -258,7 +258,7 @@ export async function runBroadSearch({ dryRun = false, cliPlatforms = null } = {
     // it rides through appendToPipeline()'s existing sanitize/atomic-write
     // logic unchanged (formatPipelineOffer's other columns are positional —
     // location/compensation — so a new column isn't safe to add here).
-    appendToPipeline(offers.map(o => ({ ...o, title: `${o.title} [via: ${o.source}]` })));
+    await appendToPipeline(offers.map(o => ({ ...o, title: `${o.title} [via: ${o.source}]` })));
   }
 
   console.log(`\napify-search: ${offers.length} new offer(s) added to pipeline.`);
