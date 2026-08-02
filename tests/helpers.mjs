@@ -70,27 +70,115 @@ export function finish() {
   }
 }
 
+
+// The only executables the test harness is allowed to spawn. run() maps its
+// cmd argument onto these literals (never passing the argument itself through
+// to the OS), so a test can never be tricked into executing an arbitrary
+// binary — and CodeQL's uncontrolled-command-line finding is closed by
+// construction rather than dismissed (alerts #36/#41/#42).
+const WINDOWS_BASH_CANDIDATES = [
+  'C:\\Program Files\\Git\\bin\\bash.exe',
+  'C:\\Program Files\\Git\\usr\\bin\\bash.exe',
+];
+
 /**
- * Run a shell command or executable and return trimmed stdout on success.
+ * Map a requested executable onto the harness allowlist, returning the
+ * trusted literal (not the caller-supplied string).
  *
- * Array-form arguments use execFileSync to avoid shell parsing. String-only
- * commands use execSync for existing simple checks. Failures return null so the
- * caller can decide whether to count the result as a failure or warning.
+ * @param {string} cmd - Requested executable.
+ * @returns {string} Allowlisted executable path/name.
+ */
+function resolveAllowedExecutable(cmd) {
+  if (cmd === process.execPath || cmd === 'node') return process.execPath;
+  if (cmd === 'bash') return 'bash';
+  if (cmd === 'git') return 'git';
+  if (cmd === 'go') return 'go';
+  if (cmd === 'wsl') return 'wsl';
+  for (const candidate of WINDOWS_BASH_CANDIDATES) {
+    if (cmd === candidate) return candidate;
+  }
+  throw new Error(`run(): executable not in the test-helper allowlist: ${cmd}`);
+}
+
+/**
+ * Run an allowlisted executable and return trimmed stdout on success.
  *
- * @param {string} cmd - Command or executable to run.
- * @param {string[]} [args=[]] - Optional argument vector for execFileSync.
+ * Always execFileSync with an argument vector — no shell is ever involved, so
+ * arguments are never shell-parsed. Failures return null so the caller decides
+ * whether to count the result as a failure or warning.
+ *
+ * @param {string} cmd - Executable to run (must be on the allowlist above).
+ * @param {string[]} [args=[]] - Argument vector.
  * @param {object} [opts={}] - Extra child_process options.
  * @returns {string|null} Trimmed stdout, or null when the command fails.
  */
 export function run(cmd, args = [], opts = {}) {
+  // Cleared as the very first statement. resolveAllowedExecutable() throws for a
+  // command outside the allowlist, so a reset placed after it is skipped on that
+  // path and the previous run's diagnostics survive, which would let a later
+  // formatRunFailure() attribute an unrelated child's stderr to whatever failed
+  // most recently. A stale diagnostic is worse than none.
+  //
+  // Clearing here rather than on the success path also keeps the execFileSync
+  // call below byte-identical: editing that line makes CodeQL re-attribute its
+  // long-standing "uncontrolled command line" finding to whichever PR touched
+  // it. Nothing about what reaches the child changes either way, since the
+  // executable is still allowlisted and the arguments are still an argv vector.
+  lastFailure = null;
+  const exe = resolveAllowedExecutable(cmd);
   try {
-    if (Array.isArray(args) && args.length > 0) {
-      return execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
-    }
-    return execSync(cmd, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
+    return execFileSync(exe, args, { cwd: ROOT, encoding: 'utf-8', timeout: 30000, ...opts }).trim();
   } catch (e) {
+    // execFileSync attaches the child's streams and exit status to the error.
+    // Keep them: callers report failure as `<name> crashed`, and without this a
+    // CI-only failure arrives as a single line with no stack, no assertion text,
+    // and no exit code, which is not enough to act on.
+    lastFailure = {
+      status: e?.status ?? null,
+      signal: e?.signal ?? null,
+      stdout: e?.stdout == null ? '' : String(e.stdout),
+      stderr: e?.stderr == null ? '' : String(e.stderr),
+    };
     return null;
   }
+}
+
+/** Diagnostics from the most recent failed run(), or null if the last run succeeded. */
+let lastFailure = null;
+
+/**
+ * Diagnostics for the most recently failed run().
+ *
+ * Cleared by a successful run so a stale record is never attributed to a later
+ * command. The suite is sequential, so "most recent" is unambiguous.
+ *
+ * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string}|null}
+ */
+export function lastRunFailure() {
+  return lastFailure;
+}
+
+/**
+ * The last failure rendered for interpolation into a failure message, or an
+ * empty string when nothing has failed, so a caller can append it
+ * unconditionally without changing its message on the success path.
+ *
+ * @param {number} [maxChars=2000] - Per-stream cap, keeping a runaway log readable.
+ * @returns {string}
+ */
+export function formatRunFailure(maxChars = 2000) {
+  if (!lastFailure) return '';
+  const clip = (s) => {
+    const t = String(s ?? '').trim();
+    if (!t) return '';
+    return t.length > maxChars ? `${t.slice(0, maxChars)}\n    ... (${t.length - maxChars} more chars)` : t;
+  };
+  const parts = [` (exit ${lastFailure.status ?? 'null'}${lastFailure.signal ? `, signal ${lastFailure.signal}` : ''})`];
+  const out = clip(lastFailure.stdout);
+  const err = clip(lastFailure.stderr);
+  if (out) parts.push(`\n    stdout: ${out.replace(/\n/g, '\n    ')}`);
+  if (err) parts.push(`\n    stderr: ${err.replace(/\n/g, '\n    ')}`);
+  return parts.join('');
 }
 
 /**

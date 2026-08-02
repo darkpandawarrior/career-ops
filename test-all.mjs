@@ -603,12 +603,17 @@ const allowedFiles = [
 // untracked files (debate artifacts, AI tool scratch, local plans/) and
 // gitignored files can't trigger false positives because they were never
 // going to reach a commit anyway.
-const grepPathspec = scanExtensions.map(e => `'*.${e}'`).join(' ');
+// argv form, not a shell string: run() is allowlist-only and never spawns a
+// shell, so the pathspecs go across as separate argv entries (no quoting) and
+// git's own stderr is dropped via stdio rather than `2>/dev/null`.
+const grepPathspec = scanExtensions.map(e => `*.${e}`);
 
 let leakFound = false;
 for (const pattern of leakPatterns) {
   const result = run(
-    `git grep -n "${pattern}" -- ${grepPathspec} 2>/dev/null`
+    'git',
+    ['grep', '-n', pattern, '--', ...grepPathspec],
+    { stdio: ['ignore', 'pipe', 'ignore'] }
   );
   if (result) {
     for (const line of result.split('\n')) {
@@ -630,9 +635,17 @@ console.log('\n7. Absolute path check');
 
 // Same git grep approach: only scans tracked files. Untracked AI tool
 // outputs, local debate artifacts, etc. can't false-positive here.
-const absPathResult = run(
-  `git grep -n "/Users/" -- '*.mjs' '*.sh' '*.md' '*.go' '*.yml' 2>/dev/null | grep -v README.md | grep -v LICENSE | grep -v CLAUDE.md | grep -v test-all.mjs`
-);
+// The `| grep -v ...` chain moved into JS: run() spawns no shell, so a pipeline
+// can't be expressed as a command string any more. Same exclusions, same result.
+const ABS_PATH_EXCLUDED = ['README.md', 'LICENSE', 'CLAUDE.md', 'test-all.mjs'];
+const absPathResult = (run(
+  'git',
+  ['grep', '-n', '/Users/', '--', '*.mjs', '*.sh', '*.md', '*.go', '*.yml'],
+  { stdio: ['ignore', 'pipe', 'ignore'] }
+) || '')
+  .split('\n')
+  .filter(line => line && !ABS_PATH_EXCLUDED.some(f => line.includes(f)))
+  .join('\n');
 if (!absPathResult) {
   pass('No absolute paths in code files');
 } else {
