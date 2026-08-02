@@ -21,10 +21,14 @@ import { rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
 // Upstream keeps openTrackerTransaction in tracker-utils.mjs; this fork's lock
 // primitives live in tracker-lock.mjs (same split as acquireTrackerLock).
 import { openTrackerTransaction } from './tracker-lock.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
-const PDF_MANIFEST = process.env.CAREER_OPS_PDF_INDEX || join(CAREER_OPS, 'data', 'pdf-index.tsv');
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
+const PDF_MANIFEST = process.env.CAREER_OPS_PDF_INDEX || join(CAREER_OPS_DATA, 'data', 'pdf-index.tsv');
 
 const flags = { dryRun: false, json: false };
 for (const arg of process.argv.slice(2)) {

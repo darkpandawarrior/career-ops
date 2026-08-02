@@ -56,8 +56,12 @@ import {
   daysBetween,
   normalizeStatus,
 } from './followup-cadence.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 const DEFAULT_STALE_AFTER_DAYS = 365;
 const DEFAULT_SILENCE_WINDOW_DAYS = 28;

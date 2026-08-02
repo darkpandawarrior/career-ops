@@ -29,8 +29,12 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use ROOT_DATA, never ROOT.
+const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // "008" and "8" are the same report — zero-padded report-link form vs unpadded
 // tracker-# form (same normalization as the manifest writer in generate-pdf.mjs).
@@ -135,7 +139,7 @@ function main() {
     return;
   }
 
-  const trackerPath = process.env.CAREER_OPS_TRACKER || resolve(ROOT, 'data', 'applications.md');
+  const trackerPath = process.env.CAREER_OPS_TRACKER || resolve(ROOT_DATA, 'data', 'applications.md');
   if (!existsSync(trackerPath)) {
     console.error(`Error: ${trackerPath} not found — nothing to search.`);
     process.exitCode = 1;
@@ -143,7 +147,7 @@ function main() {
   }
   const rows = parseTrackerRows(readFileSync(trackerPath, 'utf-8'));
 
-  const manifestPath = resolve(ROOT, 'data', 'pdf-index.tsv');
+  const manifestPath = resolve(ROOT_DATA, 'data', 'pdf-index.tsv');
   const pdfIndex = existsSync(manifestPath)
     ? parsePdfIndex(readFileSync(manifestPath, 'utf-8'))
     : new Map();

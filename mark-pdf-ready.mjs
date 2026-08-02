@@ -41,8 +41,12 @@ import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './
 import {
   rebuildRow, resolveTrackerPath, writeFileAtomic, CLI_EXIT, makeCliFailWith, acquireTrackerLockForCli,
 } from './tracker-utils.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // LOCK_TIMEOUT is not destructured here — that exit path is raised inside
 // acquireTrackerLockForCli() itself (tracker-utils.mjs), via CLI_EXIT.LOCK_TIMEOUT.
@@ -102,7 +106,7 @@ const targetReportNum = parseInt(reportSelector, 10);
 
 // ── tracker access ───────────────────────────────────────────────
 
-const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
 if (!existsSync(APPS_FILE)) {
   failWith(EXIT_NOT_FOUND, 'no-tracker', `No tracker found at ${APPS_FILE}`);
 }

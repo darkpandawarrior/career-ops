@@ -26,8 +26,12 @@ import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { resolveTrackerPath, normalizeCompany } from './tracker-utils.mjs';
 import { parsePdfIndex } from './find.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const NODE = process.execPath;
 const SET_STATUS_SCRIPT = join(CAREER_OPS, 'set-status.mjs');
 const ARCHIVE_POSTING_SCRIPT = join(CAREER_OPS, 'archive-posting.mjs');
@@ -141,7 +145,7 @@ if (!outcomeConfig) {
   failExit(`Invalid outcome_type "${rawOutcomeType}". Valid types: ${validTypes}`, 'invalid-outcome', EXIT_USAGE);
 }
 
-const appsFile = resolveTrackerPath(CAREER_OPS);
+const appsFile = resolveTrackerPath(CAREER_OPS_DATA);
 if (!existsSync(appsFile)) {
   failExit(`Tracker not found at ${appsFile}`, 'tracker-not-found', EXIT_NOT_FOUND);
 }

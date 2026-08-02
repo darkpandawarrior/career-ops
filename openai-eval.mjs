@@ -33,6 +33,7 @@ import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -43,7 +44,10 @@ try {
   config();
 } catch { /* dotenv optional */ }
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use ROOT_DATA, never ROOT.
+const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -51,9 +55,9 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const PATHS = {
   shared:  join(ROOT, 'modes', '_shared.md'),
   oferta:  join(ROOT, 'modes', 'oferta.md'),
-  cv:      join(ROOT, 'cv.md'),
-  profileYml: join(ROOT, 'config', 'profile.yml'),
-  reports: join(ROOT, 'reports'),
+  cv:      join(ROOT_DATA, 'cv.md'),
+  profileYml: join(ROOT_DATA, 'config', 'profile.yml'),
+  reports: join(ROOT_DATA, 'reports'),
 };
 
 // ---------------------------------------------------------------------------

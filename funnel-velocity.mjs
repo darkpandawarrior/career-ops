@@ -42,8 +42,12 @@ import { computeFunnel, computeTrackerStats } from './stats.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
 import { parseAppliedDate, normalizeStatus } from './followup-cadence.mjs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT), which is a different directory under the
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 
 const args = process.argv.slice(2);
@@ -220,7 +224,7 @@ export function computeVelocity(timelines, todayStr) {
 // --- Benchmarks ---
 export function loadBenchmarks(explicitPath) {
   const path = explicitPath
-    || (existsSync(join(CAREER_OPS, 'config/benchmarks.yml')) ? join(CAREER_OPS, 'config/benchmarks.yml') : join(CAREER_OPS, 'templates/benchmarks.yml'));
+    || (existsSync(join(CAREER_OPS_DATA, 'config/benchmarks.yml')) ? join(CAREER_OPS_DATA, 'config/benchmarks.yml') : join(CAREER_OPS, 'templates/benchmarks.yml'));
   let doc;
   try {
     doc = yaml.load(readFileSync(path, 'utf-8'));
@@ -663,7 +667,7 @@ function main() {
     process.exit(1);
   }
   const states = loadCanonicalStates(STATES_FILE);
-  const trackerPath = resolveTrackerPath(CAREER_OPS);
+  const trackerPath = resolveTrackerPath(CAREER_OPS_DATA);
   const logPath = join(dirname(trackerPath), 'status-log.tsv');
   const trackerContent = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
   const logContent = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';

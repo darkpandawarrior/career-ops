@@ -315,6 +315,7 @@ ok('the LATER occurrence wins', dupVcf.includes('fresh line') && !dupVcf.include
 console.log('\n--- 9. CLI behavior ---');
 
 const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'contacts.mjs');
+const resolverPath = join(dirname(fileURLToPath(import.meta.url)), 'path-resolver.mjs');
 
 try {
   execFileSync('node', [scriptPath, '--self-test'], { encoding: 'utf-8', timeout: 10000 });
@@ -324,8 +325,9 @@ try {
   console.log(`    exit code: ${e.status}, stderr: ${e.stderr?.slice(0, 200)}`);
 }
 
-// contacts.mjs resolves its paths from import.meta.url and is zero-dep, so a
-// copy of the script into a temp dir is a fully isolated career-ops root:
+// contacts.mjs resolves its paths through path-resolver.mjs, so the copy needs
+// that one sibling next to it. With both present, a temp dir is still a fully
+// isolated career-ops root:
 // data/contacts.tsv and output/ under the temp dir, no dependence on whatever
 // the caller's real workspace contains — a contributor with a real phonebook
 // gets the same results as CI.
@@ -336,6 +338,7 @@ const tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-cli-')));
 const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
+  copyFileSync(resolverPath, join(tmpRoot, 'path-resolver.mjs'));
   mkdirSync(join(tmpRoot, 'data'), { recursive: true });
   writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
     '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
@@ -442,6 +445,7 @@ try {
 const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-empty-')));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
+  copyFileSync(resolverPath, join(emptyRoot, 'path-resolver.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
   eq('missing store: JSON total = 0', emptyJson.total, 0);
   eq('missing store: contacts = []', emptyJson.contacts, []);

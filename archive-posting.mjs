@@ -21,10 +21,13 @@ import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
-const JDS_DIR = join(ROOT, 'jds');
-const PIPELINE_PATH = join(ROOT, 'data', 'pipeline.md');
+// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
+// profile's data (CAREER_OPS_ROOT). Data paths must use ROOT_DATA, never ROOT.
+const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
+const JDS_DIR = join(ROOT_DATA, 'jds');
+const PIPELINE_PATH = join(ROOT_DATA, 'data', 'pipeline.md');
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
