@@ -333,7 +333,16 @@ export function findReportFile(n: string, root: string = careerOpsRoot()): strin
   } catch {
     return null;
   }
-  const match = files.find((f) => f.endsWith(".md") && parseInt(f, 10) === target);
+  // Skip `{n}-RESERVED.md` placeholders. reserve-report-num.mjs writes an empty
+  // NNN-RESERVED.md sentinel to claim a report number before a worker has written
+  // the report; it's normally deleted once the real report lands (or GC'd after
+  // 4h if abandoned). But "RESERVED" sorts before nearly every real slug, so a
+  // sentinel that outlives its report — a worker driven directly instead of
+  // through the orchestrator that owns cleanup — would win this .find() and make
+  // the report body and the Apply/PDF-ready checks disappear.
+  const match = files.find(
+    (f) => f.endsWith(".md") && !/^\d+-RESERVED\.md$/.test(f) && parseInt(f, 10) === target,
+  );
   if (!match) return null;
   const p = path.join(root, "reports", match);
   return containedRealpath(p, root) ? p : null;
