@@ -112,6 +112,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `browser-extract.mjs` | Headless Playwright JD/listing reader — compact JSON instead of a full a11y-tree snapshot; strictly read-only |
 | `upskill.mjs` | Aggregate skill-gap analysis from tracked reports — which missing skills recur across evaluated roles (JSON; `--self-test`) |
 | `funnel-velocity.mjs` | Own funnel + stage velocity vs. market benchmarks (`templates/benchmarks.yml` / `config/benchmarks.yml`; `--summary`, `--self-test`) |
+| `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
 | `img-to-pdf.mjs` | Convert a screenshot/image into a single-page PDF for ATS uploads (Playwright; `--self-test`) |
 | `assessment-log.mjs` | Skills-assessment event log with staleness signal (JSON; `--self-test`) |
 | `cv-templates.mjs` | Config-selectable CV / cover-letter template resolver (`list` / `resolve`; reads `config/profile.yml`) |

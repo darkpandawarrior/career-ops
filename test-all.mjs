@@ -150,6 +150,9 @@ const scripts = [
   // its own fixture-driven --self-test (discovery shapes, expired/review-due
   // semantics, date-math boundaries).
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
+  // career-ops v1.24.0 sync: new standalone tools with inline self-tests.
+  { name: 'company-funded.mjs --self-test', expectExit: 0 },
+  { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
   // Root-level standalone suites: they call process.exit / use node:test, so
   // they must run as subprocesses, not be imported by tests/ discovery.
   { name: 'invite-match.test.mjs', expectExit: 0 },
@@ -161,6 +164,7 @@ const scripts = [
   { name: 'discover-ats.test.mjs', expectExit: 0 },
   { name: 'contacts.test.mjs', expectExit: 0 },
   { name: 'company-history.test.mjs', expectExit: 0 },
+  { name: 'jd-similarity.test.mjs', expectExit: 0 },
   { name: 'lib/context-budget.test.mjs', expectExit: 0 },
   // tracker-columns coverage lives at tests/tracker-columns.test.mjs
   // (auto-discovered) since the header-aware parsing port.
