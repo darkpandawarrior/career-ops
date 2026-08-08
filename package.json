@@ -51,19 +51,33 @@
     "application:init": "node application-artifacts.mjs --init",
     "trust:test": "node test-trust-validator.mjs",
     "audit:private-data": "node private-data-audit.mjs",
-    "postinstall": "npx playwright install chromium --with-deps || echo 'Playwright optional — only needed for browser-based portal scanning. Run: npx playwright install chromium'"
+    "postinstall": "npx playwright install chromium --with-deps || echo 'Playwright optional — only needed for browser-based portal scanning. Run: npx playwright install chromium'",
+    "test:cv-visual": "playwright test --config=playwright.cv.config.mjs",
+    "test:cv-visual:update": "playwright test --config=playwright.cv.config.mjs --update-snapshots"
   },
-  "keywords": ["ai", "job-search", "claude-code", "opencode", "career", "hiresignal", "career-ops", "careerops", "automation"],
+  "keywords": [
+    "ai",
+    "job-search",
+    "claude-code",
+    "opencode",
+    "career",
+    "hiresignal",
+    "career-ops",
+    "careerops",
+    "automation"
+  ],
   "author": "Gagandeep Singh",
   "homepage": "https://github.com/kirklazar-android/hiresignal#readme",
-  "repository": { "type": "git", "url": "https://github.com/kirklazar-android/hiresignal.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kirklazar-android/hiresignal.git"
+  },
   "license": "MIT",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^5.2.2",
     "pdfjs-dist": "^6.0.227",
-    "playwright": "1.62.0"
+    "playwright": "1.62.1"
   }
 }
-

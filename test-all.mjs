@@ -23,7 +23,7 @@
  * provider, create that one file; do not add a section to this file.
  */
 
-import { execSync, execFileSync, spawn } from 'child_process';
+import { execSync, execFileSync, spawn, spawnSync } from 'child_process';
 import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, symlinkSync } from 'fs';
 import { join, dirname, delimiter } from 'path';
 import { tmpdir } from 'os';
@@ -153,6 +153,8 @@ const scripts = [
   // career-ops v1.24.0 sync: new standalone tools with inline self-tests.
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
+  // security sync (#2368): untrusted-external-content directive coverage guard.
+  { name: 'validate-untrusted-content-coverage.mjs --self-test', expectExit: 0 },
   // Parity backfill: tools that predate the v1.24.0 window and were never ported.
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
@@ -771,6 +773,23 @@ if (
   pass('expand mode includes url limits, confirm gate, add-entry funneling, additive-only, and literal evidence rules');
 } else {
   fail('expand mode missing required behavior boundaries (url limits, confirm gate, additive-only, literal evidence, add-entry funneling)');
+}
+
+// Same shape, for the untrusted-external-content directive (security sync
+// #2368): every mode that ingests raw external text must reference the
+// canonical AGENTS.md rule, or a new/edited mode can silently lose it with
+// no signal until it's exploited. Runs against the real ROOT tree — the
+// --self-test entry above only exercises the pure matcher functions.
+{
+  const untrusted = spawnSync(process.execPath, [join(ROOT, 'validate-untrusted-content-coverage.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf-8',
+  });
+  if (untrusted.status === 0) {
+    pass('canonical untrusted-external-content directive is present and referenced by every ingesting mode');
+  } else {
+    fail(`Untrusted-content directive coverage gap:\n${(untrusted.stderr || untrusted.stdout || '').trim()}`);
+  }
 }
 
 // ── 9. LOCAL PARSER CONTRACT ────────────────────────────────────

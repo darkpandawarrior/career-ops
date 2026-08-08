@@ -15,8 +15,29 @@ import { pass, fail, ROOT, NODE } from './helpers.mjs';
 
 console.log('\nfollowup-seed.mjs (#1430 seed-on-Applied chain)');
 
+const DEFAULT_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-default-cadence.yml');
+
+// Pin the cadence source BEFORE followup-cadence.mjs is evaluated: it resolves
+// its cadence at module load from CAREER_OPS_PROFILE and otherwise falls back
+// to the USER's config/profile.yml, so a customized followup_cadence turned
+// the date assertions below red on a healthy install (#2268). The spawned
+// followup-seed.mjs subprocess inherits the same pin through run()'s env
+// (below); this top-level one is only for the direct import.
+//
+// Discovered tests/*.test.mjs run IN-PROCESS (test-all.mjs's runDiscovered
+// imports each one into the same process rather than spawning it), so the env
+// var must be restored right after the import — other modules imported later
+// in the same run (e.g. providers/_profile-keywords.mjs) read
+// CAREER_OPS_PROFILE too, and a leaked override would point them at this tiny
+// fixture instead of the real config/profile.yml.
+const previousProfileEnv = process.env.CAREER_OPS_PROFILE;
+process.env.CAREER_OPS_PROFILE = DEFAULT_CADENCE_PROFILE;
+
 const { parseNextOverrides, resolveNextOverride, addDays, parseDate } =
   await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+
+if (previousProfileEnv === undefined) delete process.env.CAREER_OPS_PROFILE;
+else process.env.CAREER_OPS_PROFILE = previousProfileEnv;
 
 const SCRIPT = join(ROOT, 'followup-seed.mjs');
 
@@ -60,6 +81,9 @@ function run(args, sandbox, extraEnv = {}) {
     ...process.env,
     CAREER_OPS_TRACKER: sandbox.tracker,
     CAREER_OPS_FOLLOWUPS: sandbox.followups,
+    // Explicit, not inherited: the child resolves its cadence from this or
+    // falls back to the user's real config/profile.yml (#2268).
+    CAREER_OPS_PROFILE: DEFAULT_CADENCE_PROFILE,
     CAREER_OPS_FOLLOWUPS_LOCK: sandbox.lock,
     ...extraEnv,
   };
