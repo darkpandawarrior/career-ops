@@ -157,3 +157,7 @@ docs/superpowers/
 # (see DATA_CONTRACT.md). Re-include them past the unanchored user-layer
 # patterns above (cv.md, portals.yml).
 !test-fixtures/**
+
+# Playwright run output (cv-visual harness) — derived, never committed
+test-results/
+playwright-report/
