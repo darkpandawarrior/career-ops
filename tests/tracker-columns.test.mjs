@@ -28,6 +28,9 @@ function runScript(script, args, sandbox) {
     CAREER_OPS_TRACKER: sandbox.tracker,
     CAREER_OPS_ADDITIONS: sandbox.additions,
     CAREER_OPS_TRACKER_LOCK: sandbox.lock,
+    // Pinned for the same reason as the tracker: keep the fixture isolated from
+    // the real reports/ dir. See makeSandbox.
+    ...(sandbox.reports ? { CAREER_OPS_REPORTS: sandbox.reports } : {}),
   };
   try {
     const stdout = execFileSync(NODE, [join(ROOT, script), ...args], {
@@ -55,12 +58,20 @@ function makeSandbox(trackerContent, additions = {}) {
   const tracker = join(dir, 'applications.md');
   const additionsDir = join(dir, 'tracker-additions');
   const lock = join(dir, 'lock');
+  // An empty reports dir belongs in the sandbox alongside the tracker. Without
+  // it verify-pipeline scans the REAL reports/ dir and emits one "Orphan report"
+  // warning per report not referenced by this fixture's tracker — hundreds of
+  // them on a real career-ops workspace. That makes a multi-call test slow
+  // enough to trip its own 30s timeout under full-suite load, an intermittent
+  // "tracker-columns.test.mjs crashed" that passes fine in isolation.
+  const reportsDir = join(dir, 'reports');
   mkdirSync(additionsDir, { recursive: true });
+  mkdirSync(reportsDir, { recursive: true });
   writeFileSync(tracker, trackerContent);
   for (const [name, content] of Object.entries(additions)) {
     writeFileSync(join(additionsDir, name), content);
   }
-  return { dir, tracker, additions: additionsDir, lock };
+  return { dir, tracker, additions: additionsDir, lock, reports: reportsDir };
 }
 
 // Return the data rows of a tracker (pipe lines that aren't header/separator).
