@@ -284,8 +284,12 @@ function resolveCsbMaxPages(entry) {
 // an empty/short page also stops the loop. `ctx.maxPages` (set by
 // verify-portals' bounded health probe) caps pages per locale on top of the
 // entry/default cap, so a liveness check never walks a full paginated crawl.
-/** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx */
-async function fetchCsb(entry, cfg, ctx) {
+//
+// `probe: true` marks the post-RMK fallback probe: RMK already answered (the
+// board is reachable, just empty of tiles), so an all-locales CSB failure must
+// NOT read as a dead board — return [] instead of throwing.
+/** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx @param {{probe?: boolean}} [opts] */
+async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
   let locales = CSB_DEFAULT_LOCALES;
   try {
     const html = await ctx.fetchText(cfg.searchPage, { redirect: 'error', headers: { accept: 'text/html' } });
@@ -299,6 +303,13 @@ async function fetchCsb(entry, cfg, ctx) {
   const maxPages = Math.min(resolveCsbMaxPages(entry), ctxCap);
   const jobs = [];
   const seen = new Set();
+  // When EVERY locale fails without a single successful request the board is
+  // unreachable, not empty — THROW so scan/portal-health record a failure
+  // instead of "live but empty" (meituan/tencent idiom). The FIRST failure is
+  // retained and surfaced: later locales usually fail for the same root cause,
+  // and keeping the first makes the thrown error deterministic.
+  let succeededOnce = false;
+  let firstErr = null;
 
   for (const locale of locales) {
     if (jobs.length >= MAX_JOBS) break;
@@ -312,9 +323,11 @@ async function fetchCsb(entry, cfg, ctx) {
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: 'recent' }),
         });
-      } catch {
+      } catch (err) {
+        firstErr ??= err;
         break; // this locale failed (e.g. 307 legacy redirect) — try the next
       }
+      succeededOnce = true;
       if (total === null) {
         total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
       }
@@ -340,6 +353,7 @@ async function fetchCsb(entry, cfg, ctx) {
       if (rawCount < CSB_PAGE_SIZE) break;
     }
   }
+  if (!probe && !succeededOnce && firstErr) throw firstErr;
   return jobs;
 }
 
@@ -404,6 +418,9 @@ export default {
     }
     const rmkJobs = await fetchRmk(entry, cfg, ctx);
     if (rmkJobs.length > 0) return rmkJobs;
-    return fetchCsb(entry, cfg, ctx);
+    // RMK answered (healthy, possibly legitimately empty) — the CSB call here
+    // is only a probe for the empty-shell signature, so it must not turn a
+    // failing/absent CSB endpoint into a dead-board throw.
+    return fetchCsb(entry, cfg, ctx, { probe: true });
   },
 };
