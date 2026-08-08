@@ -111,7 +111,11 @@ plugins.lock
 
 # Generated
 .resolved-prompt-*
-node_modules/
+# Unanchored and WITHOUT a trailing slash: `node_modules/` matches a directory
+# but NOT a symlink of the same name, which is how an absolute-path
+# `node_modules -> /Users/<someone>/…` symlink got committed in f51fdb07 and
+# broke the checkout for everyone else.
+node_modules
 bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md
