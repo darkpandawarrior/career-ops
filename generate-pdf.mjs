@@ -124,6 +124,13 @@ const SECTION_ALIASES = new Map([
   ['education', 'education'],
   ['education & certifications', 'education'],
   ['certifications', 'certifications'],
+  ['awards', 'awards'],
+  ['honors', 'awards'],
+  ['honours', 'awards'],
+  ['awards & honors', 'awards'],
+  ['awards and honors', 'awards'],
+  ['honors & awards', 'awards'],
+  ['awards & honours', 'awards'],
   ['skills', 'skills'],
   ['technical skills', 'skills'],
 ]);
