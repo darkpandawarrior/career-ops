@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mjs';
 import { resolveExtractorMode } from './browser-extract.mjs';
+import { parseConfigByExtension } from './jsonc-parse.mjs';
 import dotenv from 'dotenv';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -166,7 +167,10 @@ const PLAYWRIGHT_MCP_WARNING = 'Playwright MCP tools not detected';
 // any other CLI it reported "not detected" no matter how the MCP was set up.
 const MCP_CONFIGS = [
   { cli: 'claude',   files: ['.mcp.json', '.claude/settings.json', '.claude/settings.local.json'] },
-  { cli: 'opencode', files: ['opencode.json'] },
+  // opencode.jsonc is JSONC: OpenCode accepts comments and trailing commas
+  // there, and JSON.parse throwing on them used to read as "no MCP server
+  // configured" (#2252).
+  { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'] },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package.
@@ -185,7 +189,7 @@ function isPlaywrightMcpConfigured(root, activeCli) {
     const file = join(root, ...rel.split('/'));
     if (!existsSync(file)) return false;
     try {
-      const cfg = JSON.parse(readFileSync(file, 'utf8')) ?? {};
+      const cfg = parseConfigByExtension(file, readFileSync(file, 'utf8')) ?? {};
       const buckets = [cfg.mcpServers, cfg.mcp].filter((b) => b && typeof b === 'object');
       return buckets.some((servers) => Object.values(servers).some(isPlaywrightServer));
     } catch {

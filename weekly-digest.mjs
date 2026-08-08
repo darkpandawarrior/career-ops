@@ -41,6 +41,7 @@ import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSy
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml'; // js-yaml v5 is ESM-only — no default export
+import { flagValue } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SESSIONS_DIR = join(CAREER_OPS, 'interview-prep', 'sessions');
@@ -624,14 +625,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   const summaryMode = args.includes('--summary');
-  const fromIdx = args.indexOf('--from');
-  const toIdx = args.indexOf('--to');
-  const dirIdx = args.indexOf('--dir');
-  const from = fromIdx !== -1 ? args[fromIdx + 1] : undefined;
-  const to = toIdx !== -1 ? args[toIdx + 1] : undefined;
-  const sessionsDir = dirIdx !== -1 && args[dirIdx + 1] !== undefined ? args[dirIdx + 1] : DEFAULT_SESSIONS_DIR;
+  const from = flagValue(args, '--from');
+  const to = flagValue(args, '--to');
+  const dirValue = flagValue(args, '--dir');
+  const sessionsDir = dirValue ? dirValue : DEFAULT_SESSIONS_DIR;
 
-  if ((from && !isValidDateStr(from)) || (to && !isValidDateStr(to))) {
+  // `!== undefined`, not truthiness: an explicitly EMPTY bound (`--from=`) is a
+  // malformed date the caller typed, not an absent flag. Treating it as absent
+  // let '' through as a range bound, and `dateStr >= ''` is true for every
+  // session — silently widening the window instead of reporting the mistake.
+  if ((from !== undefined && !isValidDateStr(from)) || (to !== undefined && !isValidDateStr(to))) {
     console.error('  Invalid --from/--to date — expected YYYY-MM-DD');
     process.exit(1);
   }
