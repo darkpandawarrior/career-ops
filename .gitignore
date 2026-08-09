@@ -20,6 +20,12 @@ data/parser-output/**/*.json
 !data/parser-output/**/.gitkeep
 data/cache/ats-companies/
 data/hq/
+# Everything under data/ is personal, so ignore the directory rather than naming
+# files one at a time — a newly generated file is then covered automatically, with
+# no per-filename update needed. Enumerating is how data/apply-queue.md reached a
+# public PR on 2026-07-01. Matches upstream santifer/career-ops. The three tracked
+# .gitkeep files are already in the index, so this does not untrack them.
+data/*
 reports/*.md
 !reports/.gitkeep
 output/*
@@ -120,8 +126,11 @@ bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md
 
-# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
-*.bak
+# Backup files. Two shapes exist: `{file}.bak` (normalize-statuses.mjs,
+# dedup-tracker.mjs) and `{file}.bak-{timestamp}`. A plain `*.bak` glob misses the
+# timestamped form, which for cv.md or portals.yml leaves a file holding the same
+# PII as the original sitting untracked. Trailing `*` covers both.
+*.bak*
 
 # OpenRouter runner — generated data (personal, never commit)
 data/model-blacklist.json
