@@ -144,7 +144,7 @@ export function TodayDashboard({
             ))}
           </div>
           {fresh.length > 6 && (
-            <Link href="/explore" className="mt-3 inline-block text-sm text-muted transition hover:text-brand">
+            <Link href="/explore?view=fresh" className="mt-3 inline-block text-sm text-muted transition hover:text-brand">
               See all {fresh.length} →
             </Link>
           )}

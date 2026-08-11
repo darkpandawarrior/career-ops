@@ -2,19 +2,11 @@
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
 import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
+import { DEFAULT_USER_AGENT, BROWSER_LIKE_USER_AGENT } from '../user-agent.mjs';
+
+export { BROWSER_LIKE_USER_AGENT };
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops/1.3)';
-
-/**
- * Browser-like User-Agent for providers that must clear WAF/CDN bot
- * management blocking the default career-ops UA outright (seen live:
- * Glints' firewall, Geico's Cloudflare-gated Workday tenant). Shared so
- * every provider working around such a block bumps one constant instead
- * of drifting Chrome versions independently per file.
- */
-export const BROWSER_LIKE_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 async function fetchWithTimeout(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {}, method = 'GET', body = null, redirect = 'follow' } = {}, consume) {
   const controller = new AbortController();
@@ -185,9 +177,15 @@ export function makeHttpCtx() {
 export function toEpochMs(value) {
   if (value == null || value === '') return null;
   if (typeof value === 'number') {
+    // A non-positive or non-finite stamp is a board bug, not a 1970 posting.
+    // Callers that page backwards until they cross an age cutoff (getro) would
+    // stop the walk on the first malformed row if 0 read as a real date, and
+    // the age filter would treat the posting as permanently stale. Missing
+    // beats wrong here: null means "undated, keep".
+    if (!Number.isFinite(value) || value <= 0) return null;
     // Heuristic: values < 1e12 are Unix seconds, >= 1e12 are already ms
     return value < 1_000_000_000_000 ? value * 1000 : value;
   }
   const ms = Date.parse(value);
-  return isNaN(ms) ? null : ms;
+  return Number.isNaN(ms) || ms <= 0 ? null : ms;
 }

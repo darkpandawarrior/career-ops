@@ -91,7 +91,10 @@ function buildDateline(letter) {
 function buildAchievementsBlock(achievements) {
   if (!achievements || !achievements.length) return "";
   const items = achievements.map(ach => {
-    const lead = escapeHtml(ach.lead || "");
+    // Trim a caller-supplied trailing comma (cover.md's own bullet-format
+    // example shows the lead ending in a comma) so it never doubles up with
+    // the comma this function always appends.
+    const lead = escapeHtml((ach.lead || "").replace(/,\s*$/, ""));
     const impact = escapeHtml(ach.impact || "");
     return `    <li><b>${lead},</b> ${impact}</li>`;
   }).join("\n");
@@ -113,6 +116,26 @@ function buildFootnotesBlock(footnotes) {
     return `    <p>${escapeHtml(fn)}</p>`;
   }).join("\n");
   return `<div class="footnotes">\n${lines}\n  </div>`;
+}
+
+/**
+ * Build the optional sign-off block: a valediction over the signing name.
+ *
+ * Accepts either a plain string (used verbatim as the valediction) or an
+ * object `{ valediction, name }`. `name` defaults to the candidate name so a
+ * payload can set only the valediction. Returns "" when unset, which keeps
+ * every pre-existing payload rendering byte-identical.
+ */
+function buildSignatureBlock(signature, candidateName) {
+  if (!signature) return "";
+  const isObject = typeof signature === "object" && signature !== null;
+  const valediction = isObject ? signature.valediction : signature;
+  const name = (isObject ? signature.name : "") || candidateName || "";
+  if (!valediction && !name) return "";
+  // Each value is escaped independently; the <br> separator is template markup
+  // emitted between them, never injected into escaped content.
+  const lines = [valediction, name].filter(Boolean).map(escapeHtml);
+  return `<p class="signature">${lines.join("<br>")}</p>`;
 }
 
 // Resolve the cover-letter template through the shared resolver so a
@@ -149,6 +172,12 @@ export function buildHtml(payload, templatePath) {
     : "";
   const problemsBlock = letter.problems_section ? `<p>${escapeHtml(letter.problems_section)}</p>` : "";
 
+  // Optional sign-off (e.g. valediction "Sincerely," over the signing name).
+  // Omitted -> no signature, preserving behavior for payloads that don't set it.
+  // The name falls back to the candidate name so a payload can set only the
+  // valediction. The <br> is emitted around escaped values, never inside one.
+  const signatureBlock = buildSignatureBlock(letter.signature, candidate.name);
+
   const replacements = {
     "{{NAME}}": escapeHtml(candidate.name),
     "{{CONTACT_LINE}}": buildContactLine(candidate),
@@ -162,6 +191,7 @@ export function buildHtml(payload, templatePath) {
     "{{PROBLEMS_BLOCK}}": problemsBlock,
     "{{CLOSING_BLOCK}}": closingBlock,
     "{{LANGUAGE_CLOSING_BLOCK}}": languageClosingBlock,
+    "{{SIGNATURE_BLOCK}}": signatureBlock,
     "{{FOOTNOTES_BLOCK}}": buildFootnotesBlock(letter.footnotes),
   };
 
@@ -169,8 +199,29 @@ export function buildHtml(payload, templatePath) {
   // the original template. A single regex pass (rather than iterative
   // split/join) ensures a substituted value that itself contains a {{TOKEN}}
   // sequence is left literal instead of being re-interpreted as a placeholder.
-  // Tokens with no entry in the map are left untouched.
-  return html.replace(/\{\{[A-Z_]+\}\}/g, (token) => replacements[token] ?? token);
+  //
+  // A token with no entry in the map is a template the renderer cannot fill —
+  // a custom cover-letter template (KINDS.cover in cv-templates.mjs) carrying a
+  // typo'd or unsupported token. Collect those DURING the pass rather than
+  // scanning the result: a scan of the output cannot tell a template token from
+  // the same sequence appearing inside a substituted value, which is exactly
+  // what the single pass above is careful to leave literal.
+  const unresolved = new Set();
+  const rendered = html.replace(/\{\{[A-Z_]+\}\}/g, (token) => {
+    const value = replacements[token];
+    if (value == null) {
+      unresolved.add(token);
+      return token;
+    }
+    return value;
+  });
+
+  // Fail loudly, matching build-cv-html.mjs and build-cv-latex.mjs. Shipping a
+  // letter with a literal {{TOKEN}} in it is worse than not producing one.
+  if (unresolved.size) {
+    throw new Error(`Unresolved placeholders: ${[...unresolved].join(', ')}`);
+  }
+  return rendered;
 }
 
 /** Parse a payload, run the fact gate, and render the cover-letter PDF. */
@@ -194,7 +245,7 @@ Usage:
   --payload   Path to the JSON payload file (required)
   --out       Override output path from payload (optional)
   --format    Override output PDF page format (letter|a4, default: a4)
-  --report    Link the PDF to a tracker report number
+  --report    Link the PDF to a tracker report number in data/pdf-index.tsv
 `);
     process.exit(args.help ? 0 : 1);
   }
