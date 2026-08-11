@@ -725,6 +725,13 @@ for (const file of tsvFiles) {
   // 2. Company + role fuzzy match
   const reportNum = extractReportNum(addition.report);
   let duplicate = null;
+  // Tier-1 only. A report-number match (plus the company guard below) means the
+  // addition is provably the SAME evaluation as the existing row, so its role
+  // title may replace the row's. Tier-2 (entry num) and tier-3 (fuzzy role)
+  // matches keep the existing title: a fuzzy false positive that also rewrites
+  // the title destroys the evidence that two reqs were ever distinct, and that
+  // evidence is the only thing a human could use to spot the bad merge.
+  let reportNumMatched = false;
 
   if (reportNum) {
     // Report-number match must also confirm company (#912). Report-file
@@ -736,6 +743,7 @@ for (const file of tsvFiles) {
       const existingReportNum = extractReportNum(app.report);
       return existingReportNum === reportNum && companiesMatch(app.company, addition.company);
     });
+    if (duplicate) reportNumMatched = true;
   }
 
   if (!duplicate) {
@@ -814,7 +822,8 @@ for (const file of tsvFiles) {
       + (downgrade ? ' — DOWNGRADE, re-eval scored lower' : ''),
     );
     const updatedLine = buildRow({
-      num: duplicate.num, date: addition.date, company: addition.company, role: addition.role,
+      num: duplicate.num, date: addition.date, company: addition.company,
+      role: reportNumMatched ? addition.role : duplicate.role,
       via: addition.via || duplicate.via || '—',
       location: addition.location || duplicate.location || '—',
       score: addition.score, status: duplicate.status, pdf: duplicate.pdf,
