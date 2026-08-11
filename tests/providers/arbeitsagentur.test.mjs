@@ -1,4 +1,4 @@
-// tests/providers/arbeitsagentur.test.mjs — moved from test-all.mjs (test-layout migration).
+// tests/providers/arbeitsagentur.test.mjs — moved verbatim from test-all.mjs (#1440).
 // Fixtures follow the v6 search shape (#2494): the response list is
 // `ergebnisliste`, and a posting carries `referenznummer` /
 // `stellenangebotsTitel` / `firma` / `stellenlokationen[]`.
@@ -6,7 +6,7 @@ import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
-console.log('\n25. Provider — arbeitsagentur');
+console.log('\nProvider — arbeitsagentur');
 
 /** One posting in the v6 search shape. */
 const v6 = (referenznummer, stellenangebotsTitel, ort, extra = {}) => ({
@@ -21,9 +21,9 @@ const v6 = (referenznummer, stellenangebotsTitel, ort, extra = {}) => ({
 const page = (...jobs) => ({ ergebnisliste: jobs });
 
 try {
-  const aa = (await import(pathToFileURL(join(ROOT, 'providers/arbeitsagentur.mjs')).href)).default;
-  const { parseArbeitsagenturConfig, buildLocation, normalizeJob } =
-    await import(pathToFileURL(join(ROOT, 'providers/arbeitsagentur.mjs')).href);
+  const arbeitsagenturModule = await import(pathToFileURL(join(ROOT, 'providers/arbeitsagentur.mjs')).href);
+  const aa = arbeitsagenturModule.default;
+  const { parseArbeitsagenturConfig, buildLocation, normalizeJob } = arbeitsagenturModule;
 
   if (aa.id === 'arbeitsagentur') pass('arbeitsagentur.id is "arbeitsagentur"');
   else fail(`arbeitsagentur.id is ${JSON.stringify(aa.id)}`);
