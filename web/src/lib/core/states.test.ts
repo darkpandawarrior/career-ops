@@ -74,7 +74,7 @@ describe("readCanonicalStates — file path (happy)", () => {
     expect(applied.group).toBe("applied");
   });
 
-  it("caches the first read (file changes after first call are ignored)", async () => {
+  it("caches an unchanged file, and re-reads it once it changes on disk (#2590)", async () => {
     const dir = fs.mkdtempSync(path.join(ROOT, "cache-"));
     currentRoot = dir;
     writeStatesYml(dir, GOOD_YML);
@@ -83,12 +83,31 @@ describe("readCanonicalStates — file path (happy)", () => {
     const first = readCanonicalStates();
     expect(first.map((s) => s.id)).toEqual(["evaluated", "applied", "rejected"]);
 
-    // mutate the file underneath; cache must mean we still see the old list and
-    // the SAME array reference is returned.
+    // Unchanged file: served from cache, same array reference, no re-parse.
+    expect(readCanonicalStates()).toBe(first);
+
+    // Changed file: the mtime+size key misses, so the new list is picked up
+    // without a server restart. The old behaviour pinned the first read for the
+    // process lifetime, which made a core update invisible — POST /api/status
+    // then rejected a newly canonical status and kept accepting a removed one.
     writeStatesYml(dir, `states:\n  - id: only\n    label: Only\n`);
+    fs.utimesSync(path.join(dir, "templates", "states.yml"), new Date(Date.now() + 2000), new Date(Date.now() + 2000));
     const second = readCanonicalStates();
-    expect(second).toBe(first);
-    expect(second.map((s) => s.id)).toEqual(["evaluated", "applied", "rejected"]);
+    expect(second).not.toBe(first);
+    expect(second.map((s) => s.id)).toEqual(["only"]);
+  });
+
+  it("never caches a failure — a repaired states.yml is picked up on the next call (#2590)", async () => {
+    const dir = fs.mkdtempSync(path.join(ROOT, "nocache-fail-"));
+    currentRoot = dir;
+    writeStatesYml(dir, "states: []\n");
+
+    const { readCanonicalStates } = await freshStates();
+    // Readable but unusable -> FALLBACK, and nothing cached for this path.
+    expect(readCanonicalStates().length).toBeGreaterThan(0);
+
+    writeStatesYml(dir, GOOD_YML);
+    expect(readCanonicalStates().map((s) => s.id)).toEqual(["evaluated", "applied", "rejected"]);
   });
 
   it("derives id from label when id is missing, and group from id when dashboard_group absent", async () => {

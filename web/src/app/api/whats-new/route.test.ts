@@ -18,6 +18,11 @@ vi.mock("@/lib/profile-registry", () => ({
 const readApplications = vi.fn<(root?: string) => Application[]>(() => []);
 vi.mock("@/lib/career-ops", () => ({
   readApplications: (root?: string) => readApplications(root),
+  // The route now keys company names through the CORE's normalizeTextKey, loaded
+  // by lib/core/text-key.ts from careerOpsRoot()/tracker-parse.mjs (#2666). ROOT is
+  // a scratch dir with no engine in it, so the loader falls back to its own
+  // Unicode-safe key — which is the behaviour these tests want to exercise anyway.
+  careerOpsRoot: () => ROOT,
 }));
 
 import { GET } from "./route";
