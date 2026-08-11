@@ -26,8 +26,9 @@
  *   node agent-inbox.mjs resolve 1 [--result "scored 4.3 — report 012"]
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { readFileSync, writeFileSync, appendFileSync, openSync, readSync, closeSync, fstatSync, existsSync, mkdirSync } from 'fs';
+import { dirname, resolve as resolvePath } from 'path';
+import { acquireTrackerLock, lockDirFor } from './tracker-lock.mjs';
 
 const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
 
@@ -70,7 +71,15 @@ function ensureFile() {
   if (existsSync(PATH)) return;
   ensureGitignored();
   mkdirSync(dirname(PATH), { recursive: true });
-  writeFileSync(PATH, HEADER);
+  // 'wx' fails with EEXIST if the file appeared between the check above and
+  // this write. The default 'w' flag TRUNCATES, so the loser of that race would
+  // wipe whatever the winner had already appended — the same data-loss class
+  // this file's locking exists to prevent, just narrowed to a brand-new queue.
+  try {
+    writeFileSync(PATH, HEADER, { flag: 'wx' });
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+  }
 }
 
 // Parse the checklist into items, in file order.
@@ -91,12 +100,59 @@ function opt(name, def = '') {
   return v && !v.startsWith('--') ? v : def;
 }
 
-function add() {
+// Both writers below serialize on the shared tracker-lock primitive, keyed on
+// the inbox's own path so it never contends with the applications tracker.
+//
+// `add` could get away with a bare O_APPEND write (atomic below PIPE_BUF), but
+// `resolve` cannot: it is a read-modify-write over the whole file, so a
+// concurrent `add` landing between its read and its write is silently erased
+// when the pre-add snapshot is written back. The dashboard queues into this
+// file while a session resolves items, so that interleaving is a real
+// scenario here, not a theoretical one. One lock covers both rather than two
+// mechanisms that only mostly agree.
+async function withInboxLock(fn) {
+  const lockDir = lockDirFor(resolvePath(PATH), process.env.CAREER_OPS_INBOX_LOCK);
+  const lock = await acquireTrackerLock(lockDir, {
+    timeoutMs: Number(process.env.CAREER_OPS_INBOX_LOCK_TIMEOUT_MS) || 30_000,
+    retryMs: 75,
+    staleMs: 10 * 60_000,
+    tracker: PATH,
+  });
+  try {
+    return await fn();
+  } finally {
+    lock.release();
+  }
+}
+
+/** True when the file's last byte is not a newline, so an append needs one. */
+function needsLeadingNewline() {
+  let fd;
+  try {
+    fd = openSync(PATH, 'r');
+    const { size } = fstatSync(fd);
+    if (size === 0) return false;
+    const buf = Buffer.alloc(1);
+    readSync(fd, buf, 0, 1, size - 1);
+    return buf[0] !== 0x0a;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+async function add() {
   const text = oneLine(process.argv.slice(3).join(' '));
   if (!text) fail('add needs a request, e.g. node agent-inbox.mjs add "evaluate https://..."');
   ensureFile();
-  const body = readFileSync(PATH, 'utf8').replace(/\s+$/, '');
-  writeFileSync(PATH, `${body}\n- [ ] ${stamp()} — ${text}\n`);
+  await withInboxLock(() => {
+    // Append, never read-then-rewrite: the old form read the whole file,
+    // trimmed it and wrote it back, so two concurrent adds each wrote a body
+    // that predated the other and one request vanished with no error.
+    const prefix = needsLeadingNewline() ? '\n' : '';
+    appendFileSync(PATH, `${prefix}- [ ] ${stamp()} — ${text}\n`);
+  });
   process.stdout.write(`Queued: ${text}\n`);
 }
 
@@ -109,19 +165,28 @@ function list() {
   });
 }
 
-function resolve() {
+async function resolve() {
   const n = Number(process.argv[3]);
   if (!Number.isInteger(n) || n < 1) fail('resolve needs a 1-based item number (see `list`)');
-  // Number against the pending view, so `list` then `resolve N` line up.
-  const pending = parseItems().filter((it) => !it.done);
-  const target = pending[n - 1];
-  if (!target) fail(`no pending item #${n} (${pending.length} pending)`);
   const result = oneLine(opt('result'));
-  const lines = readFileSync(PATH, 'utf8').split('\n');
-  let updated = lines[target.line].replace('[ ]', '[x]');
-  if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
-  lines[target.line] = updated;
-  writeFileSync(PATH, lines.join('\n'));
+  // The whole read-modify-write runs under the lock, and the item is re-read
+  // INSIDE it. Resolving off a snapshot taken before the lock would reintroduce
+  // the bug from the other side: an `add` landing in between shifts nothing
+  // (appends go to the end) but a concurrent `resolve` does change which line
+  // is the Nth pending one, so the stale index could tick off the wrong item.
+  const target = await withInboxLock(() => {
+    // Number against the pending view, so `list` then `resolve N` line up.
+    const pending = parseItems().filter((it) => !it.done);
+    const item = pending[n - 1];
+    if (!item) return { missing: pending.length };
+    const lines = readFileSync(PATH, 'utf8').split('\n');
+    let updated = lines[item.line].replace('[ ]', '[x]');
+    if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
+    lines[item.line] = updated;
+    writeFileSync(PATH, lines.join('\n'));
+    return item;
+  });
+  if (target.missing !== undefined) fail(`no pending item #${n} (${target.missing} pending)`);
   process.stdout.write(`Resolved #${n}: ${target.text}\n`);
 }
 
@@ -131,9 +196,9 @@ function fail(msg) {
 }
 
 const cmd = process.argv[2];
-if (cmd === 'add') add();
+if (cmd === 'add') await add();
 else if (cmd === 'list') list();
-else if (cmd === 'resolve') resolve();
+else if (cmd === 'resolve') await resolve();
 else {
   process.stdout.write(
     'Usage:\n' +

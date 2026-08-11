@@ -123,5 +123,53 @@ console.log('6. first add on the default path self-heals .gitignore (idempotent)
   check('.gitignore gains exactly one data/agent-inbox.md rule', ruleCount === 1, `count=${ruleCount}`);
 }
 
+// ---------------------------------------------------------------------------
+console.log('7. concurrent writers never lose an item (adds, and adds racing resolves)');
+{
+  // Real concurrency, not a simulation: execFileSync would serialize the
+  // children and pass against the very read-modify-write this guards.
+  const { spawn } = await import('child_process');
+  const runAsync = (inbox, args) => new Promise((res, rej) => {
+    const child = spawn(NODE, [CLI, ...args], {
+      cwd: dirname(inbox),
+      env: { ...process.env, CAREER_OPS_INBOX: inbox },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    child.on('error', rej);
+    child.on('close', (code) => res(code));
+  });
+
+  // 7a. N concurrent adds. Each old add read the whole file, trimmed it and
+  // wrote it back, so two overlapping adds each wrote a body that predated the
+  // other and one request vanished silently.
+  {
+    const inbox = join(tmp('inbox-race-add-'), 'agent-inbox.md');
+    const N = 25;
+    await Promise.all(Array.from({ length: N }, (_, i) => runAsync(inbox, ['add', `req ${i}`])));
+    const pending = readFileSync(inbox, 'utf8').split('\n').filter((l) => l.startsWith('- [ ]')).length;
+    check(`${N} concurrent adds all survive`, pending === N, `kept ${pending}/${N}`);
+  }
+
+  // 7b. adds racing resolves. `resolve` is a read-modify-write over the WHOLE
+  // file, so an add landing between its read and its write is erased when the
+  // pre-add snapshot is written back. The dashboard queues into this file while
+  // a session resolves items, so this interleaving is a real scenario.
+  {
+    const inbox = join(tmp('inbox-race-mixed-'), 'agent-inbox.md');
+    const SEED = 10, ADD = 8, RESOLVE = 6;
+    for (let i = 0; i < SEED; i++) run(inbox, ['add', `seed ${i}`]);
+    const jobs = [
+      ...Array.from({ length: ADD }, (_, i) => runAsync(inbox, ['add', `late ${i}`])),
+      ...Array.from({ length: RESOLVE }, () => runAsync(inbox, ['resolve', '1', '--result', 'ok'])),
+    ];
+    await Promise.all(jobs);
+    const lines = readFileSync(inbox, 'utf8').split('\n');
+    const total = lines.filter((l) => /^- \[[ x]\]/.test(l)).length;
+    const done = lines.filter((l) => l.startsWith('- [x]')).length;
+    check(`no item lost while ${ADD} adds raced ${RESOLVE} resolves`, total === SEED + ADD, `have ${total}, expected ${SEED + ADD}`);
+    check(`each resolve ticked exactly one item`, done === RESOLVE, `ticked ${done}, expected ${RESOLVE}`);
+  }
+}
+
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
