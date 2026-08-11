@@ -1,25 +1,23 @@
 # Personal data (user fills these)
 cv.md
 article-digest.md
-data/applications.md
-data/applications.db
-data/pipeline.md
-data/scan-history.tsv
-data/scan-runs.tsv
-data/portal-health.tsv
-data/apply-queue.md
-data/follow-ups.md
-data/salary-observations.tsv
-# Status-transition ledger written by set-status.mjs's --on-aware append (synced from
-# upstream career-ops v1.23.0+); same personal-data class as applications.md.
-data/status-log.tsv
-data/blacklist.md
-data/pdf-index.tsv
-data/parser-output/**/*.json
+# Everything under data/ is generated or personal at runtime — only .gitkeep
+# placeholders are tracked (verify with `git ls-files data/`). A blanket rule
+# rather than a per-file list: the list had to be extended for every new data
+# file, and a file added without that edit was simply not ignored. Adopted from
+# upstream, and pinned by tests/user-layer-gitignored.test.mjs, which reads the
+# User Layer straight out of AGENTS.md — where `data/*` is what it declares.
+data/*
+!data/.gitkeep
+!data/offers/
+!data/parser-output/
+
+data/offers/*
+!data/offers/.gitkeep
+data/parser-output/**
+!data/parser-output/**/
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
-data/cache/ats-companies/
-data/hq/
 reports/*.md
 !reports/.gitkeep
 output/*
@@ -117,11 +115,21 @@ plugins.lock
 # broke the checkout for everyone else.
 node_modules
 bun.lock
+# Working copy the test suite makes under the repo root (test-all.mjs
+# `mkdtempSync(join(ROOT, '.tmp-script-test-'))`). A clean run deletes it; a
+# run interrupted mid-way leaves ~650MB of duplicated repo behind, which a
+# reflexive `git add .` would then stage as ~1000 new files.
+.tmp-script-test-*/
+
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md
 
-# Backup files written by normalize-statuses.mjs / dedup-tracker.mjs
-*.bak
+# Backup files. Two shapes exist: `{file}.bak` (normalize-statuses.mjs,
+# dedup-tracker.mjs, tracker.mjs) and `{file}.bak-{ISO timestamp}`
+# (web/src/lib/core/safe-write.ts). A plain `*.bak` glob misses the timestamped
+# form, which for cv.md or portals.yml leaves a file holding the same PII as the
+# original sitting untracked in the repo root. Trailing `*` covers both.
+*.bak*
 
 # OpenRouter runner — generated data (personal, never commit)
 data/model-blacklist.json
@@ -131,11 +139,19 @@ data/model-blacklist.json
 *.mov
 *.mp4
 
+# IDE-specific local config
+.idea/
+.vscode/
+
 # CLI-specific local config
 .claude/settings.local.json
 .claude/memory/
 .opencode/settings.local.json
 .opencode/memory/
+# Claude Code project-level MCP server config — commonly ends up holding
+# personal server credentials (e.g. a plugin's API token) once a user adds
+# an MCP server, same risk class as .env.
+.mcp.json
 career-dashboard
 career-dashboard.exe
 # electron-builder output (packaged .app/.dmg/.exe, hundreds of MB)
