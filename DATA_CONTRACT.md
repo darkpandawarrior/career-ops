@@ -27,6 +27,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/scan-history.tsv` | Your scan history |
 | `data/scan-runs.tsv` | Your per-run scan counters (companies/boards scanned, found/filtered/dupe/new-added tallies; appended by `scan.mjs`, read by `stats.mjs`) |
 | `data/portal-health.tsv` | Consecutive reachability status per scanned portal (`timestamp\tcompany\tstatus`; appended by `scan.mjs`, read by `stats.mjs` to flag portals persistently down) |
+| `data/dead-boards.tsv` | Dead-board memory for the reverse-ATS sweep (`ats\tslug\tmisses\tlast_checked`; written and read by `scan-ats-full.mjs`). Records only boards that returned 404, so repeat sweeps skip them instead of re-probing; re-probed every 30 days. No personal data — public ATS slugs only. Regenerable: deleting it costs a few slower sweeps, nothing more. |
 | `data/follow-ups.md` | Your follow-up history |
 | `data/status-log.tsv` | Your status-transition ledger (`report#\tdate\tfrom\tto\tset-status\t`; appended by `set-status.mjs`, read by `funnel-velocity.mjs`) |
 | `data/apply-queue.md` | Your ranked apply queue (generated from your pipeline + profile) |
