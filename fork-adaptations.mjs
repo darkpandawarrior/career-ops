@@ -132,6 +132,40 @@ export const ADAPTATIONS = [
     },
   },
   {
+    id: 'local-imports-resolve',
+    why: 'A wholesale copy from upstream silently DELETES fork-only exports, and nothing '
+       + 'fails until the importing module is loaded — which for a rarely-run CLI can be '
+       + 'weeks. Observed: copying upstream verify-portals.mjs dropped the fork-only '
+       + '`discoverAlternates`, breaking scan.mjs and 6 test suites at once; and the reverse '
+       + '(upstream retiring jobvite\'s `resolveCompanyId`) is the same hazard from the other '
+       + 'direction. Deliberately has NO baseline snapshot to drift: it re-derives both sides '
+       + 'from the tree every run.',
+    autofix: false,
+    violations(src, file, ctx) {
+      if (!file.endsWith('.mjs')) return [];
+      const out = [];
+      const importRe = /import\s*\{([^}]*)\}\s*from\s*['"](\.\/[^'"]+\.mjs)['"]/g;
+      for (const m of src.matchAll(importRe)) {
+        const target = m[2].slice(2);
+        const targetSrc = ctx?.read(target);
+        if (targetSrc == null) continue;                    // not ours / generated
+        if (/^export\s+\*/m.test(targetSrc)) continue;      // re-export, can't resolve cheaply
+        const exported = new Set([
+          ...[...targetSrc.matchAll(/^export\s+(?:async\s+)?(?:function|class)\s+(\w+)/gm)].map(x => x[1]),
+          ...[...targetSrc.matchAll(/^export\s+(?:const|let|var)\s+(\w+)/gm)].map(x => x[1]),
+          ...[...targetSrc.matchAll(/^export\s*\{([^}]*)\}/gm)]
+            .flatMap(x => x[1].split(',').map(s => s.trim().split(/\s+as\s+/).pop().trim())),
+        ]);
+        for (const raw of m[1].split(',')) {
+          const name = raw.trim().split(/\s+as\s+/)[0].trim();
+          if (!name || name.startsWith('//')) continue;
+          if (!exported.has(name)) out.push(`${file}: imports \`${name}\` from ${m[2]}, which does not export it`);
+        }
+      }
+      return out;
+    },
+  },
+  {
     id: 'web-tests-colocated',
     why: 'Upstream puts web node:test suites in web/tests/; this fork colocates them as '
        + 'web/src/lib/*.test.mjs so they run under `npm run test:engine` while vitest keeps '
@@ -148,10 +182,19 @@ export const ADAPTATIONS = [
 /** Run every adaptation over every source file. Returns a flat violation list. */
 export function check(root = ROOT, files = sourceFiles(root)) {
   const found = [];
+  // Lets a rule read a sibling module (import resolution needs both sides).
+  const cache = new Map();
+  const ctx = { read(rel) {
+    if (cache.has(rel)) return cache.get(rel);
+    let v = null;
+    try { v = readFileSync(join(root, rel), 'utf-8'); } catch { v = null; }
+    cache.set(rel, v);
+    return v;
+  } };
   for (const file of files) {
     let src;
     try { src = readFileSync(join(root, file), 'utf-8'); } catch { continue; }
-    for (const a of ADAPTATIONS) found.push(...a.violations(src, file).map(m => ({ id: a.id, message: m })));
+    for (const a of ADAPTATIONS) found.push(...a.violations(src, file, ctx).map(m => ({ id: a.id, message: m })));
   }
   return found;
 }

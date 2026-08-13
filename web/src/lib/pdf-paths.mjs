@@ -8,7 +8,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import * as yaml from "js-yaml"; // js-yaml v5 is ESM-only — no default export
+import * as yaml from "js-yaml";
 
 /**
  * Lowercase, non-alphanumeric runs -> single hyphen, trimmed.

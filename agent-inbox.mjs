@@ -26,9 +26,12 @@
  *   node agent-inbox.mjs resolve 1 [--result "scored 4.3 — report 012"]
  */
 
-import { readFileSync, writeFileSync, appendFileSync, openSync, readSync, closeSync, fstatSync, existsSync, mkdirSync } from 'fs';
-import { dirname, resolve as resolvePath } from 'path';
-import { acquireTrackerLock, lockDirFor } from './tracker-lock.mjs';
+import {
+  readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync,
+  openSync, fstatSync, readSync, closeSync,
+} from 'fs';
+import { dirname } from 'path';
+import { withPipelineLock } from './pipeline-lock.mjs';
 
 const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
 
@@ -71,14 +74,33 @@ function ensureFile() {
   if (existsSync(PATH)) return;
   ensureGitignored();
   mkdirSync(dirname(PATH), { recursive: true });
-  // 'wx' fails with EEXIST if the file appeared between the check above and
-  // this write. The default 'w' flag TRUNCATES, so the loser of that race would
-  // wipe whatever the winner had already appended — the same data-loss class
-  // this file's locking exists to prevent, just narrowed to a brand-new queue.
+  // 'wx': atomic create-exclusive. Two concurrent first-time `add` calls can
+  // both pass the existsSync check above before either writes; without an
+  // exclusive flag, the second writeFileSync (default 'w', which truncates)
+  // lands after the first has already appended its item and wipes it back to
+  // just the header. 'wx' makes only one of them win the create — the loser
+  // gets EEXIST and does nothing, same as if it had seen existsSync === true.
   try {
     writeFileSync(PATH, HEADER, { flag: 'wx' });
   } catch (err) {
     if (err?.code !== 'EEXIST') throw err;
+  }
+}
+
+// Whether appending to `path` needs a leading newline first, i.e. the file is
+// non-empty and doesn't already end in one. Reads only the last byte instead
+// of the whole file — the full-file read this replaced was only ever used to
+// check one byte.
+function needsLeadingNewline(path) {
+  const fd = openSync(path, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    if (size === 0) return false;
+    const buf = Buffer.alloc(1);
+    readSync(fd, buf, 0, 1, size - 1);
+    return buf[0] !== 0x0a; // '\n'
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -100,59 +122,47 @@ function opt(name, def = '') {
   return v && !v.startsWith('--') ? v : def;
 }
 
-// Both writers below serialize on the shared tracker-lock primitive, keyed on
-// the inbox's own path so it never contends with the applications tracker.
-//
-// `add` could get away with a bare O_APPEND write (atomic below PIPE_BUF), but
-// `resolve` cannot: it is a read-modify-write over the whole file, so a
-// concurrent `add` landing between its read and its write is silently erased
-// when the pre-add snapshot is written back. The dashboard queues into this
-// file while a session resolves items, so that interleaving is a real
-// scenario here, not a theoretical one. One lock covers both rather than two
-// mechanisms that only mostly agree.
-async function withInboxLock(fn) {
-  const lockDir = lockDirFor(resolvePath(PATH), process.env.CAREER_OPS_INBOX_LOCK);
-  const lock = await acquireTrackerLock(lockDir, {
-    timeoutMs: Number(process.env.CAREER_OPS_INBOX_LOCK_TIMEOUT_MS) || 30_000,
-    retryMs: 75,
-    staleMs: 10 * 60_000,
-    tracker: PATH,
-  });
-  try {
-    return await fn();
-  } finally {
-    lock.release();
-  }
-}
-
-/** True when the file's last byte is not a newline, so an append needs one. */
-function needsLeadingNewline() {
-  let fd;
-  try {
-    fd = openSync(PATH, 'r');
-    const { size } = fstatSync(fd);
-    if (size === 0) return false;
-    const buf = Buffer.alloc(1);
-    readSync(fd, buf, 0, 1, size - 1);
-    return buf[0] !== 0x0a;
-  } catch {
-    return false;
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
-}
-
 async function add() {
   const text = oneLine(process.argv.slice(3).join(' '));
   if (!text) fail('add needs a request, e.g. node agent-inbox.mjs add "evaluate https://..."');
   ensureFile();
-  await withInboxLock(() => {
-    // Append, never read-then-rewrite: the old form read the whole file,
-    // trimmed it and wrote it back, so two concurrent adds each wrote a body
-    // that predated the other and one request vanished with no error.
-    const prefix = needsLeadingNewline() ? '\n' : '';
-    appendFileSync(PATH, `${prefix}- [ ] ${stamp()} — ${text}\n`);
-  });
+  // Append rather than rewrite. This is the queue's concurrent path — anything
+  // running in the background can drop an item in — and a read-whole-file /
+  // write-whole-file cycle loses every request that lands between the two. With
+  // 30 concurrent `add` calls, half the queue vanished silently.
+  //
+  // POSIX guarantees an O_APPEND write is atomic below PIPE_BUF, and one
+  // checklist line is far under it, so concurrent appends interleave instead of
+  // clobbering. WINDOWS IS NOT POSIX, and that is the whole reason for the lock
+  // below: with 30 concurrent adds on windows-latest this dropped exactly one
+  // item (#2777), silently, which is the same failure this function exists to
+  // remove — it just moved to the one platform the guarantee does not cover.
+  //
+  // The lock is the repo's existing one rather than a second mechanism: the
+  // same `withPipelineLock` that scan.mjs uses for scan-history appends. Two
+  // lock implementations would drift, and the append is short enough that
+  // serializing it costs nothing next to spawning the process that calls it.
+  //
+  // Checking the last byte still happens INSIDE the lock: it decides whether a
+  // separating newline is needed, and reading it outside would race with
+  // another writer's append between the check and the write.
+  //
+  // timeoutMs is raised from the shared 8s default because this queue's whole
+  // point is bursty concurrent writers (a dashboard, a script, cron all drop
+  // items at once), and lock acquisition is a retry lottery, not a fair queue.
+  // Serving N herded waiters is the coupon-collector problem: ~N·H(N) rounds,
+  // so 30 concurrent adds need ~120 rounds while 8000/80 = 100 only affords
+  // ~100. On the slow, contended windows-latest runner that shortfall makes one
+  // waiter time out and its item is LOST, the exact #2777 drop, reappearing as
+  // a loud LockTimeoutError instead of a silent overwrite. Jitter in
+  // pipeline-lock.mjs cuts the collision rate ~6x but is explicitly "not a
+  // cure"; the fit-for-purpose budget for a burst-write queue is the contained
+  // fix. 30s gives ~375 rounds of headroom, well past the herd's worst case,
+  // while the critical section itself is a single sub-millisecond append.
+  await withPipelineLock(PATH, () => {
+    const separator = needsLeadingNewline(PATH) ? '\n' : '';
+    appendFileSync(PATH, `${separator}- [ ] ${stamp()} — ${text}\n`);
+  }, { timeoutMs: 30_000 });
   process.stdout.write(`Queued: ${text}\n`);
 }
 
@@ -165,28 +175,19 @@ function list() {
   });
 }
 
-async function resolve() {
+function resolve() {
   const n = Number(process.argv[3]);
   if (!Number.isInteger(n) || n < 1) fail('resolve needs a 1-based item number (see `list`)');
+  // Number against the pending view, so `list` then `resolve N` line up.
+  const pending = parseItems().filter((it) => !it.done);
+  const target = pending[n - 1];
+  if (!target) fail(`no pending item #${n} (${pending.length} pending)`);
   const result = oneLine(opt('result'));
-  // The whole read-modify-write runs under the lock, and the item is re-read
-  // INSIDE it. Resolving off a snapshot taken before the lock would reintroduce
-  // the bug from the other side: an `add` landing in between shifts nothing
-  // (appends go to the end) but a concurrent `resolve` does change which line
-  // is the Nth pending one, so the stale index could tick off the wrong item.
-  const target = await withInboxLock(() => {
-    // Number against the pending view, so `list` then `resolve N` line up.
-    const pending = parseItems().filter((it) => !it.done);
-    const item = pending[n - 1];
-    if (!item) return { missing: pending.length };
-    const lines = readFileSync(PATH, 'utf8').split('\n');
-    let updated = lines[item.line].replace('[ ]', '[x]');
-    if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
-    lines[item.line] = updated;
-    writeFileSync(PATH, lines.join('\n'));
-    return item;
-  });
-  if (target.missing !== undefined) fail(`no pending item #${n} (${target.missing} pending)`);
+  const lines = readFileSync(PATH, 'utf8').split('\n');
+  let updated = lines[target.line].replace('[ ]', '[x]');
+  if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
+  lines[target.line] = updated;
+  writeFileSync(PATH, lines.join('\n'));
   process.stdout.write(`Resolved #${n}: ${target.text}\n`);
 }
 
@@ -198,7 +199,7 @@ function fail(msg) {
 const cmd = process.argv[2];
 if (cmd === 'add') await add();
 else if (cmd === 'list') list();
-else if (cmd === 'resolve') await resolve();
+else if (cmd === 'resolve') resolve();
 else {
   process.stdout.write(
     'Usage:\n' +

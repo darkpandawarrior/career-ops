@@ -1,13 +1,4 @@
-/**
- * profile-language.mjs — output-language directive shared by the headless evaluators
- *
- * config/profile.yml's `language.output` sets the language every evaluation
- * should be written in. Before this module existed, each headless engine
- * (gemini/ollama/openai-eval.mjs, openrouter-runner.mjs) either ignored it or
- * let the JD's own language override it. Centralising the parse + directive
- * text here keeps that logic in one place and one behavior everywhere (#1916).
- */
-import { load as yamlLoad } from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const DEFAULT_OUTPUT_LANGUAGE = 'en';
 
@@ -23,7 +14,7 @@ function normalizeOutputLanguage(value) {
 /** Parse language.output from profile YAML, falling back to English. */
 export function parseOutputLanguage(profileYaml) {
   try {
-    const profile = yamlLoad(String(profileYaml ?? '')) || {};
+    const profile = yaml.load(String(profileYaml ?? '')) || {};
     return normalizeOutputLanguage(profile?.language?.output);
   } catch {
     return DEFAULT_OUTPUT_LANGUAGE;

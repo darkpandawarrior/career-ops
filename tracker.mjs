@@ -34,12 +34,13 @@
  * so the index can never serve stale reads.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, statSync, renameSync, rmSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
-import { dirname, resolve, join, basename } from 'path';
+import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 import { canonicalizeTrackerPath, openTrackerTransaction } from './tracker-lock.mjs';
 
 const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
@@ -164,7 +165,6 @@ function repairPlaceholder(cell) {
 // ── Markdown parsing ────────────────────────────────────────────────
 
 function parseMarkdownRows(text, diag) {
-  const rows = [];
   const lines = text.split('\n');
   // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
   // (e.g. an inserted Location column) can't shift Score into Status. Falls back
@@ -172,6 +172,7 @@ function parseMarkdownRows(text, diag) {
   const colmap = resolveColumns(lines);
   // Expected `split('|')` width: highest mapped index + the trailing empty cell.
   const width = Math.max(...Object.values(colmap)) + 2;
+  const rows = [];
   for (const line of lines) {
     const t = line.trim();
     if (!t.startsWith('|')) continue;
@@ -197,12 +198,12 @@ function parseMarkdownRows(text, diag) {
 // duplicates are all removed.
 export function removeRowByNum(content, num) {
   const target = String(num).trim();
-  let removedCount = 0;
-  let report = null;
   const lines = content.split('\n');
   // Header-aware report-column lookup (#954) — fixed index 7 read the wrong
   // cell on customized layouts (e.g. with a Location column).
   const colmap = resolveColumns(lines);
+  let removedCount = 0;
+  let report = null;
   const kept = lines.filter((line) => {
     const t = line.trim();
     if (!t.startsWith('|')) return true; // non-table line — keep verbatim
@@ -449,13 +450,13 @@ async function exportMd(args) {
     process.exit(1);
   }
 
-  // --out can target applications.md itself (a repair round-trip). Only that
-  // case needs the shared tracker lock — an export to any other path is a
-  // read-only snapshot and must not block on (or be blocked by) another
-  // writer.
   const trackerPath = canonicalizeTrackerPath(MD_PATH);
-  const writesTracker = outPath ? canonicalizeTrackerPath(outPath) === trackerPath : false;
-  const trackerTransaction = writesTracker ? await openTrackerTransaction(trackerPath) : null;
+  const writesTracker = outPath
+    ? canonicalizeTrackerPath(outPath) === trackerPath
+    : false;
+  const trackerTransaction = writesTracker
+    ? await openTrackerTransaction(trackerPath)
+    : null;
 
   try {
     const DatabaseSync = await loadSqlite();
@@ -492,27 +493,10 @@ async function exportMd(args) {
 
 // ── Main ────────────────────────────────────────────────────────────
 
-// Atomic file replace via a same-directory temp file + rename, so a reader never
-// sees a partially written applications.md (mirrors merge-tracker's writer).
-function writeFileAtomic(filePath, content) {
-  const tmp = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  try {
-    writeFileSync(tmp, content);
-    renameSync(tmp, filePath);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
-  }
-}
-
 // `delete --num N` removes one application row from applications.md and rebuilds
 // the derived index. The markdown stays the source of truth: callers (incl. the
 // web) orchestrate this script rather than editing applications.md directly.
-// The read and atomic replacement share the same cross-process lock
-// merge-tracker.mjs/set-status.mjs use (tracker-lock.mjs, via
-// openTrackerTransaction) — a batch merge and a row delete can no longer race
-// each other into a corrupted/half-written applications.md, and reading only
-// after the lock is held means a delete can never act on a stale pre-lock copy.
+// The read and atomic replacement share merge-tracker's cross-process lock.
 async function deleteApp(args) {
   const num = flagValue(args, '--num');
   if (!num) {
@@ -523,10 +507,7 @@ async function deleteApp(args) {
     console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
     process.exit(1);
   }
-  const dryRun = args.includes('--dry-run');
-  if (dryRun) {
-    // Dry-runs write nothing, so they can safely overlap with a real
-    // merge/delete — only the actual write needs the exclusive lock.
+  if (args.includes('--dry-run')) {
     const { removed, removedCount, report } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
     if (!removed) {
       console.error(`No application numbered ${num} in ${MD_PATH}.`);
@@ -537,13 +518,7 @@ async function deleteApp(args) {
     return;
   }
 
-  let trackerTransaction;
-  try {
-    trackerTransaction = await openTrackerTransaction(MD_PATH);
-  } catch (err) {
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
-  }
+  const trackerTransaction = await openTrackerTransaction(MD_PATH);
 
   let removal;
   try {
