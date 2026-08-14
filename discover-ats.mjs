@@ -335,6 +335,14 @@ export function renderPortalEntry(match) {
 }
 
 /** Normalize a careers_url/api for dedupe comparison: lowercase, strip trailing slash. */
+// Deliberately NOT url-key.mjs's normalizeUrl, despite the identical name.
+// That one builds a POSTING identity key and returns '' for anything
+// unparseable (placeholders, `local:` refs, non-http). Here the result goes
+// straight into a Set that dedupeAgainstPortals() membership-tests, so a single
+// portal with a placeholder careers_url would put '' in the set and then every
+// new portal with an unparseable URL would be silently dropped as a duplicate.
+// This is portal-config comparison, not posting identity — same name, different
+// job. (It also lowercases the path, which url-key deliberately preserves.)
 function normalizeUrl(u) {
   return String(u || '').trim().toLowerCase().replace(/\/+$/, '');
 }

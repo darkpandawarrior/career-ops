@@ -21,6 +21,10 @@
  */
 
 import { fileURLToPath } from 'node:url';
+// Shared implementation: it refuses non-emittable code points, so `&#0;` stays
+// literal instead of decoding to a raw NUL that would land in scan-history.
+export { decodeEntities } from './providers/_html-entities.mjs';
+import { decodeEntities } from './providers/_html-entities.mjs';
 import { fetchJson } from './providers/_http.mjs';
 
 const MIN_USEFUL = 200; // chars; below this we treat as a miss and fall back
@@ -32,12 +36,6 @@ const ENTITIES = {
   '&rsquo;': "'", '&lsquo;': "'", '&ldquo;': '"', '&rdquo;': '"', '&hellip;': '...',
 };
 
-export function decodeEntities(s) {
-  return s
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-    .replace(/&[a-z]+;|&#x?\d*;/gi, m => ENTITIES[m.toLowerCase()] ?? m);
-}
 
 export function htmlToText(html) {
   if (!html) return '';
