@@ -12,16 +12,6 @@
 // resolution: importing the module in-process would read this process's env, not
 // a lane's. Each check spawns a real scan.mjs over the local-parser fixture
 // board, so nothing here touches the network.
-//
-// FORK ADAPTATION: upstream resolves data/pipeline.md and data/scan-history.tsv
-// relative to process.cwd(), so its version of this test sandboxes with `cwd`
-// alone. This fork resolves them from CAREER_OPS_ROOT (or scan.mjs's own
-// directory), never from cwd — see path-resolver.mjs — so every run below also
-// pins CAREER_OPS_ROOT at the sandbox (same adaptation already documented in
-// tests/scan-company-role-dedup.test.mjs and tests/scan-url-dedup.test.mjs).
-// Skipping that would make the "defaults unchanged" case (#1) write into this
-// checkout's REAL data/pipeline.md and data/scan-history.tsv instead of the
-// sandbox — exactly the real-user-data write the test suite must never risk.
 import { pass, fail, ROOT, NODE } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -47,7 +37,7 @@ tracked_companies:
       script: tests/fixtures/three-city-board.mjs
 `;
 
-/** A scan sandbox: temp CAREER_OPS_ROOT, empty tracker, fixture portals. */
+/** A scan sandbox: temp cwd, empty tracker, fixture portals. */
 function makeLane() {
   const dir = mkdtempSync(join(tmpdir(), 'scan-outpaths-'));
   mkdirSync(join(dir, 'data'), { recursive: true });
@@ -57,15 +47,37 @@ function makeLane() {
   return { dir, portals };
 }
 
-// CAREER_OPS_ROOT pins scan.mjs's data root at the sandbox (see file header);
-// local-parser still resolves its fixture script relative to the real repo
-// root via `cwd`, so no network is ever involved.
-const runScan = (dir, env) => execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
-  cwd: dir,
-  env: { ...process.env, CAREER_OPS_ROOT: dir, ...env },
-  encoding: 'utf-8',
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+// Every variable scan.mjs resolves a path from. Cleared before each spawn so a
+// test's environment is only what that test asked for.
+//
+// This matters more here than in a typical suite, because the audience for
+// these variables is precisely the person running the suite with them set: the
+// docs added alongside this feature tell a second-lane user to export
+// CAREER_OPS_PIPELINE and CAREER_OPS_SCAN_HISTORY. With the parent environment
+// inherited wholesale, check 1 below - the one asserting DEFAULT behavior -
+// would follow that user's override and append fixture postings to their real
+// inbox, and the corresponding scan-history write would poison their dedup
+// source. A test suite must not be able to write into the data it is testing
+// the handling of (CodeRabbit, reviewing #2568).
+const SCANNER_PATH_VARS = [
+  'CAREER_OPS_PORTALS',
+  'CAREER_OPS_PROFILE',
+  'CAREER_OPS_PIPELINE',
+  'CAREER_OPS_SCAN_HISTORY',
+];
+
+// CAREER_OPS_ROOT pins scan.mjs's data root at the sandbox (fork: multi-profile),
+// on top of upstream's scrubbing of inherited scanner path vars.
+const runScan = (dir, env) => {
+  const childEnv = { ...process.env };
+  for (const name of SCANNER_PATH_VARS) delete childEnv[name];
+  return execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
+    cwd: dir,
+    env: { ...childEnv, CAREER_OPS_ROOT: dir, ...env },
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+};
 
 /** Pending rows in a pipeline file; [] when the file was never created. */
 function entries(pipelinePath) {
@@ -184,5 +196,45 @@ function entries(pipelinePath) {
     fail(`scan into a new directory failed: ${err.message}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// 5. The suite's own isolation, asserted rather than assumed. Check 1 claims to
+//    exercise DEFAULT paths, but it can only do that if nothing ambient reaches
+//    the child - and the user most likely to run this suite with these variables
+//    exported is the second-lane user this feature was built for. Simulate that
+//    environment and confirm the fixture's writes land in the lane's own
+//    directory and nowhere else.
+//
+//    Goes through the same runScan() the checks above use, deliberately. A case
+//    that spawned scan.mjs with its own hand-built environment would keep
+//    passing if the clearing were dropped, which is the whole failure mode: on a
+//    machine with these variables unset, removing it changes nothing observable.
+{
+  const { dir, portals } = makeLane();
+  const ambientRoot = mkdtempSync(join(tmpdir(), 'scan-outpaths-ambient-'));
+  const ambientPipeline = join(ambientRoot, 'pipeline.md');
+  const ambientHistory = join(ambientRoot, 'scan-history.tsv');
+  const saved = SCANNER_PATH_VARS.map((name) => [name, process.env[name]]);
+  try {
+    process.env.CAREER_OPS_PIPELINE = ambientPipeline;
+    process.env.CAREER_OPS_SCAN_HISTORY = ambientHistory;
+    runScan(dir, { CAREER_OPS_PORTALS: portals });
+    const laneEntries = entries(join(dir, 'data', 'pipeline.md')).length;
+    const leaked = existsSync(ambientPipeline) || existsSync(ambientHistory);
+    if (laneEntries > 0 && !leaked) {
+      pass('an ambient CAREER_OPS_PIPELINE / CAREER_OPS_SCAN_HISTORY cannot redirect this suite (#2568)');
+    } else {
+      fail(`suite is not isolated from the ambient environment: ${laneEntries} lane entr(y/ies), ambient files ${leaked ? 'WRITTEN' : 'untouched'} (#2568)`);
+    }
+  } catch (err) {
+    fail(`ambient-environment isolation check failed: ${err.message}`);
+  } finally {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(ambientRoot, { recursive: true, force: true });
   }
 }

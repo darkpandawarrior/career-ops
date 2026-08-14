@@ -124,7 +124,7 @@ export async function POST(req: Request) {
   // (tracker.mjs delete doesn't yet share a lock with merge-tracker — see run-registry).
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
 
-  const child = spawn(binPath, args, { cwd: root, env: { ...process.env, CAREER_OPS_ROOT: root }, shell: process.platform === "win32" });
+  const child = spawn(binPath, args, { cwd: root, env: { ...process.env, CAREER_OPS_ROOT: root }, shell: process.platform === "win32" , stdio: ["ignore", "pipe", "pipe"] });
   const enc = new TextEncoder();
 
   // `closed` + kill timer in the OUTER scope so cancel() (client disconnect) can

@@ -334,7 +334,7 @@ export function findReportFile(n: string, root: string = careerOpsRoot()): strin
   if (linked) {
     const p = path.resolve(root, "data", linked);
     // Containment: a hand-edited link must not resolve outside the project.
-    if (p.endsWith(".md") && containedRealpath(p, root)) return p;
+    if (p.endsWith(".md") && !isReservedReportFile(p) && containedRealpath(p, root)) return p;
   }
   let files: string[];
   try {

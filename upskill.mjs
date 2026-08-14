@@ -22,23 +22,64 @@
  *      node upskill.mjs --self-test
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { extractSkills } from './skill-extract.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
   ? join(CAREER_OPS_DATA, 'data/applications.md')
   : join(CAREER_OPS_DATA, 'applications.md');
 const CV_FILE = join(CAREER_OPS_DATA, 'cv.md');
 const PROFILE_FILE = join(CAREER_OPS_DATA, 'config/profile.yml');
+
+// Canonical reports-root containment. A tracker link resolves to a candidate
+// path; accept it only if it stays inside the repo's reports/ directory. Two
+// layers: a cheap lexical traversal guard (no stat) rejects a crafted link like
+// reports/../../etc/passwd, which join() collapses to a repo-relative path that
+// no longer starts with reports/; then realpath canonicalization rejects a
+// symlink whose target escapes reports/ (a lexical-only check would follow it).
+// realpathSync throws ENOENT/ENOTDIR for a not-yet-created candidate or a
+// missing reports root — both are non-fatal: a missing candidate falls through
+// to the downstream read (which returns null, preserving prior semantics), a
+// missing root means there are simply no reports. Only genuinely unexpected
+// errors rethrow, matching readTextIfExists. Identical to the guard in
+// analyze-patterns.mjs so both sites behave the same.
+function withinReports(candidate) {
+  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
+  let realRoot;
+  try {
+    realRoot = realpathSync(join(CAREER_OPS_DATA, 'reports'));
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+    throw err;
+  }
+  let realCandidate;
+  try {
+    realCandidate = realpathSync(candidate);
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return true;
+    throw err;
+  }
+  const rootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+  return realCandidate === realRoot || realCandidate.startsWith(rootWithSep);
+}
+
+// Read a file, returning null when it does not exist. A pre-flight existsSync
+// costs a full stat per report and races with the read (#2385); attempting the
+// read and handling the missing-file error costs the same as a bare read.
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
 
 // Bump when extraction rules change in a way that would make gap lists from
 // older runs non-comparable. The upskill mode's diff-vs-previous section only
@@ -53,6 +94,7 @@ const LOW_FIT_SCORE = 4.0;
 // Skill vocabulary + canonical extractor moved to skill-extract.mjs (#1896) so
 // upskill, jd-skill-gap, and analyze-patterns share ONE source of truth. Re-
 // exported here so existing importers of extractSkills keep working unchanged.
+import { extractSkills } from './skill-extract.mjs';
 export { extractSkills };
 
 // --- Machine Summary + Gap table parsing ---
@@ -169,6 +211,32 @@ export function aggregateGaps(reports, knownSkills) {
   return { gaps, excludedAsKnown, totalLowFit };
 }
 
+/**
+ * Targeted-mode gap analysis for a single JD (#1739): which JD skills are gaps
+ * vs. already known from the CV/profile.
+ *
+ * Uses the SAME canonicalization as the aggregate path (extractSkills on both
+ * sides, canonical-to-canonical comparison) so a known CV skill is suppressed
+ * and a real gap surfaces. The previous inline implementation matched raw
+ * lowercased regex tokens with substring `.includes()`, which (a) never matched
+ * symbol skills like `c\+\+`/`\.net` and (b) over-suppressed via substrings
+ * (`go` ⊂ `mongodb`, `sql` ⊂ `postgresql`, `java` ⊂ `javascript`) — inverting the
+ * result on every skill (#1851). Emits canonical names, matching aggregate mode.
+ *
+ * @param {string} jdText - the target job description text
+ * @param {string} knownText - cv + profile text (already-known skills)
+ * @returns {{ gaps: string[], excludedAsKnown: string[], knownSkills: string[] }}
+ */
+export function computeTargetedGaps(jdText, knownText) {
+  const known = extractSkills(knownText);
+  const gaps = [];
+  const excludedAsKnown = [];
+  for (const skill of extractSkills(jdText)) {
+    (known.has(skill) ? excludedAsKnown : gaps).push(skill);
+  }
+  return { gaps, excludedAsKnown, knownSkills: [...known].sort() };
+}
+
 // --- Main ---
 function analyze(minReports) {
   if (!existsSync(APPS_FILE)) {
@@ -190,11 +258,17 @@ function analyze(minReports) {
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
     // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
-    const candidates = [join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])];
-    const reportPath = candidates.find(p => existsSync(p));
-    if (!reportPath) continue;
+    // The read is attempted directly instead of probing with existsSync first,
+    // which costs a full stat per report and races with the read (#2385).
+    const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
+    let content = null;
+    for (const p of candidates) {
+      if (!withinReports(p)) continue;
+      content = readTextIfExists(p);
+      if (content !== null) break;
+    }
+    if (content === null) continue;
     reportsRead += 1;
-    const content = readFileSync(reportPath, 'utf-8');
     const { score, gapText, hasMachineSummary } = parseReportGaps(content);
     if (hasMachineSummary) reportsWithMachineSummary += 1;
     const trackerScore = parseFloat(row.score);
@@ -344,6 +418,107 @@ soft_gaps:
   if (!/Kafka/.test(parsed.gapText)) failures.push('Gap table row not captured');
   if (!/Airflow/.test(parsed.gapText)) failures.push('soft_gaps not captured');
 
+  // Targeted mode (#1851): known-skill suppression must be canonical-to-canonical,
+  // never raw-token substring matching. The old inline path inverted every skill —
+  // CV skills shown as gaps, real gaps hidden. This is the exact reproduction from
+  // the bug report.
+  {
+    const { gaps, excludedAsKnown } = computeTargetedGaps(
+      'Kubernetes, C++, .NET, Java, SQL, Go, LLMs',        // JD asks for
+      'k8s, C++, .NET, JavaScript, PostgreSQL, MongoDB, LLMs' // CV already has
+    );
+    const gapSet = new Set(gaps);
+    const exSet = new Set(excludedAsKnown);
+    for (const g of ['Java', 'SQL', 'Go']) {
+      if (!gapSet.has(g)) failures.push(`targeted: ${g} should be a gap (got ${gaps.join(',')})`);
+      if (exSet.has(g)) failures.push(`targeted: real gap ${g} wrongly suppressed as known`);
+    }
+    for (const k of ['Kubernetes', 'C++', '.NET', 'LLMs']) {
+      if (!exSet.has(k)) failures.push(`targeted: ${k} should be excluded as known (got ${excludedAsKnown.join(',')})`);
+      if (gapSet.has(k)) failures.push(`targeted: known skill ${k} wrongly reported as gap`);
+    }
+  }
+
+  // Targeted --url-text path (#1894): the fetched page text must reach
+  // computeTargetedGaps as a plain STRING. It used to be run through normalizeJd
+  // (which wants the { title, text } DOM object), yielding { text: '' } and then
+  // a `text.matchAll is not a function` crash. Guard both halves: a realistic
+  // multi-line JD string produces the right gaps, and the source no longer feeds
+  // the raw string to normalizeJd.
+  {
+    const jdText = 'Requirements:\n- Kubernetes and Go\n- 5+ years experience';
+    const { gaps } = computeTargetedGaps(jdText, 'Python, AWS'); // must not throw on a string
+    if (!gaps.includes('Kubernetes') || !gaps.includes('Go')) {
+      failures.push(`url-text: multi-line JD string should yield Kubernetes+Go gaps (got ${gaps.join(',')})`);
+    }
+    const selfSrc = readFileSync(fileURLToPath(import.meta.url), 'utf-8');
+    if (/normalizeJd\(\s*targetText/.test(selfSrc)) {
+      failures.push('url-text: upskill.mjs still passes the raw fetched string to normalizeJd (regression, #1894)');
+    }
+    if (!/compactText\(targetText\)/.test(selfSrc)) {
+      failures.push('url-text: fetched text should be normalized with compactText (string->string), #1894');
+    }
+  }
+
+  // Reports-root containment: a legit link stays inside reports/, a crafted
+  // traversal link escapes root and must be rejected before any read. join()
+  // collapses '..' at the call site, so the candidate is already absolute here.
+  {
+    const legit = join(CAREER_OPS_DATA, 'reports', '042-acme-2026-01-01.md');
+    if (!withinReports(legit)) failures.push('containment: legit reports/ path wrongly rejected');
+    const escape = join(CAREER_OPS_DATA, 'reports/../../../etc/passwd');
+    if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
+    const sibling = join(CAREER_OPS_DATA, 'reports-evil', 'x.md');
+    if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+  }
+
+  // Symlink-escape + missing-file graceful degradation (#2655). realpath
+  // canonicalization must reject a symlink whose target resolves OUTSIDE
+  // reports/ (a lexical-only guard would follow it), while a real file inside
+  // reports/ still passes and a missing candidate degrades gracefully (the
+  // downstream read returns null) rather than throwing.
+  {
+    const reportsDir = join(CAREER_OPS_DATA, 'reports');
+    if (existsSync(reportsDir)) {
+      const tag = `__co2655-${process.pid}-${Date.now()}`;
+      const realReport = join(reportsDir, `${tag}-real.md`);
+      const escapeLink = join(reportsDir, `${tag}-escape.md`);
+      const missing = join(reportsDir, `${tag}-missing.md`);
+      // Missing candidate must not throw and must stay accepted so the
+      // downstream read returns null (pre-#2385 existsSync-removal semantics).
+      try {
+        if (!withinReports(missing)) failures.push('containment: missing report file wrongly rejected (should degrade to a null read, not a hard skip)');
+      } catch (err) {
+        failures.push(`containment: missing report file threw instead of degrading gracefully (${err.code || err.message})`);
+      }
+      try {
+        writeFileSync(realReport, '# real report\n');
+        if (!withinReports(realReport)) failures.push('containment: real file inside reports/ wrongly rejected');
+        // Symlink whose target resolves outside reports/ (this module file);
+        // its lexical path is under reports/ but realpath escapes and must be
+        // rejected. symlinkSync often needs privilege on Windows — skip the
+        // assertion (do not fail) when the platform refuses.
+        let symlinkCreated = false;
+        try {
+          symlinkSync(fileURLToPath(import.meta.url), escapeLink);
+          symlinkCreated = true;
+        } catch (err) {
+          if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'ENOSYS') {
+            console.log(`upskill self-test: skipping symlink-escape assertion (platform refused symlink creation: ${err.code})`);
+          } else {
+            throw err;
+          }
+        }
+        if (symlinkCreated && withinReports(escapeLink)) {
+          failures.push('containment: symlink escaping reports/ was accepted (realpath containment broken)');
+        }
+      } finally {
+        rmSync(realReport, { force: true });
+        rmSync(escapeLink, { force: true });
+      }
+    }
+  }
+
   if (failures.length > 0) {
     console.error(`upskill self-test failed: ${failures.join('; ')}`);
     process.exit(1);
@@ -353,19 +528,158 @@ soft_gaps:
 }
 
 // --- CLI ---
+// --- CLI ---
 const args = process.argv.slice(2);
 if (args.includes('--self-test')) runSelfTest();
 
-const minReportsIdx = args.indexOf('--min-reports');
-const MIN_REPORTS = (() => {
-  if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
-  const n = parseInt(args[minReportsIdx + 1], 10);
-  return Number.isNaN(n) || n < 1 ? 5 : n;
-})();
+// ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
+const urlTextIdx = args.indexOf('--url-text');
+const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
 
-const result = analyze(MIN_REPORTS);
-if (args.includes('--summary')) {
-  printSummary(result);
+// Helper function to enforce egress guard against SSRF (Private/Loopback IPs)
+const dnsCache = new Map();
+
+async function validateUrlSecurity(urlString) {
+  const dns = await import('dns/promises');
+  const url = new URL(urlString.endsWith('.') ? urlString.slice(0, -1) : urlString);
+  const hostname = url.hostname;
+
+  if (hostname === 'localhost' || hostname.endsWith('.local')) {
+    throw new Error('Access denied: Localhost or internal domain target detected.');
+  }
+
+  let addresses;
+  if (dnsCache.has(hostname)) {
+    addresses = dnsCache.get(hostname);
+  } else {
+    addresses = await dns.resolve(hostname).catch(() => []);
+    const lookupRes = await dns.lookup(hostname).catch(() => null);
+    if (lookupRes) addresses.push(lookupRes.address);
+    dnsCache.set(hostname, addresses);
+  }
+
+  for (const ip of addresses) {
+    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|169\.254\.)/.test(ip)) {
+      throw new Error(`Access denied: Egress guard blocked private target IP ${ip}`);
+    }
+    if (ip === '::1' || ip.startsWith('fe80:') || ip.startsWith('fc00:') || ip.startsWith('fd00:')) {
+      throw new Error(`Access denied: Egress guard blocked private target IPv6 ${ip}`);
+    }
+  }
+  return url.toString();
+}
+
+if (urlTextIdx !== -1 || directUrl) {
+  (async () => {
+    let targetText = '';
+    const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
+
+    if (!inputSource) {
+      console.error('Error: Please provide a valid URL or file path after --url-text');
+      process.exit(1);
+    }
+
+    if (inputSource.startsWith('http://') || inputSource.startsWith('https://')) {
+      let browser;
+      try {
+        const secureUrl = await validateUrlSecurity(inputSource);
+        const { chromium } = await import('playwright');
+        browser = await chromium.launch({ headless: true });
+        const page = await browser.newPage();
+
+        await page.route('**/*', async (route) => {
+          const requestUrl = route.request().url();
+          try {
+            await validateUrlSecurity(requestUrl);
+            await route.continue();
+          } catch (err) {
+            console.error(`Security Violation on Redirect: ${err.message}`);
+            await route.abort('blockedbyclient');
+            process.exit(1);
+          }
+        });
+
+        await page.goto(secureUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        targetText = await page.innerText('body');
+      } catch (err) {
+        console.warn('Playwright extraction failed or blocked, trying fallback WebFetch...', err.message);
+        try {
+          const secureUrl = await validateUrlSecurity(inputSource);
+          // validateUrlSecurity only vets the initial URL; a redirect could still
+          // steer the fetch at an internal host (SSRF). The Playwright path
+          // re-validates per hop, but this plain fetch must refuse redirects
+          // outright — fail closed rather than follow an unvetted Location (#1851).
+          const res = await fetch(secureUrl, { signal: AbortSignal.timeout(30000), redirect: 'error' });
+          if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+          targetText = await res.text();
+        } catch (fetchErr) {
+          console.error(`Fatal: Failed to fetch JD from URL: ${fetchErr.message}`);
+          process.exit(1);
+        }
+      } finally {
+        if (browser) await browser.close();
+      }
+
+      // Whitespace-collapse + length-cap the fetched page text. Use compactText
+      // (string -> string), NOT normalizeJd: normalizeJd expects the { title,
+      // text } DOM-read object and returns { url, title, text }, so feeding it
+      // the innerText/fetch STRING silently produced { text: '' } — destroying
+      // the JD and then throwing `text.matchAll is not a function` downstream
+      // (#1894). compactText is the string-in/string-out helper this wants.
+      try {
+        const { compactText } = await import('./browser-extract.mjs');
+        targetText = compactText(targetText);
+      } catch (e) {}
+    } else {
+      if (existsSync(inputSource)) {
+        targetText = readFileSync(inputSource, 'utf-8');
+      } else {
+        console.error(`Fatal: Target file not found at path: ${inputSource}`);
+        process.exit(1);
+      }
+    }
+
+    // Assemble the known-skills text (cv + profile), matching aggregate mode.
+    // Targeted mode additionally falls back to cv-example.md when cv.md is absent
+    // so a fresh checkout still produces a meaningful comparison.
+    const knownTextChunks = [];
+    if (existsSync(PROFILE_FILE)) {
+      try { knownTextChunks.push(readFileSync(PROFILE_FILE, 'utf-8')); } catch (e) {}
+    }
+    let activeCvFile = CV_FILE;
+    if (!existsSync(activeCvFile)) {
+      activeCvFile = join(CAREER_OPS, 'cv-example.md');
+    }
+    if (existsSync(activeCvFile)) {
+      try { knownTextChunks.push(readFileSync(activeCvFile, 'utf-8')); } catch (e) {}
+    }
+
+    const { gaps: gapList, excludedAsKnown, knownSkills } =
+      computeTargetedGaps(targetText, knownTextChunks.join('\n'));
+
+    console.log(JSON.stringify({
+      mode: 'targeted',
+      source: inputSource,
+      gaps: gapList.map(skill => ({ skill })),
+      excludedAsKnown: excludedAsKnown.map(skill => ({ skill })),
+      knownSkills,
+    }, null, 2));
+
+    process.exit(0);
+  })();
 } else {
-  console.log(JSON.stringify(result, null, 2));
+  // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
+  const minReportsIdx = args.indexOf('--min-reports');
+  const MIN_REPORTS = (() => {
+    if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
+    const n = parseInt(args[minReportsIdx + 1], 10);
+    return Number.isNaN(n) || n < 1 ? 5 : n;
+  })();
+
+  const result = analyze(MIN_REPORTS);
+  if (args.includes('--summary')) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
 }
