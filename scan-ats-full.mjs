@@ -11,6 +11,9 @@
  *
  * Company directories come from the public job-board-aggregator dataset
  * (github.com/Feashliaa/job-board-aggregator), cached in data/cache/ for 24h.
+ * ~46% of those slugs are permanently 404 (companies that left the ATS), so
+ * boards that 404 on repeated sweeps are remembered in data/dead-boards.tsv
+ * and skipped until their periodic re-probe — see dead-boards.mjs.
  *
  * Zero LLM tokens — pure HTTP + JSON, same providers/ modules as scan.mjs.
  * Postings without a usable publish date are skipped: a reverse scan is only
@@ -37,6 +40,10 @@ import * as yaml from 'js-yaml';
 
 import { makeHttpCtx, fetchJson } from './providers/_http.mjs';
 import { dnsPacingStats, isResolverFailure } from './providers/_dns-cache.mjs';
+import {
+  loadDeadBoards, saveDeadBoards, boardKey, shouldSkip, recordMiss, recordHit, isDeadBoardError,
+  DEAD_AFTER_MISSES, RECHECK_AFTER_DAYS,
+} from './dead-boards.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
@@ -71,7 +78,27 @@ const CACHE_TTL_HOURS = 24;
 // careers_url and drops anything that doesn't resolve to the ATS's own host —
 // so a tampered dataset can at worst name boards that don't exist.
 const DATASET_BASE = 'https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data';
+
+// Default fan-out, used by sources whose boards each live on their OWN host
+// (workday: {tenant}.{instance}.myworkdayjobs.com). There 20 in flight is 20
+// different servers, and the resolver — not any one vendor — is the limit.
 const CONCURRENCY = 20;
+
+// Greenhouse, Lever and Ashby each serve their ENTIRE directory from a single
+// hostname, so the same 20 is 20 sustained connections to one API for tens of
+// thousands of boards. That is what earns an HTTP throttle: after a full sweep,
+// an immediate second one saw lever's unreachable count jump 2,436 -> 4,100 and
+// ashby's 683 -> 1,675, recovering to 2,525 / 684 after a cooldown. Those were
+// live boards being refused, and refused boards cost real postings.
+// ponytail: a fixed polite cap, not an adaptive controller — fetchJsonWithRetry
+// already backs off on 429; raise per source if a vendor proves it can take more.
+const SINGLE_HOST_CONCURRENCY = 6;
+
+// Persistent dead-board memory. ~46% of the directory is permanently 404, and
+// the in-process DNS cache forgets all of it at exit, so every sweep re-probed
+// ~13k known-dead boards — half the runtime, and the traffic that provokes the
+// throttle above. See dead-boards.mjs for why only a 404 may retire a board.
+const DEAD_BOARDS_PATH = path.join(_DATA_ROOT, 'data/dead-boards.tsv');
 
 // Crash insurance for multi-hour directory sweeps: progress + matches are
 // checkpointed every CHECKPOINT_EVERY companies so --resume can continue a
@@ -142,6 +169,8 @@ const SOURCES = {
   greenhouse: {
     provider: greenhouse,
     dataset: `${DATASET_BASE}/greenhouse_companies.json`,
+    // Whole directory served from one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://job-boards.greenhouse.io/${slug}`, h => h === 'job-boards.greenhouse.io')
       : null,
@@ -149,6 +178,8 @@ const SOURCES = {
   lever: {
     provider: lever,
     dataset: `${DATASET_BASE}/lever_companies.json`,
+    // Whole directory served from one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.lever.co/${slug}`, h => h === 'jobs.lever.co')
       : null,
@@ -156,6 +187,8 @@ const SOURCES = {
   ashby: {
     provider: ashby,
     dataset: `${DATASET_BASE}/ashby_companies.json`,
+    // Whole directory served from one host — see SINGLE_HOST_CONCURRENCY.
+    concurrency: SINGLE_HOST_CONCURRENCY,
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://jobs.ashbyhq.com/${slug}`, h => h === 'jobs.ashbyhq.com')
       : null,
@@ -577,7 +610,15 @@ async function main() {
   // sinceMs once postings are confidently past the --since window, and
   // includeUndated (when false) for a tenant that exposes no postedOn at
   // all, since its postings would all be dropped as undated below anyway.
-  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated };
+  // syntheticEntries states what this scanner's entries ARE: built from the
+  // external ATS dataset, not read from portals.yml tracked_companies.
+  // workday.mjs picks its cap-hit warning from it — there is no portal entry
+  // to raise max_pages on here, so that half of the message is inactionable.
+  // It used to infer that from sinceMs being set, which stopped being true
+  // once scan.mjs --since set it too (upstream #2495) — an inference this fork
+  // still carried, so `scan.mjs --since` was suppressing the actionable
+  // suggestion it should have shown.
+  const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated, syntheticEntries: true };
   const date = new Date().toISOString().slice(0, 10);
 
   const newOffers = checkpoint ? checkpoint.offers : [];
@@ -600,9 +641,15 @@ async function main() {
   let noDateSkipJobs = cc.noDateSkipJobs || 0;
   const datasetStatus = {};
 
+  // Dead-board memory. One timestamp for the whole sweep, so a multi-hour run
+  // can't have its early boards fall due for re-probe before it finishes.
+  const deadBoards = loadDeadBoards(DEAD_BOARDS_PATH);
+  const sweepStart = Date.now();
+  let skippedDead = cc.skippedDead || 0;
+
   const snapshotCounters = () => ({
     totalCompaniesScanned, totalErrors, droppedNoDate, droppedContent,
-    noDateSkipCompanies, noDateSkipJobs,
+    noDateSkipCompanies, noDateSkipJobs, skippedDead,
   });
   const checkpointBase = () => ({
     version: 1,
@@ -690,13 +737,22 @@ async function main() {
     // call returns to checkpoint where it actually stopped (#2283).
     let lastDone = 0;
     let lastResumeAt = 0;
-    await parallelEach(entries, CONCURRENCY, async (entry) => {
+    await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry) => {
+      // Skipped HERE rather than by filtering `entries` up front: parallelEach's
+      // resumeAt is an index into this exact array, and a filtered array would
+      // desync it from the checkpoint offset (which indexes entriesAll) —
+      // silently skipping or re-scanning boards on --resume.
+      if (shouldSkip(deadBoards.get(boardKey(name, entry.name)), sweepStart)) {
+        skippedDead++;
+        return;
+      }
       try {
         // The whole per-company unit — fetch AND processJobs — runs inside one
         // watchdog, so enrichment latency can't blow past COMPANY_TIMEOUT_MS.
         await withTimeout((async () => {
           const jobs = await source.provider.fetch(entry, ctx);
           consecutiveResolverFailures = 0;
+          recordHit(deadBoards, name, entry.name);
           if (jobs.workdayTruncated) truncated.push(entry);
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
           await processJobs(jobs, name);
@@ -705,6 +761,10 @@ async function main() {
         // Mostly defunct boards in the public dataset — expected noise, so the
         // default stays quiet; --verbose surfaces per-board failures.
         errors++;
+        // ONLY a 404 retires a board. A 429/5xx/timeout/DNS failure means the
+        // sweep couldn't tell, and recording those would let one throttled run
+        // permanently hide live boards — see dead-boards.mjs.
+        if (isDeadBoardError(err)) recordMiss(deadBoards, name, entry.name, sweepStart);
         // Any NON-resolver outcome resets the run: the breaker fires only on an
         // uninterrupted streak, so a scattering of dead boards can never trip it.
         if (isResolverFailure(err)) {
@@ -822,6 +882,20 @@ async function main() {
     }
   }
 
+  // Written before the summary and regardless of how the sweep ended: a run cut
+  // short by the resolver breaker still learned which boards 404'd, and that is
+  // exactly the run whose knowledge is most worth keeping. --dry-run writes
+  // nothing, matching how it treats every other data/ file.
+  if (!opts.dryRun) {
+    try {
+      saveDeadBoards(DEAD_BOARDS_PATH, deadBoards);
+    } catch (err) {
+      // A store we can't persist costs a slower next sweep, never this run's
+      // results — report it and carry on to the offers we already have.
+      console.error(`⚠  could not write ${DEAD_BOARDS_PATH}: ${err.message}`);
+    }
+  }
+
   const blacklistResult = filterBlacklistedOffers(newOffers, blacklist, { includeBlacklisted: opts.includeBlacklisted });
   let offers = blacklistResult.offers;
   if (offers.length && opts.liveness) offers = await filterLive(offers);
@@ -832,6 +906,11 @@ async function main() {
   log(`${'━'.repeat(45)}`);
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
+  // Never silently drop coverage: a skip count the operator can't see reads as
+  // "the directory shrank" rather than "we chose not to look".
+  if (skippedDead > 0) {
+    log(`Known-dead skipped: ${skippedDead} (404 on ${DEAD_AFTER_MISSES}+ sweeps; re-probed every ${RECHECK_AFTER_DAYS}d — data/dead-boards.tsv)`);
+  }
   // A paced sweep is slower on purpose. Say so, or the operator reads the
   // wall-clock time as a hang (#2229).
   const pacing = dnsPacingStats();

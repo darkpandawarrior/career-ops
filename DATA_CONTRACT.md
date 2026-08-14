@@ -13,7 +13,7 @@ These files contain your personal data, customizations, and work product. Update
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases (optional; seeded from `config/cv-facts.example.json`) |
 | `modes/_profile.md` | Your archetypes, narrative, negotiation scripts |
 | `modes/_custom.md` | Your house rules, custom workflows & output preferences (procedural — survives updates) |
-| `voice-dna.md` | Your writing voice guardrail — banned words, anti-AI-slop rules, tone (optional) |
+| `voice-dna.md` | Your writing-voice profile. Fork-only split: `voice-dna.template.md` is TRACKED, this working copy is gitignored, and `doctor.mjs` copies template -> working copy on first run (same convention as `modes/_profile.md`). Upstream tracks `voice-dna.md` directly; personalizing a tracked file would publish your voice via the public sibling fork. |
 | `article-digest.md` | Your proof points from portfolio |
 | `interview-prep/story-bank.md` | Your accumulated STAR+R stories |
 | `interview-prep/{company}-{role}.md` | Company-specific interview prep reports (written by `/career-ops interview-prep`) |
@@ -27,11 +27,13 @@ These files contain your personal data, customizations, and work product. Update
 | `data/scan-history.tsv` | Your scan history |
 | `data/scan-runs.tsv` | Your per-run scan counters (companies/boards scanned, found/filtered/dupe/new-added tallies; appended by `scan.mjs`, read by `stats.mjs`) |
 | `data/portal-health.tsv` | Consecutive reachability status per scanned portal (`timestamp\tcompany\tstatus`; appended by `scan.mjs`, read by `stats.mjs` to flag portals persistently down) |
+| `data/dead-boards.tsv` | Dead-board memory for the reverse-ATS sweep (`ats\tslug\tmisses\tlast_checked`; written and read by `scan-ats-full.mjs`). Records only boards that returned 404, so repeat sweeps skip them instead of re-probing; re-probed every 30 days. No personal data — public ATS slugs only. Regenerable: deleting it costs a few slower sweeps, nothing more. |
 | `data/follow-ups.md` | Your follow-up history |
 | `data/status-log.tsv` | Your status-transition ledger (`report#\tdate\tfrom\tto\tset-status\t`; appended by `set-status.mjs`, read by `funnel-velocity.mjs`) |
 | `data/apply-queue.md` | Your ranked apply queue (generated from your pipeline + profile) |
 | `data/salary-observations.tsv` | Your append-only compensation observation log (desired/advertised/actual pay per application; read by `salary-gap.mjs`) |
 | `data/blacklist.md` | Your do-not-apply list (companies to skip; read by `scan.mjs`, opt-in via `--include-blacklisted`) |
+| `documents/` | Source documents you drop in for the intake flow (master CV, LinkedIn export, diplomas, references). Gitignored and backed up via the career-ops-active registry entry. Declared before the upstream `intake` feature is ported, so a later sync cannot land the directory unprotected. |
 | `data/hq/` | Your personal HQ page (`hq.html`, served at `/hq` by the dashboard) and its progress state (`state.json`, read/written by `/api/hq-state`) |
 | `profiles.json` | Root profile registry — candidate name / email / owner handle per profile. Same class as `profiles.yml` |
 | `profiles.yml.bak-*` | Timestamped backups written by `migrate-profile.mjs`; carry the same per-candidate private config as `profiles.yml` |

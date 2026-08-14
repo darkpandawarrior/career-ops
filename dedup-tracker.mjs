@@ -2,26 +2,48 @@
 /**
  * dedup-tracker.mjs — Remove duplicate entries from applications.md
  *
- * Groups by normalized company + exact (normalized) role match, or exact
- * report identity.
- * Keeps entry with highest score. If discarded entry had more advanced status,
- * preserves that status. Merges notes.
+ * Groups by normalized company, then merges only rows whose full role title
+ * matches exactly (case- and whitespace-normalized). Keeps entry with highest
+ * score. If discarded entry had more advanced status, preserves that status.
+ * Merges notes.
  *
  * Run: node career-ops/dedup-tracker.mjs [--dry-run]
  */
 
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
-import { rebuildRow, resolveTrackerPath, normalizeCompany } from './tracker-utils.mjs';
-import { openTrackerTransaction } from './tracker-lock.mjs';
+import { fileURLToPath } from 'url';
+import { normalizeCompany, openTrackerTransaction, rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
+
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const { dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
-const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
+
+// ── CLI args ────────────────────────────────────────────────────────
+// Same shape as scan-ats-full.mjs (#1633/PR #1635) and reply-watch.mjs
+// (#2743): an unrecognized flag must fail fast, never silently fall through
+// to the live-run default and write to the real tracker (#2744).
+const KNOWN_FLAGS = ['--dry-run', '--help', '-h'];
+const USAGE = `Usage: node dedup-tracker.mjs [--dry-run]`;
+
+const cliArgs = process.argv.slice(2);
+
+const unknownFlags = cliArgs.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+if (unknownFlags.length) {
+  console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+  process.exit(1);
+}
+
+if (cliArgs.includes('--help') || cliArgs.includes('-h')) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure the target tracker directory exists in both normal and fixture mode.
@@ -93,12 +115,14 @@ function statusRank(status) {
 }
 
 /**
- * An Applied+ row (Applied, Responded, Interview, Offer) represents a real
- * action already taken — it must never be collapsed into another row by
- * title/company matching alone, only by exact report identity.
+ * Check whether a status represents a real application already in motion.
  *
- * @param {string} status - Raw or normalized status value.
- * @returns {boolean}
+ * Rows at Applied or later have user-visible history that dedup must preserve
+ * unless the duplicate relationship is exact. This guard prevents fuzzy title
+ * matches from silently deleting an active application record.
+ *
+ * @param {string} status - Raw status value from the tracker row.
+ * @returns {boolean} True when the row is Applied, Responded, Interview, or Offer.
  */
 function isAdvancedStatus(status) {
   return statusRank(status) >= STATUS_RANK.applied;
@@ -142,35 +166,56 @@ function sameReportIdentity(a, b) {
 }
 
 /**
- * Normalize a role title for exact-match comparison (case-insensitive,
- * whitespace-normalized, punctuation stripped the same way company names are).
+ * Build a stable key for logging one protected same-title pair only once.
  *
- * @param {string} role - Raw role title from an applications.md row.
- * @returns {string} Normalized role key.
+ * The nested dedup loop can encounter a protected pair during cluster building.
+ * Sorting the row numbers produces the same key regardless of comparison order,
+ * which keeps the warning output readable and avoids repeated noise.
+ *
+ * @param {object} a - First parsed applications.md row.
+ * @param {object} b - Second parsed applications.md row.
+ * @returns {string} Stable pair key in ascending tracker-number order.
+ */
+function pairKey(a, b) {
+  return [a.num, b.num].sort((x, y) => x - y).join(':');
+}
+
+const protectedTitlePairs = new Set();
+
+/**
+ * Normalize a role title into the key used for exact same-opening comparison.
+ *
+ * Deduplication must only collapse rows that describe the *same* opening, so
+ * the comparison is exact on the meaningful title text. Only presentation noise
+ * is removed — letter case and whitespace (leading, trailing, and repeated
+ * internal spaces). Distinguishing words such as seniority ("Senior") or the
+ * team suffix ("Data Infrastructure" vs "Agent Infrastructure") are preserved,
+ * so sibling roles at one company are never merged.
+ *
+ * @param {string} role - Role title from an applications.md row.
+ * @returns {string} Lowercase, whitespace-collapsed role key.
  */
 function normalizeRole(role) {
-  return String(role ?? '').toLowerCase()
-    .replace(/[()]/g, '')
+  return String(role ?? '')
     .replace(/\s+/g, ' ')
-    .replace(/[^\p{L}\p{N} ]/gu, '')
-    .trim();
+    .trim()
+    .toLowerCase();
 }
 
 /**
  * Decide whether two same-company tracker rows should be deduplicated.
  *
- * Exact report identity is always a match. Otherwise, this requires an EXACT
- * (case-insensitive, whitespace-normalized) company+role match rather than a
- * fuzzy/similarity threshold — the fuzzy version silently deleted distinct
- * same-company roles that happened to have similar-but-different titles (e.g.
- * two different "Software Engineer" openings). Titles that are merely similar
- * are kept as separate rows.
+ * Rows merge only when they describe the same opening: either the exact same
+ * report identity (same tracker number or bracketed report number), or an exact
+ * role-title match after normalizing case and whitespace. Fuzzy title matching
+ * is deliberately NOT used here — it collapsed distinct sibling roles at one
+ * company (e.g. "Software Engineer, Data Infrastructure" vs "Senior Software
+ * Engineer, Agent Infrastructure"), causing real data loss.
  *
- * An Applied+ row is never clustered by title match alone, even an exact one —
- * two rows can legitimately share a title (e.g. re-applying to a reposted
- * role, or a tracking mistake worth a human's eyes) and collapsing them would
- * silently discard a real applied-application record. Only exact report
- * identity may remove an Applied+ row.
+ * When titles match exactly but either row is already Applied or later, dedup
+ * still keeps both and warns: deleting an in-flight application would lose its
+ * status, report link, and notes unless the rows are the exact same report
+ * identity.
  *
  * @param {object} a - First parsed applications.md row.
  * @param {object} b - Second parsed applications.md row.
@@ -178,8 +223,23 @@ function normalizeRole(role) {
  */
 function roleMatch(a, b) {
   if (sameReportIdentity(a, b)) return true;
-  if (isAdvancedStatus(a.status) || isAdvancedStatus(b.status)) return false;
-  return normalizeRole(a.role) === normalizeRole(b.role);
+  if (normalizeRole(a.role) !== normalizeRole(b.role)) return false;
+
+  // Exact-title duplicates that have entered the real application pipeline are
+  // kept separate. A user may already have applied to one row; deleting it
+  // because a higher-scored exact-title sibling exists would lose status,
+  // report, and notes. Keep both unless the rows point to the exact same
+  // report identity.
+  if (isAdvancedStatus(a.status) || isAdvancedStatus(b.status)) {
+    const key = pairKey(a, b);
+    if (!protectedTitlePairs.has(key)) {
+      protectedTitlePairs.add(key);
+      console.warn(`⚠️  Keep #${a.num} and #${b.num}: exact-title match but advanced status requires exact report identity`);
+    }
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -217,10 +277,6 @@ if (!existsSync(APPS_FILE)) {
   process.exit(0);
 }
 
-// Dry-runs write nothing, so they can safely overlap with a real merge/dedup —
-// only the actual write needs the exclusive lock. Real runs read AFTER the
-// lock is acquired: reading first risks deduping against a stale snapshot and
-// clobbering a row another writer just added.
 let trackerTransaction = null;
 let COLMAP;
 if (!DRY_RUN) {
@@ -230,7 +286,9 @@ if (!DRY_RUN) {
     console.error(`Cannot acquire tracker lock: ${err.message}`);
     process.exit(1);
   }
-  process.once('exit', () => { try { trackerTransaction.close(); } catch {} });
+  process.once('exit', () => {
+    try { trackerTransaction.close(); } catch {}
+  });
 }
 try {
 const content = trackerTransaction ? trackerTransaction.read() : readFileSync(APPS_FILE, 'utf-8');
@@ -272,6 +330,7 @@ console.log(`📊 ${entries.length} entries loaded`);
 // one makes grep classify this file as binary and report NO MATCH for any
 // pattern in it, silently, with the same exit code as a genuine absence.
 // Identical value at runtime, and the file stays greppable.
+// Pinned by tests/source-no-nul-bytes.test.mjs.
 const BLIND_KEY = '\u0000blind-via:';
 const groups = new Map();
 for (const entry of entries) {

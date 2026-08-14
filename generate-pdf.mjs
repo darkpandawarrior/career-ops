@@ -30,13 +30,13 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const PDF_PAGE_MARGIN = '0.6in';
 
-// engineRoot: script location, also where the shared fonts/ assets live.
-// __dirname: the user-data root (output/, data/, cv.md) — CAREER_OPS_ROOT in a
-// multi-profile setup, else the same as engineRoot.
-const { engineRoot, dataRoot: __dirname } = resolveCareerOpsRoot(import.meta.url);
+// CAREER_OPS: script location, also where the shared fonts/ assets live.
+// CAREER_OPS_DATA: the user-data root (output/, data/, cv.md) — CAREER_OPS_ROOT in a
+// multi-profile setup, else the same as CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // Ensure output directory exists (fresh setup)
-mkdirSync(resolve(__dirname, 'output'), { recursive: true });
+mkdirSync(resolve(CAREER_OPS_DATA, 'output'), { recursive: true });
 
 /**
  * Normalize text for ATS compatibility by converting problematic Unicode.
@@ -289,7 +289,7 @@ function countRenderedPdfPages(pdfBuffer) {
  */
 export function repoRelativeManifestPath(pathValue) {
   if (!pathValue) return '';
-  const rel = relative(__dirname, resolve(pathValue));
+  const rel = relative(CAREER_OPS_DATA, resolve(pathValue));
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
   return rel.split(sep).join('/');
 }
@@ -306,7 +306,12 @@ export function injectPrintPageCss(html, format = 'a4') {
   const pageStyle = `<style id="career-ops-page-setup">\n@page { size: ${pageSize}; margin: var(--page-margin, ${PDF_PAGE_MARGIN}); }\n</style>`;
 
   if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${pageStyle}\n</head>`);
+    // Replacer function, matching the <html> branch just below. `pageStyle`
+    // interpolates only internal constants today, so this is hardening rather
+    // than a live bug — but the two branches sat in one function disagreeing
+    // about it, and the safe spelling is the one that stays correct if a
+    // configurable value is ever interpolated here (#2596).
+    return html.replace(/<\/head>/i, () => `${pageStyle}\n</head>`);
   }
 
   if (/<html\b[^>]*>/i.test(html)) {
@@ -327,8 +332,8 @@ export function injectPrintPageCss(html, format = 'a4') {
  * gitignored output/ artifacts and is meaningless on another machine.
  */
 function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
-  const manifestPath = resolve(__dirname, 'data', 'pdf-index.tsv');
-  const toRel = (p) => relative(__dirname, p).split(sep).join('/');
+  const manifestPath = resolve(CAREER_OPS_DATA, 'data', 'pdf-index.tsv');
+  const toRel = (p) => relative(CAREER_OPS_DATA, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
   const relHTML = repoRelativeManifestPath(htmlPath);
   const date = new Date().toISOString().slice(0, 10);
@@ -423,7 +428,7 @@ async function generatePDF() {
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
   try {
-    cvMarkdown = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+    cvMarkdown = await readFile(resolve(CAREER_OPS_DATA, 'cv.md'), 'utf-8');
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
@@ -464,7 +469,7 @@ async function generatePDF() {
 export async function inlineLocalFonts(html) {
   const FONT_REF = /url\(\s*(['"]?)\.\/fonts\/([^'")\s]+)\1\s*\)/g;
   const MIME = { woff2: 'font/woff2', woff: 'font/woff', otf: 'font/otf', ttf: 'font/ttf' };
-  const fontsDir = resolve(engineRoot, 'fonts');
+  const fontsDir = resolve(CAREER_OPS, 'fonts');
   const names = [...new Set([...html.matchAll(FONT_REF)].map((m) => m[2]))];
   const dataUrls = new Map();
   for (const name of names) {
@@ -534,7 +539,28 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
 
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
+    // A CV is static markup, so the renderer needs neither scripts nor the network.
+    // Both are denied because this HTML is not fully trusted: it is built from
+    // cv.md, the job posting and the evaluation report, and postings are untrusted
+    // input (AGENTS.md). With JS off an injected <script> cannot run; with
+    // non-local requests aborted an injected <img src="https://…"> cannot beacon
+    // out. file:/data: subresources still load, which is all a template needs.
+    //
+    // newContext(), not newPage(): javaScriptEnabled is a Playwright context
+    // option with no per-page equivalent. Guarded so an injected test double that
+    // only implements newPage() still works.
+    const context = browser.newContext
+      ? await browser.newContext({ javaScriptEnabled: false })
+      : null;
+    const page = context ? await context.newPage() : await browser.newPage();
+    if (page.route) {
+      await page.route('**/*', (route) => {
+        const url = route.request().url();
+        return url.startsWith('file:') || url.startsWith('data:')
+          ? route.continue()
+          : route.abort();
+      });
+    }
 
     // Load from file:// so the page origin allows local subresources
     await page.goto(pathToFileURL(tmpHtmlPath).href, {

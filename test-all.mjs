@@ -145,6 +145,7 @@ const scripts = [
   { name: 'discover-ats.mjs --self-test', expectExit: 0 },
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-history.mjs --self-test', expectExit: 0 },
+  { name: 'rejection-latency.mjs --self-test', expectExit: 0 },
   { name: 'seed-fixture.mjs --self-test', expectExit: 0 },
   // career-ops follow-up sync (2026-07-30): check-table-freshness.mjs ships
   // its own fixture-driven --self-test (discovery shapes, expired/review-due
@@ -152,6 +153,8 @@ const scripts = [
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   // career-ops v1.24.0 sync: new standalone tools with inline self-tests.
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
+  { name: 'invite-match.mjs --self-test', expectExit: 0 },
+  { name: 'invite-match.test.mjs', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
   // security sync (#2368): untrusted-external-content directive coverage guard.
   { name: 'validate-untrusted-content-coverage.mjs --self-test', expectExit: 0 },
@@ -184,6 +187,12 @@ const scripts = [
   // as the bare verify-portals.mjs run directly above: confirms the module
   // loads and its default-path guard exits cleanly without touching network.
   { name: 'fix-slugs.mjs', expectExit: 0 },
+  // The fork's layer over upstream, as a gate. Exits 1 naming any adaptation a
+  // sync overwrote — the failure mode that otherwise ships silently with a
+  // green suite (upstream #75 restored a wrong-profile read across 25 scripts
+  // exactly that way). Green as of the normalisation pass; a red here means a
+  // sync dropped something, not that the checker is noisy.
+  { name: 'fork-adaptations.mjs', expectExit: 0 },
 ];
 
 for (const { name, allowFail, skipIfMissing } of scripts) {
@@ -747,6 +756,301 @@ if (
 } else {
   fail('eval modes missing liveness gate before evaluation');
 }
+
+// --- Block G pay-transparency range-width signal (#2019, re-scoped #2280) ---
+{
+  // Maintainer direction (#2280): the jurisdiction table is gone — no
+  // external YAML, no legal threshold. Only the self-computed range-width
+  // heuristic (former 13a) survives; the corroborating missing-range
+  // sub-signal (former 13b) had no trigger without the table and was removed
+  // with it.
+  const ptPath = join(ROOT, 'templates', 'pay-transparency.yml');
+  if (existsSync(ptPath)) {
+    fail('templates/pay-transparency.yml should have been removed per maintainer direction (#2280)');
+  } else {
+    pass('templates/pay-transparency.yml removed — no jurisdiction table remains (#2280)');
+  }
+
+  // oferta.md carries the standalone, table-free range-width signal
+  const ptStart = ofertaMode.indexOf('Pay-Transparency Range-Width Check');
+  const ptEnd = ofertaMode.indexOf('### Output format:', Math.max(ptStart, 0));
+  const ptSection = ptStart >= 0 && ptEnd > ptStart ? ofertaMode.slice(ptStart, ptEnd) : '';
+  if (
+    ptSection &&
+    !ptSection.includes('templates/pay-transparency.yml') &&
+    !/13b/.test(ptSection) &&
+    ptSection.includes('general heuristic') &&
+    ptSection.includes('top - bottom > 0.5 × bottom') &&
+    ptSection.includes('Phrasing discipline (mandatory)') &&
+    ptSection.includes('not legal advice')
+  ) {
+    pass('oferta Block G has the table-free, self-computed pay-transparency range-width signal (#2280)');
+  } else {
+    fail('oferta Block G missing/incomplete pay-transparency range-width section — needs table-free arithmetic heuristic, "general heuristic" framing, the documented threshold formula (top - bottom > 0.5 × bottom), phrasing discipline, not-legal-advice note, and no leftover table/13b references (#2280)');
+  }
+
+  // Phrasing discipline holds in the report-facing text: the blockquote
+  // template the agent renders must state facts, never legal accusations.
+  // (The rule text itself may quote the banned phrases to forbid them,
+  // so only '>' lines — the rendered output templates — are scanned.)
+  const ptQuoteLines = ptSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const accusatory = ptQuoteLines.filter((l) => /illegal|violation|breaking the law/i.test(l));
+  if (ptSection && ptQuoteLines.length >= 1 && accusatory.length === 0) {
+    pass('pay-transparency report template states facts only — no "illegal"/"violation"/"breaking the law" assertions (#2280)');
+  } else {
+    fail(`pay-transparency phrasing discipline broken: ${accusatory.length ? `accusatory blockquote line(s): ${accusatory[0].trim().slice(0, 80)}` : 'expected 1+ blockquote output template in the section'} (#2280)`);
+  }
+}
+
+// --- Block G minimum-wage lawyer question (#2025, reshaped #2280) ---
+// Per maintainer direction on #2027: no jurisdiction wage table, no
+// comparison/assertion against any statutory rate. This signal only does
+// the arithmetic that needs no legal table (offer -> comparable hourly
+// figure) and routes the actual compliance question to a lawyer.
+{
+  // 1. templates/minimum-wage.yml must be GONE — the reshape's whole point
+  //    is that no rate table should exist to go stale.
+  const mwPath = join(ROOT, 'templates', 'minimum-wage.yml');
+  if (!existsSync(mwPath)) {
+    pass('templates/minimum-wage.yml removed — no jurisdiction wage table ships (#2280)');
+  } else {
+    fail('templates/minimum-wage.yml still exists — maintainer direction on #2027/#2280 was to drop the rate table entirely');
+  }
+
+  // 2. oferta.md carries the reshaped section: no reference to the deleted
+  //    table, jurisdiction still resolved strictly from the JD (no
+  //    config/profile.yml fallback), the fixed-cash comparable-amount gate
+  //    and JD-hours-first normalization are preserved, and no staleness/
+  //    carve-out-eligibility machinery (which existed only to support the
+  //    now-deleted table comparison) remains.
+  const mwStart = ofertaMode.indexOf('**14. Minimum-Wage Lawyer Question**');
+  const mwEnd = ofertaMode.indexOf('### Output format:', Math.max(mwStart, 0));
+  const mwSection = mwStart >= 0 && mwEnd > mwStart ? ofertaMode.slice(mwStart, mwEnd) : '';
+  if (
+    mwSection &&
+    !mwSection.includes('templates/minimum-wage.yml') &&
+    mwSection.includes('NEVER from `config/profile.yml`') &&
+    mwSection.includes('Comparable-amount gate (mandatory)') &&
+    mwSection.includes('guaranteed, fixed cash amount') &&
+    mwSection.includes('bonuses, commissions, allowances, overtime pay, 13th-month') &&
+    mwSection.includes("JD's own stated working hours") &&
+    mwSection.includes('2080 hours/year') &&
+    mwSection.includes('always disclose in the output which hours figure was used') &&
+    mwSection.includes('Jurisdiction resolution (mandatory)') &&
+    mwSection.includes('[ask your lawyer]') &&
+    mwSection.includes('never conditioned on whether') &&
+    !mwSection.includes('staleness gate') &&
+    !mwSection.includes('Carve-out honesty') &&
+    !mwSection.includes('as_of') &&
+    !mwSection.includes('reference rate')
+  ) {
+    pass('oferta Block G signal 13 dropped the wage-table reference and staleness/carve-out-eligibility machinery while keeping jurisdiction-strict resolution (no profile fallback), the fixed-cash comparable-amount gate, and JD-hours-first normalization (#2280)');
+  } else {
+    fail('oferta Block G signal 13 missing/incomplete post-#2280 reshape — needs: no templates/minimum-wage.yml reference, jurisdiction still resolved strictly from the JD only, fixed-cash comparable-amount gate excluding ranges/variable comp, JD-hours-first normalization with 2080 fallback disclosure, [ask your lawyer] routing, unconditional firing rule, AND removal of the old staleness gate / carve-out-honesty / as_of / reference-rate language that only made sense with a table (#2280)');
+  }
+
+  // 3. Phrasing discipline: the rendered blockquote must never assert or
+  //    imply a current statutory minimum wage, never claim compliance either
+  //    way, and must route to [ask your lawyer]. (The rule text itself may
+  //    quote banned phrases to forbid them, so only '>' lines — the
+  //    rendered output template — are scanned.)
+  const mwQuoteLines = mwSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const mwAccusatory = mwQuoteLines.filter((l) => /illegal|violation|breaking the law/i.test(l));
+  const mwHasLawyerRouting = mwQuoteLines.some((l) => l.includes('[ask your lawyer]'));
+  if (mwSection && mwQuoteLines.length >= 1 && mwAccusatory.length === 0 && mwHasLawyerRouting) {
+    pass('minimum-wage report template routes to [ask your lawyer] with no "illegal"/"violation"/"breaking the law" assertions (#2280)');
+  } else {
+    fail(`minimum-wage phrasing discipline broken: ${mwAccusatory.length ? `accusatory blockquote line(s): ${mwAccusatory[0].trim().slice(0, 80)}` : (!mwHasLawyerRouting ? 'missing [ask your lawyer] routing in rendered blockquote' : 'expected a blockquote output template in the section')} (#2280)`);
+  }
+
+  // 4. The rendered lawyer question must follow santifer's exact shape from
+  //    his #2027 comment: computed hourly figure, hours basis disclosed,
+  //    jurisdiction name, statutory-minimum question, AND a mention of
+  //    special rates (student/homeworker) as a prompt — never an assertion
+  //    of eligibility, since there is no table to judge that from anymore.
+  const mwHandoffQuote = mwQuoteLines.find((l) => l.includes('[ask your lawyer]')) || '';
+  if (
+    /\/hour/i.test(mwHandoffQuote) &&
+    /statutory minimum/i.test(mwHandoffQuote) &&
+    /jurisdiction_name|\{jurisdiction/i.test(mwHandoffQuote) &&
+    /student/i.test(mwHandoffQuote) &&
+    /homeworker/i.test(mwHandoffQuote)
+  ) {
+    pass('minimum-wage lawyer question follows the maintainer-specified shape: computed hourly figure, jurisdiction placeholder, statutory-minimum question, special-rates (student/homeworker) prompt (#2280)');
+  } else {
+    fail('minimum-wage lawyer question does not match the maintainer-specified shape — must include the hourly figure, the jurisdiction placeholder, the statutory-minimum question, and a student/homeworker special-rates prompt (#2280)');
+  }
+
+  // 5. Behavioral test for the hourly-conversion arithmetic itself (the part
+  //    of the old algorithm that survives the reshape unchanged): fixed
+  //    cash amount -> comparable hourly figure, JD-stated hours preferred,
+  //    2080-hour fallback only when the JD is silent, ranges/variable comp
+  //    excluded by the comparable-amount gate.
+  {
+    function computeHourlyFigure({ advertisedComp, isRange, isVariable, period, jdStatedHoursPerYear }) {
+      if (advertisedComp == null || isRange || isVariable) return { skip: true };
+      if (period === 'hourly') {
+        return { skip: false, hourly: advertisedComp, hoursBasis: 'n/a (already hourly)' };
+      }
+      let annual = period === 'monthly' ? advertisedComp * 12 : advertisedComp;
+      const hoursPerYear = jdStatedHoursPerYear ?? 2080;
+      const hoursBasis = jdStatedHoursPerYear ? 'JD-stated' : '2080-hour fallback';
+      if (!hoursPerYear) return { skip: true };
+      return { skip: false, hourly: annual / hoursPerYear, hoursBasis };
+    }
+
+    // (a) already hourly -> passthrough
+    const hourly = computeHourlyFigure({ advertisedComp: 22.50, isRange: false, isVariable: false, period: 'hourly' });
+    // (b) annual, JD states 37.5 hrs/week * 52 = 1950 hrs/year -> preferred over 2080
+    const annualJdHours = computeHourlyFigure({ advertisedComp: 62400, isRange: false, isVariable: false, period: 'annual', jdStatedHoursPerYear: 1950 });
+    // (c) annual, JD silent on hours -> 2080 fallback
+    const annualFallback = computeHourlyFigure({ advertisedComp: 62400, isRange: false, isVariable: false, period: 'annual' });
+    // (d) monthly -> annualized first, then converted
+    const monthly = computeHourlyFigure({ advertisedComp: 5000, isRange: false, isVariable: false, period: 'monthly' });
+    // (e) comparable-amount gate: range excluded
+    const rangeSkipped = computeHourlyFigure({ advertisedComp: 17, isRange: true, isVariable: false, period: 'hourly' });
+    // (f) comparable-amount gate: variable comp (bonus/commission) excluded
+    const variableSkipped = computeHourlyFigure({ advertisedComp: 5000, isRange: false, isVariable: true, period: 'annual' });
+    // (g) null advertised_comp -> skip (pay-transparency signal's territory)
+    const nullSkipped = computeHourlyFigure({ advertisedComp: null, isRange: false, isVariable: false, period: 'hourly' });
+
+    const arithmeticOk =
+      !hourly.skip && hourly.hourly === 22.50 &&
+      !annualJdHours.skip && Math.abs(annualJdHours.hourly - 32) < 0.001 && annualJdHours.hoursBasis === 'JD-stated' &&
+      !annualFallback.skip && Math.abs(annualFallback.hourly - 30) < 0.001 && annualFallback.hoursBasis === '2080-hour fallback' &&
+      !monthly.skip && Math.abs(monthly.hourly - (60000 / 2080)) < 0.001 &&
+      rangeSkipped.skip === true &&
+      variableSkipped.skip === true &&
+      nullSkipped.skip === true;
+
+    if (arithmeticOk) {
+      pass('hourly-conversion arithmetic correctly passes through hourly figures, prefers JD-stated hours over the 2080 fallback, annualizes monthly pay before converting, and the comparable-amount gate excludes ranges/variable comp/null advertised_comp (#2280)');
+    } else {
+      fail(`hourly-conversion arithmetic produced wrong results: hourly=${JSON.stringify(hourly)} annualJdHours=${JSON.stringify(annualJdHours)} annualFallback=${JSON.stringify(annualFallback)} monthly=${JSON.stringify(monthly)} rangeSkipped=${JSON.stringify(rangeSkipped)} variableSkipped=${JSON.stringify(variableSkipped)} nullSkipped=${JSON.stringify(nullSkipped)} (#2280)`);
+    }
+  }
+
+  // 6. Signal-13 boundary check: signal 13 is the last numbered Block G
+  //    signal before "### Output format:", so slicing it for phrasing
+  //    checks elsewhere in this file must not accidentally swallow the
+  //    output-format section.
+  if (mwEnd > mwStart && mwStart >= 0) {
+    pass('signal-13 section boundary (start of signal 13 to "### Output format:") resolved correctly for slicing (#2280)');
+  } else {
+    fail('could not locate signal 14 ("**14. Minimum-Wage Lawyer Question**") or its end boundary in modes/oferta.md (#2280)');
+  }
+}
+
+// offer-prep is read here because the sub-statutory block below asserts against it;
+// upstream defines it in the same place for the same reason.
+const offerPrepMode = fileExists('modes/offer-prep.md') ? readFile('modes/offer-prep.md') : '';
+
+// --- offer-prep sub-statutory-terms lawyer question (#2039, reworked per #2280) ---
+// santifer's direction on PR #2042 (2026-07-29, reasoning in #2280): a
+// jurisdiction table of category-regulation flags (floor_categories,
+// void_doctrine) is a live legal fact this system can never verify or
+// notice going stale, same as #2027's minimum-wage table — a stale flag
+// with a citation is worse than no flag at all. templates/statutory-
+// employment-minimums.yml is deleted entirely (no flags-only shape either).
+// modes/offer-prep.md now only restates the clause's own stated term (no
+// legal table needed) and routes the statutory-floor and voiding-doctrine
+// questions to the lawyer unconditionally, for every jurisdiction, never
+// gated on a table row. Tests below assert the table is gone and the
+// section fires the lawyer questions without any table-backed gating.
+{
+  // 1. The table is gone, not merely emptied.
+  const semPath = join(ROOT, 'templates', 'statutory-employment-minimums.yml');
+  if (!existsSync(semPath)) {
+    pass('templates/statutory-employment-minimums.yml deleted per maintainer direction (#2039, #2280)');
+  } else {
+    fail('templates/statutory-employment-minimums.yml should be deleted entirely per #2280 — a live legal fact this system cannot verify or notice going stale, same reasoning as #2027s minimum-wage table');
+  }
+
+  // templates/README.md carries no row for the deleted table.
+  const templatesReadme = readFile('templates/README.md');
+  if (!templatesReadme.includes('statutory-employment-minimums.yml')) {
+    pass('templates/README.md carries no row for the deleted statutory-employment-minimums.yml (#2280)');
+  } else {
+    fail('templates/README.md still references statutory-employment-minimums.yml, which was deleted per #2280');
+  }
+
+  // 2. offer-prep carries the sub-statutory-terms subsection, reworked to
+  //    route unconditionally to the lawyer list with no table lookup, no
+  //    floor_categories/void_doctrine gating, and no reintroduced ESA
+  //    figures or Waksdale narrative.
+  const semStart = offerPrepMode.indexOf('Sub-statutory-terms lawyer question');
+  const semEnd = offerPrepMode.indexOf('## Step 3', Math.max(semStart, 0));
+  const semSection = semStart >= 0 && semEnd > semStart ? offerPrepMode.slice(semStart, semEnd) : '';
+  if (
+    semSection.includes('Questions for your lawyer') &&
+    semSection.includes('#2280') &&
+    /gone and is not coming back in any shape/.test(semSection) &&
+    /Never assert a floor value, a regulation flag, a doctrine holding,\s+voidness, or violation\s+\(HARD RULE\)/.test(semSection) &&
+    semSection.includes('always a lawyer question') &&
+    semSection.includes('Render in {language.output}') &&
+    /no floor-figure statements,\s+no regulation-flag statements/.test(semSection) &&
+    /never computes, estimates, or\s+ranges a notice or severance amount/.test(semSection) &&
+    // must NOT reference the deleted table's path, or gate any behavior on
+    // its removed flag fields — `floor_categories`/`void_doctrine` may each
+    // appear at most once, in the single historical sentence explaining
+    // what the deleted table used to carry (not as active gating logic).
+    !semSection.includes('templates/statutory-employment-minimums.yml') &&
+    (semSection.match(/floor_categories/g) || []).length <= 1 &&
+    (semSection.match(/void_doctrine/g) || []).length <= 1 &&
+    !semSection.includes('Floors-absent silence') &&
+    !semSection.includes('floorMatch') &&
+    !semSection.includes('voidDoctrineMatch') &&
+    // must NOT reintroduce the removed floor value / doctrine narrative, and
+    // must NOT reintroduce a named case/doctrine (e.g. Bardal) as a factor
+    // list or asserted holding — a bare case citation belongs only in
+    // restrictive-covenants.yml's own `sources` field, never narrated here
+    !/2 weeks|3 weeks|8 weeks|26 weeks/.test(semSection) &&
+    !/Waksdale|ONCA 391|wilful.misconduct standard|Bardal/i.test(semSection)
+  ) {
+    pass('offer-prep sub-statutory-terms subsection documents the table deletion per #2280, routes unconditionally to lawyer questions with no table lookup or category/doctrine gating, never-assert hard rule, {language.output} rendering, no-calculations non-goal — and carries no reintroduced statutory figures or doctrine narrative (#2039, #2280)');
+  } else {
+    fail('offer-prep sub-statutory-terms subsection missing/incomplete, or still asserts a specific floor value / regulation flag / doctrine holding, or still gates on a table lookup — needs the #2280 table-deletion rationale, unconditional lawyer-question routing, the floor-value/flag/doctrine never-assert hard rule, {language.output} rendering, no-calculations non-goal, and must not restate the removed ESA figures or Waksdale narrative (#2039, #2280)');
+  }
+
+  // 3. Lawyer-question workflow: both the floor question and the
+  //    doctrine-directed question are present, fire unconditionally (no
+  //    table-flag gating), explicitly ask the lawyer for the current
+  //    figure/effect rather than the mode asserting one, and are routed
+  //    through {language.output} rendering at the presentation boundary.
+  const semLawyerBlock = semSection.slice(
+    Math.max(0, semSection.indexOf('Questions for your lawyer')),
+    semSection.indexOf('candidate-empowering angle') > 0
+      ? semSection.indexOf('candidate-empowering angle')
+      : undefined
+  );
+  if (
+    /at or above the statutory minimum/i.test(semLawyerBlock) &&
+    /does this clause meet it/i.test(semLawyerBlock) &&
+    /could void the whole clause/i.test(semLawyerBlock) &&
+    !/void_doctrine: true/.test(semLawyerBlock) &&
+    (semLawyerBlock.match(/Render in \{language\.output\}/g) || []).length >= 2
+  ) {
+    pass('sub-statutory-terms lawyer-question workflow generates both the statutory-floor question and the doctrine-directed question unconditionally (no table-flag gating), each asking the lawyer for the current figure/effect (never asserting one) and each rendered via [Render in {language.output}] at the presentation boundary (#2039, #2280)');
+  } else {
+    fail('sub-statutory-terms lawyer-question workflow incomplete — needs a statutory-floor question asking the lawyer for the current minimum, a doctrine-directed question about whether a defect could void the whole clause, both firing unconditionally with no void_doctrine table-flag gating, and both rendered via [Render in {language.output}] (#2039, #2280)');
+  }
+
+  // 4. Phrasing discipline holds in the report-facing text: no rendered
+  //    output template may assert a specific floor value, a regulation
+  //    flag, a doctrine holding, or a verdict about the candidate's own
+  //    clause. Only '>' lines (rendered output templates) are scanned.
+  const semQuoteLines = semSection.split('\n').filter((l) => l.trimStart().startsWith('>'));
+  const semAssertive = semQuoteLines.filter((l) =>
+    /(this|your|the candidate'?s?) (specific )?(clause|provision|term|contract) (is|would be|will be) (void|illegal|unenforceable|invalid|below the (statutory )?floor|in violation)/i.test(l)
+  );
+  const semFigureLeak = semQuoteLines.filter((l) => /Waksdale|ONCA 391|\b2 weeks\b|\b8 weeks\b|\b26 weeks\b/i.test(l));
+  if (semSection && semQuoteLines.length >= 1 && semAssertive.length === 0 && semFigureLeak.length === 0) {
+    pass('sub-statutory-terms rendered templates state only the clause\'s own term + the lawyer question — no void/illegal/unenforceable/below-the-floor assertions and no reintroduced statutory figures or doctrine names (#2039, #2280)');
+  } else {
+    fail(`sub-statutory-terms phrasing discipline broken: ${semAssertive.length ? `clause-directed verdict in blockquote: ${semAssertive[0].trim().slice(0, 80)}` : semFigureLeak.length ? `reintroduced statutory figure/doctrine name in blockquote: ${semFigureLeak[0].trim().slice(0, 80)}` : 'expected a blockquote output template in the section'} (#2039)`);
+  }
+}
+
 
 const pipelineMode = readFile('modes/pipeline.md');
 if (
@@ -1714,6 +2018,7 @@ try {
       filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredPostingAge: 7,
       filteredSalary: 0, filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29,
       errors: 0, filteredBlacklist: 8, filteredVisa: 2, filteredPostedDate: 1,
+      filteredCountryEligibility: 4,
     }, runsFile);
     const content = readFileSync(runsFile, 'utf-8');
     const lines = content.trim().split('\n');
@@ -1723,10 +2028,12 @@ try {
       fail(`appendScanRunSummary header mismatch — got: ${lines[0]}`);
     }
     const cols = lines[1].split('\t');
-    // filtered_blacklist/filtered_visa/filtered_posted_date land in the three
-    // trailing columns (16/17/18), per the header-name append-only contract.
-    if (cols.length === 18 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed'
-        && cols[13] === '29' && cols[15] === '8' && cols[16] === '2' && cols[17] === '1') {
+    // filtered_blacklist/filtered_visa/filtered_posted_date/filtered_country_eligibility
+    // land in the four trailing columns (16-19), per the header-name append-only
+    // contract: an older file keeps parsing, the extra cells are simply unnamed there.
+    if (cols.length === 19 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed'
+        && cols[13] === '29' && cols[15] === '8' && cols[16] === '2' && cols[17] === '1'
+        && cols[18] === '4') {
       pass('appendScanRunSummary writes one tab-delimited row with the run counters');
     } else {
       fail(`appendScanRunSummary row shape wrong: ${JSON.stringify(cols)}`);
@@ -1750,17 +2057,70 @@ try {
 console.log('\n12. Follow-up cadence logic');
 
 try {
-  const cadence = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+  // Pin the cadence source BEFORE followup-cadence.mjs is evaluated (#2268).
+  // Its module-level `CADENCE = resolveCadenceConfig()` reads CAREER_OPS_PROFILE at
+  // import time and otherwise falls back to the USER's config/profile.yml - so the
+  // computeUrgency / computeNextFollowupDate cases below, which encode
+  // DEFAULT_CADENCE, went red on a perfectly healthy install where the user had
+  // customized followup_cadence. #2446 pinned the two standalone suites this way;
+  // this in-process import was the piece left over.
+  //
+  // The import below must stay DYNAMIC: ESM hoists static imports above every
+  // statement in the file, so a static import would evaluate the module before this
+  // assignment and the pin would silently do nothing.
+  const CADENCE_FIXTURE = join(ROOT, 'tests', 'fixtures', 'profile-default-cadence.yml');
+  const priorCadenceProfile = process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_PROFILE = CADENCE_FIXTURE;
 
-  // CLI regression: the import.meta.url guard must still let the module run as a CLI.
-  // Data-independent — default mode emits the result as JSON: a `metadata` object when
-  // the tracker has applications, or an `{error}` object (exit 1) when it is empty.
-  // Empty output would mean the guard wrongly suppressed main().
+  let cadence;
   let cliOut = '';
   try {
-    cliOut = execFileSync(NODE, [join(ROOT, 'followup-cadence.mjs')], { cwd: ROOT, encoding: 'utf-8', timeout: 30000 });
-  } catch (cliErr) {
-    cliOut = `${cliErr.stdout || ''}`; // exit 1 on an empty tracker is expected; keep stdout
+    cadence = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+
+    // CLI regression: the import.meta.url guard must still let the module run as a CLI.
+    // Data-independent — default mode emits the result as JSON: a `metadata` object when
+    // the tracker has applications, or an `{error}` object (exit 1) when it is empty.
+    // Empty output would mean the guard wrongly suppressed main().
+    //
+    // The pin is passed explicitly: this is a FRESH process, so it re-resolves the
+    // profile on its own and would otherwise read the user's config/profile.yml no
+    // matter what the parent set.
+    try {
+      cliOut = execFileSync(NODE, [join(ROOT, 'followup-cadence.mjs')], {
+        cwd: ROOT,
+        encoding: 'utf-8',
+        timeout: 30000,
+        env: { ...process.env, CAREER_OPS_PROFILE: CADENCE_FIXTURE },
+      });
+    } catch (cliErr) {
+      cliOut = `${cliErr.stdout || ''}`; // exit 1 on an empty tracker is expected; keep stdout
+    }
+  } finally {
+    // Restore immediately. followup-cadence.mjs froze CADENCE at import above, so the
+    // pin has already done its job, and other modules read the same variable
+    // (scan.mjs, cv-templates.mjs, providers/_profile-keywords.mjs, plugins/_engine.mjs)
+    // - later sections must not silently inherit the fixture.
+    if (priorCadenceProfile === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = priorCadenceProfile;
+  }
+
+  // Guard the pin itself: if it ever stops taking effect, the two cadence-dependent
+  // blocks below revert to silently asserting against whatever the developer happens
+  // to have configured. This fails loudly instead.
+  //
+  // The module-private CADENCE isn't exported, but resolveCadenceConfig() with no
+  // arguments re-reads the same module-level PROFILE_FILE that CADENCE was built
+  // from - which was resolved from CAREER_OPS_PROFILE at import time. So this is a
+  // faithful proxy for "the pin was in place when the module was evaluated".
+  {
+    const pinned = cadence.resolveCadenceConfig();
+    const drift = Object.keys(cadence.DEFAULT_CADENCE)
+      .filter((k) => pinned[k] !== cadence.DEFAULT_CADENCE[k]);
+    if (drift.length === 0) {
+      pass('section 12 pins CAREER_OPS_PROFILE, so cadence resolves to the documented defaults');
+    } else {
+      fail(`section 12 cadence pin did not take effect - drifted keys: ${drift.join(', ')} (got ${JSON.stringify(pinned)})`);
+    }
   }
   let cliJson = null;
   try { cliJson = JSON.parse(cliOut.trim()); } catch { /* leave null → fail below */ }

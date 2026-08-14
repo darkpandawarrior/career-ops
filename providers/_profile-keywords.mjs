@@ -16,7 +16,7 @@
 // would require changing the Provider.fetch(entry, ctx) contract itself.
 
 import { existsSync, readFileSync } from 'fs';
-import * as yaml from 'js-yaml'; // js-yaml v5 is ESM-only — no default export
+import * as yaml from 'js-yaml';
 
 // Matches the CAREER_OPS_PROFILE override already honored by scan.mjs,
 // cv-templates.mjs, followup-cadence.mjs, plugins/_engine.mjs, and

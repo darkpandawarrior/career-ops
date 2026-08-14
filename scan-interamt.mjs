@@ -18,14 +18,18 @@
  */
 
 import { chromium } from 'playwright';
+import { join } from 'path';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
-import * as yaml from 'js-yaml'; // js-yaml v5 is ESM-only — no default export
+import * as yaml from 'js-yaml';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
+
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // ── Config ───────────────────────────────────────────────────────────
 
 const PORTALS_PATH    = 'portals.yml';
-const SCAN_HISTORY    = 'data/scan-history.tsv';
+const SCAN_HISTORY    = join(CAREER_OPS_DATA, 'data/scan-history.tsv');
 const INTERAMT_HOME   = 'https://interamt.de/koop/app/';
 // Direct offer URL — constructed from StellenangebotId.
 // Wicket adds a session version number (?28&id=...) during live navigation,
@@ -321,11 +325,11 @@ async function main() {
 
   if (!DRY_RUN) {
     if (newOffers.length > 0) await appendToPipeline(newOffers);
-    if (newOffers.length > 0) appendToScanHistory(newOffers, date, 'added');
-    if (titleSkipped.length > 0) appendToScanHistory(titleSkipped, date, 'skipped_title');
-    if (locationSkipped.length > 0) appendToScanHistory(locationSkipped, date, 'skipped_location');
-    if (dateSkipped.length > 0) appendToScanHistory(dateSkipped, date, 'skipped_date');
-    if (dupeSkipped.length > 0) appendToScanHistory(dupeSkipped, date, 'skipped_dup');
+    if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
+    if (titleSkipped.length > 0) await appendToScanHistory(titleSkipped, date, 'skipped_title');
+    if (locationSkipped.length > 0) await appendToScanHistory(locationSkipped, date, 'skipped_location');
+    if (dateSkipped.length > 0) await appendToScanHistory(dateSkipped, date, 'skipped_date');
+    if (dupeSkipped.length > 0) await appendToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
   // Summary

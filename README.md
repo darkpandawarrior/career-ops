@@ -6,8 +6,8 @@
 
 ---
 
-![engine version](https://img.shields.io/badge/engine-career--ops_v1.24.0-6366f1?style=flat-square)
-![dashboard version](https://img.shields.io/badge/dashboard-web_v0.5.0-22d3ee?style=flat-square)
+![engine version](https://img.shields.io/badge/engine-career--ops_post--v1.26.0-6366f1?style=flat-square)
+![dashboard version](https://img.shields.io/badge/dashboard-web_v0.6.1-22d3ee?style=flat-square)
 ![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript_7-3178C6?style=flat-square&logo=typescript&logoColor=white)
@@ -19,7 +19,37 @@
 ![Built on career-ops](https://img.shields.io/badge/built_on-career--ops-6366f1?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)
 
+**[Screenshots](#screenshots)** · **[Why](#why-hiresignal-exists)** · **[Features](#features)** · **[Quick start](#quick-start)** · **[Architecture](#architecture)** · **[Upstream relationship](#relationship-to-upstream-updates)** · **[Privacy](#data--privacy)**
+
+**Built on:** [santifer/career-ops](https://github.com/santifer/career-ops) &nbsp;·&nbsp; **Portfolio:** [cv-siddharth.vercel.app](https://cv-siddharth.vercel.app/)
+
 </div>
+
+---
+
+<details>
+<summary><b>Table of contents</b></summary>
+
+- [What is this](#what-is-this)
+- [Screenshots](#screenshots)
+- [Why HireSignal exists](#why-hiresignal-exists)
+- [Features](#features)
+- [The 2.0 dashboard](#the-20-dashboard-web)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+- [Architecture](#architecture)
+- [How HireSignal uses career-ops](#how-hiresignal-uses-career-ops)
+- [Relationship to upstream updates](#relationship-to-upstream-updates)
+- [Data & privacy](#data--privacy)
+- [Ethics](#ethics)
+- [Version history](#version-history)
+
+</details>
+
+> **At a glance** — **77** zero-auth job-board providers · **2,741** engine tests · **6** machine-checked
+> fork adaptations · **28,746** ATS boards per full sweep, of which **~46%** are permanently dead and
+> skipped from `data/dead-boards.tsv`. Local-first: no hosted service, no account, your data never
+> leaves the machine.
 
 ---
 
@@ -47,6 +77,41 @@ routing (`?profile=slug` registry + switcher), in-process scoring, and a full
 surface (Today command center · Board · Pipeline · Ops · Intel · Portals ·
 Analytics · CV · Onboarding · ⌘K palette). **This README's "modern dashboard"
 notes describe `web/`.**
+
+---
+
+## Screenshots
+
+> Every frame is rendered from a **synthetic demo profile** — fictional employers, invented
+> scores, `example.com` URLs. No real job search, tracker row or report appears anywhere in this
+> README, and the seeder builds the fixture from scratch rather than transforming real data, so
+> there is no field anyone could forget to redact.
+>
+> **Reproduce the whole set:**
+> ```bash
+> mkdir -p /tmp/hs-demo && node demo-seed.mjs /tmp/hs-demo
+> CAREER_OPS_ROOT=/tmp/hs-demo npm --prefix web run dev
+> ```
+> The seed is deterministic (fixed clock), so a regenerated set diffs cleanly instead of churning.
+
+<table>
+<tr>
+<td width="50%" valign="top"><b>Job board — scored, not just listed</b><br/><sub>12 roles scored against the profile, banded excellent → low, with the matched skills that drove each score. The number is explainable, which is the point: it is a reason to open a posting, not a ranking to trust blindly.</sub><br/><br/><img src="docs/assets/screens/board.png" alt="Job board showing 12 scored roles, 4 excellent, score bands and matched-skill chips"/></td>
+<td width="50%" valign="top"><b>Analytics — where the funnel actually leaks</b><br/><sub>Stage distribution, score distribution and top companies over the tracked set. Built to answer &ldquo;am I being rejected, or ignored?&rdquo; — those need different fixes.</sub><br/><br/><img src="docs/assets/screens/analytics.png" alt="Analytics with pipeline-by-stage, score distribution and top companies"/></td>
+</tr>
+<tr>
+<td valign="top"><b>Pipeline — the inbox of pending decisions</b><br/><sub>Discovered postings waiting on a call, separate from applications already in flight. Keeping them apart is what stops &ldquo;applied&rdquo; from quietly meaning &ldquo;still owes a screening step&rdquo;.</sub><br/><br/><img src="docs/assets/screens/pipeline.png" alt="Pipeline view listing pending discovered postings"/></td>
+<td valign="top"><b>Today — the command center</b><br/><sub>What needs a human right now, and nothing else. When there is genuinely nothing, it says so rather than manufacturing a task list.</sub><br/><br/><img src="docs/assets/screens/today.png" alt="Today command center"/></td>
+</tr>
+<tr>
+<td valign="top"><b>Ops — the engine's own health</b><br/><sub>Scan runs, portal health and the state of the local data contract. A scanner that silently stops finding things looks identical to a quiet market; this is where the difference shows.</sub><br/><br/><img src="docs/assets/screens/ops.png" alt="Ops view with scan runs and portal health"/></td>
+<td valign="top"><b>Portals — what is actually being scanned</b><br/><sub>Configured companies and boards, with which ones have ever produced a match. Low is not the same as broken, and the view says so.</sub><br/><br/><img src="docs/assets/screens/portals.png" alt="Portals configuration view"/></td>
+</tr>
+<tr>
+<td valign="top"><b>Intel — company research surface</b><br/><sub>Per-company context gathered alongside the pipeline, kept local.</sub><br/><br/><img src="docs/assets/screens/intel.png" alt="Intel company research view"/></td>
+<td valign="top"><b>CV — the source of truth, rendered</b><br/><sub>`cv.md` is canonical; the dashboard renders and checks it rather than holding a second copy that can drift.</sub><br/><br/><img src="docs/assets/screens/cv.png" alt="CV view rendering cv.md"/></td>
+</tr>
+</table>
 
 ---
 
@@ -243,7 +308,7 @@ flowchart TD
     I --> J[job-search-runner.mjs]
 
     J --> K1["scan.mjs + scan-ats-full.mjs<br/>(zero-token ATS feeds)"]
-    J --> K2["69 provider modules"]
+    J --> K2["77 provider modules"]
     J --> K3["pipeline entries + scan history"]
     J --> K4["search leads"]
 
@@ -421,7 +486,7 @@ HireSignal is not a separate job-search engine bolted next to career-ops. It is 
 | career-ops capability | How HireSignal uses it |
 |----------------------|----------------------|
 | Data contract | Candidate data kept in user-layer files: `cv.md`, `config/profile.yml`, `config/job-search.yml`, `modes/_profile.md`, `portals.yml`, `data/`, `reports/`, `output/` |
-| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, 69 provider modules ([`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md)), scan history, and pipeline conventions — no hosted service needed |
+| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, 77 provider modules ([`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md)), scan history, and pipeline conventions — no hosted service needed |
 | Tracker model | `data/applications.md`, `data/pipeline.md`, status normalization, deduplication, and report links remain career-ops compatible |
 | Modes and templates | Role evaluation prompts, profile narrative, resume templates, and PDF generation flow remain available for agent-assisted review |
 | Liveness and quality rules | Job links checked, low-fit roles discouraged, no automatic submission |
@@ -445,28 +510,81 @@ The original code is MIT licensed. The `career-ops` name and brand belong to the
 
 ## Relationship to Upstream Updates
 
-This repository keeps `upstream` pointed at `https://github.com/santifer/career-ops.git` to periodically inspect new scanner, provider, mode, and safety improvements — without treating this repo as a direct mirror.
+`upstream` points at [santifer/career-ops](https://github.com/santifer/career-ops). This repo is
+**not a mirror** — it is a fork that absorbs upstream deliberately, and contributes back.
 
-**Do not blindly merge or rebase upstream into `main`.** A normal upstream merge can reintroduce intentionally removed files.
+### The two directions
 
-Use a review branch instead:
+**Fork ← upstream.** Absorbed in explicit windows, never by merging `upstream/main`. A plain merge
+reintroduces files this fork removed on purpose and silently reverts fork adaptations. The
+post-v1.26.0 window was 104 commits / 194 files, classified before a single file was touched:
+
+| Class | Meaning | Treatment |
+|---|---|---|
+| clean | fork never diverged from upstream at the window's base | verbatim copy |
+| absent | new upstream file | port, or record why not |
+| diverged | fork changed it too | per-file judgment — see below |
+
+**Fork → upstream.** Bug fixes, providers and docs go straight to a PR; features and architecture
+changes open an issue first (their CONTRIBUTING). 17 PRs merged upstream so far. Anything general
+enough to live upstream *should* — every accepted fix is one fewer file that conflicts here forever.
+
+### Why "diverged" is not one problem
+
+A diverged file is one of three things, and they need opposite treatment:
+
+- **Fork-adapted** — take ours for the conflict, upstream's for everything else (`git merge-file --ours`).
+- **Merely stale** — the fork was simply behind. Rebuild from upstream and re-apply the fork layer.
+  `scan.mjs` was this: zero fork-only exports, eight upstream ones missing.
+- **Both sides added** — union, not a choice.
+
+Guessing wrong is expensive in a specific way: `--ours` on a file upstream refactored keeps its new
+call sites while dropping their definitions, producing a runtime `ReferenceError` that `node --check`
+cannot see. **Load-test every merged file**, not just parse it.
+
+### The fork layer, as data
+
+The fork's changes to upstream-owned files are not scattered judgment calls — they are a handful of
+transforms repeated across ~40 files. [`fork-adaptations.mjs`](fork-adaptations.mjs) encodes them:
 
 ```bash
-git fetch upstream
-git checkout -b upstream-review upstream/main
-
-# Compare
-git log --oneline dev..upstream-review
-git diff --name-status dev..upstream-review
-
-# Port only useful runtime changes
-git checkout dev
-git checkout upstream-review -- scan.mjs scan-ats-full.mjs providers modes templates
-cd web && npm run test:engine && cd ..
-npm run audit:private-data
+node fork-adaptations.mjs            # check; exits 1 naming any adaptation a sync dropped
+node fork-adaptations.mjs --apply    # re-apply the mechanical ones
 ```
 
-Prefer scanner, provider, liveness, mode, template, parser, and safety fixes. Avoid reintroducing: GitHub workflows, Release Please config, Docker/Nix packaging, demo assets, examples, scaffolder files, non-Codex CLI adapters.
+It runs as part of `test-all.mjs`, so a sync that quietly reverts an adaptation fails the suite
+instead of shipping. The rules carry their own `why`, because each one is a bug this fork already
+fixed once — the multi-profile rule exists because upstream once shipped a wrong-profile read across
+25 scripts **with a green test suite the entire time**.
+
+**Sync workflow this enables:**
+
+```bash
+git fetch upstream origin
+# 1. classify the window (clean / absent / diverged) before touching anything
+# 2. copy upstream wholesale where it is safe
+node fork-adaptations.mjs --apply    # 3. re-apply the fork layer mechanically
+node fork-adaptations.mjs            # 4. must be clean
+node test-all.mjs                    # 5. must be green
+node private-data-audit.mjs          # 6. no user-layer file became tracked
+```
+
+### What stays different, and why
+
+| Adaptation | Reason |
+|---|---|
+| `path-resolver.mjs` — engine root vs **data root** | Under `./profile <name>` the active profile's data is at `CAREER_OPS_ROOT`, which is *not* the script directory. Upstream has no multi-profile concept. |
+| namespace `import * as yaml` | js-yaml v5 is ESM-only. Upstream has largely converged here on its own. |
+| `tracker-lock.mjs` → only `lockDirFor` | Its other helpers were byte-identical to upstream's `tracker-utils.mjs` and were dropped in favour of the shared ones. |
+| web tests colocated at `web/src/lib/*.test.mjs` | Runs under `npm run test:engine`; vitest globs `*.test.{ts,tsx}`, so the two runners coexist. |
+| `voice-dna.template.md` tracked, `voice-dna.md` ignored | Upstream tracks `voice-dna.md` directly. It is User Layer here, and the public sibling fork means personalizing a tracked file would publish your writing voice. |
+| no `update-system.mjs` | This fork syncs explicitly; it never self-updates. |
+
+**Converging is the default.** Where upstream has since added something this fork was carrying its
+own copy of, the fork drops its copy — that is delta paid for at every sync for no gain. But the test
+is whether it is *genuinely the same thing*, not whether the name matches: `normalizeUrl` exists in
+both and does a different job in each, and adopting upstream's would have made portal discovery
+silently discard real results.
 
 ---
 
@@ -506,7 +624,8 @@ kirklazar-android/hiresignal --state merged`.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **career-ops v1.24.0 · web v0.5.0** (current) | 2026-08-02 | Follow-up Tracker page (`/followups`) with logging, history and cadence settings; backend-rendered PDFs (the agent writes HTML + a format sidecar, the platform renders — no sandbox-escalation prompt); cover-letter fact gate extended to employer/title/tool claims; `jd-similarity.mjs`, `application-artifacts.mjs`, `company-funded.mjs`, `weekly-digest.mjs`, `mark-pdf-ready.mjs`, `portal-health-lock.mjs`; DNS pacing + resolver negative-cache for full sweeps; word-boundary location filter with URL and remote-title hints; `set-status --row/--report` explicit selectors; Italian interview modes |
+| **career-ops post-v1.26.0 · web v0.6.1** (current) | 2026-08-14 | Absorbed the post-v1.26.0 upstream window (104 commits / 194 files) — see [Relationship to Upstream Updates](#relationship-to-upstream-updates); `fork-adaptations.mjs` encodes the fork layer as machine-checked rules and runs in `test-all.mjs`; multi-profile adaptation normalized from ten shapes to one, making it autofixable; `scan.mjs` gains upstream country-eligibility filtering (reads the JD **body**, where "US-only" actually lives, rather than the structured location field), AND-groups in `title_filter.positive` ("android + kotlin"), and a scan-runs row on failed/interrupted sweeps; reverse-ATS sweep skips known-dead boards via `data/dead-boards.tsv` (~46% of the public directory is permanently 404) and drops single-host ATSs to 6 concurrent, which stopped self-throttling — unreachable boards 16,000 → 13,252 and DNS wait 14,133s → 83s; `tracker-lock` helpers converged onto upstream's `tracker-utils`; `voice-dna.md` split into a tracked template + gitignored working copy |
+| career-ops v1.24.0 · web v0.5.0 | 2026-08-02 | Follow-up Tracker page (`/followups`) with logging, history and cadence settings; backend-rendered PDFs (the agent writes HTML + a format sidecar, the platform renders — no sandbox-escalation prompt); cover-letter fact gate extended to employer/title/tool claims; `jd-similarity.mjs`, `application-artifacts.mjs`, `company-funded.mjs`, `weekly-digest.mjs`, `mark-pdf-ready.mjs`, `portal-health-lock.mjs`; DNS pacing + resolver negative-cache for full sweeps; word-boundary location filter with URL and remote-title hints; `set-status --row/--report` explicit selectors; Italian interview modes |
 | career-ops v1.23.0 + unreleased main · web v0.4.0 | 2026-07-30 | role-matcher.mjs fixes (MTS-prefix stripping, accent-folding, exact-title short-circuit, `product`/CI/CD-acronym handling); new standalone tools — `discover-ats.mjs`, `skill-extract.mjs`, `contacts.mjs`, `company-history.mjs`, `batch-tailor.mjs`, `fix-slugs.mjs`, `check-table-freshness.mjs`; iCIMS provider; jurisdiction-prohibited-content table + `apply.md` Step 5c form warning; Hired canonical status wired into dashboard fallback + pipeline tabs; dependency refresh (Next.js 16.2.12, React 19.2.8, Playwright 1.62, `@testing-library/jest-dom` 7, `js-yaml` 5.2.2) |
 | career-ops v1.22.0 · web v0.3.0 | 2026-07-24 | 5 new job-board providers (Alibaba, Jobvite, Gem, Welcome to the Jungle, Agentic Engineering Jobs); token-usage tracking (`utils/token-tracker.mjs`); tracker writer-lock race-condition fix; CV/PDF page-overflow guard + shared `cv-sections-core.mjs` + Chinese-minimal CV template; SSRF hardening in Playwright liveness checks; in-process DNS cache for scan reliability; Block G location-tag-mismatch fraud signal |
 | career-ops v1.20.0 + v1.21.0 | 2026-07-18 | Oracle Recruiting Cloud provider; scan trust-signal persistence + portal-health tracking; Workday liveness rung; atomic report-number allocation; per-round salary comparison; oferta Risk Summary + benefits-mismatch signal |

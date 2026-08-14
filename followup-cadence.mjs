@@ -12,18 +12,19 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname, relative, sep } from 'path';
-import { pathToFileURL } from 'url';
-import * as yaml from 'js-yaml';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { join, dirname, relative, sep } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
+import * as yaml from 'js-yaml';
+import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
+import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 
-const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
-const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
-  ? join(DATA_ROOT, 'data/applications.md')
-  : join(DATA_ROOT, 'applications.md');
-const FOLLOWUPS_FILE = join(DATA_ROOT, 'data/follow-ups.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+  ? join(CAREER_OPS_DATA, 'data/applications.md')
+  : join(CAREER_OPS_DATA, 'applications.md');
+const FOLLOWUPS_FILE = join(CAREER_OPS_DATA, 'data/follow-ups.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS_DATA, 'config/profile.yml');
 
 
 // --- CLI args ---
@@ -83,31 +84,50 @@ export function resolveCadenceConfig({ profilePath = PROFILE_FILE, appliedDays =
 
 const CADENCE = resolveCadenceConfig();
 
-// --- Status normalization (mirrors verify-pipeline.mjs) ---
-const ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated',
-  'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
-  'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  // Hired aliases from templates/states.yml — without these, an "Accepted" or
-  // "Contratado" row normalizes to itself, so stats/funnel/company-history
-  // consumers looking for 'hired' silently drop the best outcome in the tracker.
-  'contratado': 'hired', 'contratada': 'hired', 'accepted': 'hired', 'accept': 'hired',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded',
-  'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-};
+// --- Status normalization ---
+//
+// DERIVED from templates/states.yml, not a hand-copy of it. The map that used
+// to live here was already missing every Turkish spelling the Go dashboard
+// recognises, so the same tracker row normalized three different ways: the TUI
+// read `Mülakat` as `interview`, this file left it as `mülakat` (matching no
+// ACTIONABLE/ADVANCED set, so the row silently vanished from the funnel), and
+// the web rejected it outright on writeback. tracker-utils already exposes the
+// loader for exactly this — its docstring says "a new state or alias lands in
+// one file and every consumer follows" — it just had no consumer here (#2704).
+//
+// Cached per process: these are short-lived CLI runs, so a single read is
+// correct. A long-running consumer must NOT copy this pattern — see #2590,
+// where caching states.yml for a server's lifetime pinned a stale roster.
+let aliasMapCache = null;
+
+/** alias/id/label (lowercased) → canonical lowercase id, from states.yml. */
+function statusAliasMap() {
+  if (aliasMapCache) return aliasMapCache;
+  const map = new Map();
+  try {
+    for (const st of loadCanonicalStates(join(CAREER_OPS, 'templates', 'states.yml'))) {
+      const id = st.id.toLowerCase();
+      map.set(foldStatusInput(id), id);
+      if (st.label) map.set(foldStatusInput(st.label), id);
+      for (const a of st.aliases) map.set(foldStatusInput(a), id);
+    }
+  } catch {
+    // A missing/malformed states.yml is a broken install. Degrade to
+    // identity-normalization rather than resurrecting a hardcoded table: a
+    // fallback copy is the same copy in disguise and drifts the same way.
+    return (aliasMapCache = new Map());
+  }
+  return (aliasMapCache = map);
+}
 
 const ACTIONABLE_STATUSES = ['applied', 'responded', 'interview'];
 
 export function normalizeStatus(raw) {
-  const clean = raw.replace(/\*\*/g, '').trim().toLowerCase()
-    .replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
-  return ALIASES[clean] || clean;
+  // foldStatusInput, not a bare toLowerCase: JS lowercases the Turkish dotted
+  // capital `İ` to `i` + U+0307 and the mark survives, so every all-caps
+  // Turkish row missed every alias (#2704 review).
+  const clean = foldStatusInput(String(raw).replace(/\s+\d{4}-\d{2}-\d{2}.*$/, ''));
+  return statusAliasMap().get(clean) || clean;
 }
 
 // --- Date helpers ---
@@ -217,10 +237,11 @@ export function addDays(date, days) {
 }
 
 // --- Parse applications.md ---
-function parseTracker() {
-  if (!existsSync(APPS_FILE)) return [];
-  const content = readFileSync(APPS_FILE, 'utf-8');
-  const lines = content.split('\n');
+// Content-based core so any consumer (stats.mjs, tests) can classify rows
+// from in-memory strings without touching disk. The disk-backed wrapper
+// below is what the CLI path uses.
+function parseTrackerContent(content) {
+  const lines = String(content ?? '').split('\n');
   const colmap = resolveColumns(lines);
   const entries = [];
   for (const line of lines) {
@@ -231,11 +252,6 @@ function parseTracker() {
 }
 
 // --- Parse follow-ups.md ---
-// Pure function of `content` (matching career-ops upstream's signature) so
-// callers like company-history.mjs can parse an already-read buffer; falls
-// back to reading FOLLOWUPS_FILE itself when no content is passed, preserving
-// this module's own zero-arg call site below.
-
 // Two formats coexist in the log (both append-only):
 //   1. Table rows:  | num | appNum | date | company | role | channel | contact | notes |
 //   2. Legacy bullets written by early web builds: `- YYYY-MM-DD · #NUM Company — note`
@@ -247,10 +263,6 @@ function parseTracker() {
 const BULLET_RE = /^-\s+(\d{4}-\d{2}-\d{2})\s+·\s+#(\d+)\s+(.+?)(?:\s+—\s+(.*))?$/;
 
 export function parseFollowups(content) {
-  if (content === undefined) {
-    if (!existsSync(FOLLOWUPS_FILE)) return [];
-    content = readFileSync(FOLLOWUPS_FILE, 'utf-8');
-  }
   const entries = [];
   for (const line of String(content ?? '').split('\n')) {
     if (line.startsWith('|')) {
@@ -299,9 +311,19 @@ export { parseFollowups as parseFollowupsContent };
 // follow-up logged on/after the pin's set-date resumes the normal schedule.
 // Stored in data/follow-ups.md as directive lines:
 //   - next #42 2026-07-10 (set 2026-07-02)
+//   - next #42 2026-07-10 (set 2026-07-02) — why the date was pinned
 // The `(set …)` part records when the pin was made; if omitted (hand-written)
 // it defaults to the pinned date itself. The LAST pin line per application wins.
-const OVERRIDE_RE = /^-\s+next\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s+\(set\s+(\d{4}-\d{2}-\d{2})\))?\s*$/i;
+//
+// A trailing `— note` is accepted and ignored. Pins are written by hand as
+// often as by `followup-seed.mjs`, and a hand-written pin almost always wants
+// to record WHY the date moved. Anchoring the pattern immediately after the
+// `(set …)` group made every annotated pin fail to match — silently, since a
+// non-matching line is indistinguishable from an ordinary bullet. The failure
+// mode is the dangerous direction: the pin vanishes, the computed cadence
+// takes over, and the application reports overdue when the user had
+// explicitly deferred it.
+const OVERRIDE_RE = /^-\s+next\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s+\(set\s+(\d{4}-\d{2}-\d{2})\))?(?:\s*[—–-].*)?\s*$/i;
 
 export function parseNextOverrides(content) {
   const byApp = new Map();
@@ -324,9 +346,46 @@ export function resolveNextOverride(override, lastFollowupDate) {
   return override.date;
 }
 
-function parseOverrides() {
-  if (!existsSync(FOLLOWUPS_FILE)) return new Map();
-  return parseNextOverrides(readFileSync(FOLLOWUPS_FILE, 'utf-8'));
+// --- Retire directives ---
+// Not every application has a reachable human behind it. A cold ATS submission
+// with no contact on file has no follow-up channel at all, yet the cadence
+// keeps reporting it overdue every week forever. A dashboard whose overdue
+// count is mostly un-actionable rows trains the user to stop reading it, which
+// costs far more than the rows themselves.
+//
+// A retire directive drops ONE application out of the cadence:
+//   - cleared #42 2026-08-04 — no contact on file, no warm path
+// The date records when the retirement was made. This closes the follow-up
+// loop only — it does NOT close the application. The tracker row keeps its
+// status and any inbound reply is still caught by reply-watch.
+//
+// Like a pin, a retirement is revoked by a follow-up logged after it, so
+// re-engaging a retired application resumes its normal cadence with no
+// bookkeeping. The LAST directive per application wins, and a retirement
+// outranks a pin on the same application: retiring is the more explicit
+// "stop surfacing this", and reviving it is a one-line edit either way.
+const CLEARED_RE = /^-\s+cleared\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s*[—–-].*)?\s*$/i;
+
+export function parseClearedDirectives(content) {
+  const byApp = new Map();
+  for (const line of String(content ?? '').split('\n')) {
+    const m = line.match(CLEARED_RE);
+    if (!m) continue;
+    const setDate = m[2];
+    if (!parseDate(setDate)) continue; // an impossible date never poisons the analysis
+    const appNum = parseInt(m[1]);
+    byApp.set(appNum, { appNum, setDate });
+  }
+  return byApp;
+}
+
+// Mirrors resolveNextOverride's revival rule, including the same-day tie:
+// "log a final follow-up, then retire" is the common flow, so a follow-up
+// dated the same day as the retirement does not undo it.
+export function isRetired(cleared, lastFollowupDate) {
+  if (!cleared) return false;
+  if (lastFollowupDate && lastFollowupDate > cleared.setDate) return false;
+  return true;
 }
 
 // --- Extract contacts from notes ---
@@ -506,9 +565,6 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
   }
   if (status === 'responded') {
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.responded_subsequent);
-    // First follow-up after a recruiter reply uses the shorter responded_initial
-    // cadence, not responded_subsequent — a fresh reply deserves a quick nudge,
-    // not the same spacing as a chase after an earlier follow-up already went out.
     return addDays(parseDate(appDate), CADENCE.responded_initial);
   }
   if (status === 'interview') {
@@ -521,14 +577,23 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
 }
 
 // --- Main analysis ---
-function analyze() {
-  const apps = parseTracker();
+// Content-based core so consumers outside this CLI (stats.mjs, tests) can
+// reuse the exact same cadence/urgency math — including the 'cold'
+// classification — without duplicating it or touching disk. `followupsContent`
+// missing/empty (the common case when data/follow-ups.md doesn't exist yet)
+// degrades gracefully: every app gets followupCount 0, so 'cold' (which
+// requires followupCount >= applied_max_followups) simply never triggers —
+// no error, no guessing, matching the same "absent optional file = pass
+// through" convention used elsewhere in this project.
+export function analyzeFromContent(trackerContent, followupsContent = '') {
+  const apps = parseTrackerContent(trackerContent);
   if (apps.length === 0) {
     return { error: 'No applications found in tracker.' };
   }
 
-  const followups = parseFollowups();
-  const overrides = parseOverrides();
+  const followups = parseFollowups(followupsContent);
+  const overrides = parseNextOverrides(String(followupsContent ?? ''));
+  const cleared = parseClearedDirectives(followupsContent);
 
   // Group follow-ups by app number
   const followupsByApp = new Map();
@@ -578,6 +643,14 @@ function analyze() {
       urgency = daysBetween(parseDate(nextOverride), now) >= 0 ? 'overdue' : 'waiting';
     }
 
+    // A retirement outranks a pin: it means "there is no channel here", which
+    // no computed or pinned date can make true.
+    const retired = isRetired(cleared.get(app.num), lastFollowupDate);
+    if (retired) {
+      urgency = 'retired';
+      nextFollowupDate = null;
+    }
+
     const nextDate = nextFollowupDate ? parseDate(nextFollowupDate) : null;
     const daysUntilNext = nextDate ? daysBetween(now, nextDate) : null;
 
@@ -590,6 +663,12 @@ function analyze() {
       appliedDate,
       appDateSource,
       company: app.company,
+      // Intermediary channel (#1596): agency name when the application went
+      // through an intermediary, null for a direct application (the tracker's
+      // `—` placeholder and the no-Via-column case both normalize to null, so
+      // consumers never learn the sentinel). When set, follow-ups chase the
+      // agency contact, not the company.
+      via: app.via && app.via !== '—' ? app.via : null,
       role: app.role,
       status: normalized,
       score: app.score,
@@ -602,6 +681,7 @@ function analyze() {
       followups: sortedFollowups,
       urgency,
       nextFollowupDate,
+      nextOverride,
       daysUntilNext,
     });
   }
@@ -610,23 +690,44 @@ function analyze() {
   const urgencyOrder = { urgent: 0, overdue: 1, waiting: 2, cold: 3 };
   entries.sort((a, b) => (urgencyOrder[a.urgency] ?? 9) - (urgencyOrder[b.urgency] ?? 9));
 
+  // Retired applications are counted but not listed — surfacing them in the
+  // entries array would defeat the point of retiring them, and the count keeps
+  // the retirement visible enough to be reconsidered.
+  const retiredCount = entries.filter(e => e.urgency === 'retired').length;
+  const active = entries.filter(e => e.urgency !== 'retired');
+
   const filtered = overdueOnly
-    ? entries.filter(e => e.urgency === 'overdue' || e.urgency === 'urgent')
-    : entries;
+    ? active.filter(e => e.urgency === 'overdue' || e.urgency === 'urgent')
+    : active;
 
   return {
     metadata: {
       analysisDate: now.toISOString().split('T')[0],
       totalTracked: apps.length,
-      actionable: entries.length,
-      overdue: entries.filter(e => e.urgency === 'overdue').length,
-      urgent: entries.filter(e => e.urgency === 'urgent').length,
-      cold: entries.filter(e => e.urgency === 'cold').length,
-      waiting: entries.filter(e => e.urgency === 'waiting').length,
+      actionable: active.length,
+      overdue: active.filter(e => e.urgency === 'overdue').length,
+      urgent: active.filter(e => e.urgency === 'urgent').length,
+      cold: active.filter(e => e.urgency === 'cold').length,
+      waiting: active.filter(e => e.urgency === 'waiting').length,
+      retired: retiredCount,
     },
     entries: filtered,
     cadenceConfig: CADENCE,
+    // The EFFECTIVE cadence above is defaults+profile overrides. Consumers that
+    // need to show what a value would be WITHOUT the user's override (the web
+    // settings form's placeholder) need the pure defaults too — sourcing that
+    // placeholder from cadenceConfig would render a user's own override as the
+    // default they'd be reverting to. Emitting both is what lets the web stop
+    // hand-copying DEFAULT_CADENCE (#2369).
+    cadenceDefaults: DEFAULT_CADENCE,
   };
+}
+
+// --- Main analysis (disk-backed CLI entry point) ---
+function analyze() {
+  const trackerContent = existsSync(APPS_FILE) ? readFileSync(APPS_FILE, 'utf-8') : '';
+  const followupsContent = existsSync(FOLLOWUPS_FILE) ? readFileSync(FOLLOWUPS_FILE, 'utf-8') : '';
+  return analyzeFromContent(trackerContent, followupsContent);
 }
 
 // --- Summary mode ---
@@ -676,15 +777,30 @@ function printSummary(result) {
   console.log('');
 }
 
+// ── CLI flags + help ────────────────────────────────────────────────
+
+const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+
+const USAGE = `Usage:
+  node followup-cadence.mjs                    # full JSON analysis to stdout
+  node followup-cadence.mjs --summary          # human-readable dashboard
+  node followup-cadence.mjs --overdue-only     # only show overdue/urgent entries
+  node followup-cadence.mjs --applied-days 10  # override applied_first cadence (days)
+  node followup-cadence.mjs --help|-h          # print this usage block and exit`;
+
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const result = analyze();
-
-  if (summaryMode) {
-    printSummary(result);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
   } else {
-    console.log(JSON.stringify(result, null, 2));
-  }
+    const result = analyze();
 
-  if (result.error) process.exit(1);
+    if (summaryMode) {
+      printSummary(result);
+    } else {
+      console.log(JSON.stringify(result, null, 2));
+    }
+
+    if (result.error) process.exit(1);
+  }
 }

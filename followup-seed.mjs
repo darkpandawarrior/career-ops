@@ -59,7 +59,8 @@ import { pathToFileURL } from 'url';
 import { randomUUID } from 'crypto';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath } from './tracker-utils.mjs';
+import { lockDirFor } from './tracker-lock.mjs';
 import {
   resolveCadenceConfig,
   normalizeStatus,
@@ -69,7 +70,7 @@ import {
   addDays,
 } from './followup-cadence.mjs';
 
-const { dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 /** Canonical header written when data/follow-ups.md doesn't exist yet. */
 // Divergence from upstream: upstream renamed the header to lowercase
@@ -161,14 +162,14 @@ export function formatPinLine(appNum, nextDate, setDate) {
 
 function resolveTrackerPath() {
   if (process.env.CAREER_OPS_TRACKER) return process.env.CAREER_OPS_TRACKER;
-  return existsSync(join(DATA_ROOT, 'data/applications.md'))
-    ? join(DATA_ROOT, 'data/applications.md')
-    : join(DATA_ROOT, 'applications.md');
+  return existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+    ? join(CAREER_OPS_DATA, 'data/applications.md')
+    : join(CAREER_OPS_DATA, 'applications.md');
 }
 
 function resolveFollowupsPath() {
   if (process.env.CAREER_OPS_FOLLOWUPS) return process.env.CAREER_OPS_FOLLOWUPS;
-  return join(DATA_ROOT, 'data/follow-ups.md');
+  return join(CAREER_OPS_DATA, 'data/follow-ups.md');
 }
 
 function envInt(name, fallback) {

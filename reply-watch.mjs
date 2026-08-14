@@ -12,18 +12,20 @@
  */
 
 import fs from 'node:fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
-import { openTrackerTransaction } from './tracker-lock.mjs';
+import { openTrackerTransaction, rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
+
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_CANDIDATES_PATH = path.join(__dirname, 'data', 'reply-candidates.json');
+const DEFAULT_CANDIDATES_PATH = path.join(CAREER_OPS_DATA, 'data', 'reply-candidates.json');
 const APPS_FILE = resolveTrackerPath(__dirname);
-const FOLLOWUPS_FILE = path.join(__dirname, 'data', 'follow-ups.md');
+const FOLLOWUPS_FILE = path.join(CAREER_OPS_DATA, 'data', 'follow-ups.md');
 
 // Helper to ask a question in the CLI
 function askQuestion(query) {
@@ -139,11 +141,9 @@ function loadFollowups() {
   return followups;
 }
 
-// Two replies can recommend the same application (e.g. an auto-ack followed
-// by a real rejection) — group by app so the batch applies one status change
-// per row, not a last-write-wins race between duplicate recommendations. Two
-// DIFFERENT target statuses for the same row is a genuine conflict: neither
-// wins automatically, it needs a human to look.
+// Apply an approved batch in one locked read/modify/write transaction. Reading
+// after lock acquisition matters because the review prompt can remain open
+// while another process merges or updates tracker rows.
 function groupStatusRecommendations(recommendations) {
   const byApplication = new Map();
   for (const recommendation of recommendations) {
@@ -151,8 +151,11 @@ function groupStatusRecommendations(recommendations) {
     const transitions = byApplication.get(recommendation.num);
     const key = `${recommendation.oldStatus}\0${recommendation.newStatus}`;
     const existing = transitions.get(key);
-    if (existing) existing.count++;
-    else transitions.set(key, { ...recommendation, count: 1 });
+    if (existing) {
+      existing.count++;
+    } else {
+      transitions.set(key, { ...recommendation, count: 1 });
+    }
   }
 
   const updates = [];
@@ -165,11 +168,6 @@ function groupStatusRecommendations(recommendations) {
   return { updates, conflicts };
 }
 
-// Apply an approved batch in one locked read/modify/write transaction.
-// Reading only after the lock is held matters because the review prompt can
-// stay open for a while (waiting on the user's y/N) during which another
-// process may merge or update tracker rows — a pre-lock read would silently
-// clobber that change when this batch writes back.
 async function updateTrackerStatuses(updates) {
   const trackerTransaction = await openTrackerTransaction(APPS_FILE);
 
@@ -177,7 +175,8 @@ async function updateTrackerStatuses(updates) {
     const content = trackerTransaction.read();
     const lines = content.split('\n');
     const colmap = resolveColumns(lines);
-    const updatesByNum = new Map(updates.map(update => [update.num, update]));
+    const grouped = groupStatusRecommendations(updates);
+    const updatesByNum = new Map(grouped.updates.map(update => [update.num, update]));
     const applied = new Set();
     const alreadyCurrent = new Set();
     const conflicts = new Map();
@@ -194,8 +193,6 @@ async function updateTrackerStatuses(updates) {
         continue;
       }
       if (row.status !== update.oldStatus) {
-        // The row moved since the recommendation was computed (another writer
-        // got there first) — do not overwrite a status change made mid-review.
         conflicts.set(update.num, row.status);
         continue;
       }
@@ -206,14 +203,31 @@ async function updateTrackerStatuses(updates) {
     }
 
     if (applied.size > 0) trackerTransaction.replace(lines.join('\n'));
-    return { applied, alreadyCurrent, conflicts, missing };
+    return { applied, alreadyCurrent, conflicts, missing, recommendationConflicts: grouped.conflicts };
   } finally {
     trackerTransaction.close();
   }
 }
 
+const KNOWN_FLAGS = ['--help', '-h'];
+const USAGE = 'Usage: node reply-watch.mjs [path/to/candidates.json]';
+
 async function main() {
-  const candidatesPath = process.argv[2] || DEFAULT_CANDIDATES_PATH;
+  const args = process.argv.slice(2);
+
+  const positional = args.filter(a => !a.startsWith('-'));
+  const unknownFlags = args.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
+  if (unknownFlags.length > 0) {
+    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    process.exit(1);
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+
+  const candidatesPath = positional[0] || DEFAULT_CANDIDATES_PATH;
   ensureCandidatesFile(candidatesPath);
 
   if (!fs.existsSync(candidatesPath)) {
@@ -280,10 +294,10 @@ async function main() {
     }
   });
 
-  const grouped = groupStatusRecommendations(recommendations);
-  if (grouped.conflicts.length > 0) {
+  const groupedRecommendations = groupStatusRecommendations(recommendations);
+  if (groupedRecommendations.conflicts.length > 0) {
     console.warn('Conflicting status recommendations require manual review:');
-    for (const conflict of grouped.conflicts) {
+    for (const conflict of groupedRecommendations.conflicts) {
       const summary = conflict.choices
         .map(choice => `${choice.newStatus} (${choice.count} ${choice.count === 1 ? 'reply' : 'replies'})`)
         .join(' vs ');
@@ -292,8 +306,8 @@ async function main() {
     console.log('');
   }
 
-  if (grouped.updates.length > 0) {
-    const updates = grouped.updates;
+  if (groupedRecommendations.updates.length > 0) {
+    const updates = groupedRecommendations.updates;
     console.log('Suggested status updates to apply:');
     updates.forEach(r => {
       const count = r.count > 1 ? ` (${r.count} replies)` : '';

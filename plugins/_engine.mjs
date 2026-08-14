@@ -62,6 +62,35 @@ function warnSkip(label, reason) {
   console.warn(`⚠️  ${label}: skipping — ${reason}`);
 }
 
+function isWithinDirectory(rootAbs, candidateAbs) {
+  const rel = path.relative(rootAbs, candidateAbs);
+  return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
+}
+
+function nearestExistingPath(absPath) {
+  let current = path.resolve(absPath);
+  while (!existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+  return current;
+}
+
+function isSafePluginPath(rootAbs, candidateAbs) {
+  const rootResolved = path.resolve(rootAbs);
+  const candidateResolved = path.resolve(candidateAbs);
+  if (!isWithinDirectory(rootResolved, candidateResolved)) return false;
+
+  const nearestExisting = nearestExistingPath(candidateResolved);
+  if (!nearestExisting) return false;
+  try {
+    return isWithinDirectory(realpathSync(rootResolved), realpathSync(nearestExisting));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve the config/plugins.yml path for a given project root.
  * @param {string} root
@@ -81,12 +110,13 @@ export async function loadPluginConfig(root) {
   const file = pluginsConfigPath(root);
   if (!existsSync(file)) return {};
   try {
-    // Not `.default` — this fork is already on js-yaml 5's native ESM build
-    // (dist/js-yaml.mjs), which exposes `load` directly on the namespace; the
-    // `.default` unwrap upstream needs is a v4-CJS-interop artifact that
-    // doesn't apply here (and would make `yaml` undefined).
-    const yaml = await import('js-yaml');
-    const parsed = yaml.load(readFileSync(file, 'utf8'));
+    // Named, not `.default`: js-yaml 5 ships a native ESM build with no default
+    // export, so `.default` is undefined there and `yaml.load` throws straight
+    // into the catch below. That catch fails OPEN — it returns {}, so every
+    // configured plugin silently stops loading and the only trace is one ⚠️ line
+    // that reads like a malformed config. The named form resolves on 4.x and 5.x.
+    const { load } = await import('js-yaml');
+    const parsed = load(readFileSync(file, 'utf8'));
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch (err) {
     warnSkip('config/plugins.yml', `unreadable, ignoring — ${err.message}`);
@@ -118,63 +148,6 @@ export async function loadPluginConfig(root) {
  * @property {string} [homepage]
  * @property {string} dir
  */
-/**
- * True if `candidateAbs` is textually inside `rootAbs` (no symlink resolution
- * — a pure path-relation check used both directly and as the second, resolved
- * pass inside isSafePluginPath).
- * @param {string} rootAbs
- * @param {string} candidateAbs
- * @returns {boolean}
- */
-function isWithinDirectory(rootAbs, candidateAbs) {
-  const rel = path.relative(rootAbs, candidateAbs);
-  return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
-}
-
-/**
- * Walk up from `absPath` to the nearest ancestor that actually exists on
- * disk. A manifest can validly reference a path that doesn't exist yet (the
- * old existsSync-gated check skipped the containment check entirely in that
- * case, which is bypassable if a later step creates the file) — this lets
- * isSafePluginPath validate containment against the nearest real ancestor
- * instead of silently trusting an unchecked path.
- * @param {string} absPath
- * @returns {string|null}
- */
-function nearestExistingPath(absPath) {
-  let current = path.resolve(absPath);
-  while (!existsSync(current)) {
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
-  return current;
-}
-
-/**
- * True if `candidateAbs` resolves (symlinks followed) to inside `rootAbs`.
- * A raw startsWith() on unresolved paths is bypassable via a symlink that
- * textually starts with the right prefix but points elsewhere — resolve both
- * sides with realpathSync (via the nearest existing ancestor, so a
- * not-yet-created path is still validated) before comparing.
- * @param {string} rootAbs
- * @param {string} candidateAbs
- * @returns {boolean}
- */
-function isSafePluginPath(rootAbs, candidateAbs) {
-  const rootResolved = path.resolve(rootAbs);
-  const candidateResolved = path.resolve(candidateAbs);
-  if (!isWithinDirectory(rootResolved, candidateResolved)) return false;
-
-  const nearestExisting = nearestExistingPath(candidateResolved);
-  if (!nearestExisting) return false;
-  try {
-    return isWithinDirectory(realpathSync(rootResolved), realpathSync(nearestExisting));
-  } catch {
-    return false;
-  }
-}
-
 export function validateManifest(m, dir, dirName) {
   const label = dirName;
   if (!m || typeof m !== 'object') { warnSkip(label, 'manifest.json is not an object'); return null; }
@@ -217,7 +190,6 @@ export function validateManifest(m, dir, dirName) {
   const entry = typeof m.entry === 'string' && m.entry.trim() ? m.entry : 'index.mjs';
   if (!entry.endsWith('.mjs')) { warnSkip(label, `entry "${entry}" must be a .mjs file`); return null; }
   const entryAbs = path.resolve(dir, entry);
-  if (!existsSync(entryAbs)) { warnSkip(label, `entry file not found: ${entry}`); return null; }
   if (!isSafePluginPath(dir, entryAbs)) { warnSkip(label, `entry "${entry}" escapes the plugin directory`); return null; }
 
   // Optional companion skill (Open-Agent-Skill-Standard SKILL.md). Traversal-
@@ -227,8 +199,8 @@ export function validateManifest(m, dir, dirName) {
   if (m.skill !== undefined) {
     if (typeof m.skill !== 'string' || !m.skill.endsWith('.md')) { warnSkip(label, 'skill must be a relative .md path'); return null; }
     const skillAbs = path.resolve(dir, m.skill);
-    if (!existsSync(skillAbs)) { warnSkip(label, `skill file not found: ${m.skill}`); return null; }
     if (!isSafePluginPath(dir, skillAbs)) { warnSkip(label, `skill "${m.skill}" escapes the plugin directory`); return null; }
+    if (!existsSync(skillAbs)) { warnSkip(label, `skill file not found: ${m.skill}`); return null; }
     skill = m.skill;
   }
 

@@ -22,10 +22,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import readline from 'node:readline';
-import { execFileSync } from 'node:child_process';
 import * as yaml from 'js-yaml';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
+import {
+  formatReportNumber, releaseReportNumbers, reserveReportNumbers,
+} from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
+import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -171,6 +174,25 @@ function fileExists(relPath) {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt caching (#1709)
+// ---------------------------------------------------------------------------
+// The static system prefix (shared + profile + mode + cv, ~12K tokens) is
+// byte-identical across every offer in a run, yet it was re-sent and re-billed
+// on each call. Send it as a structured content block with an ephemeral
+// `cache_control` breakpoint — OpenRouter's documented prompt-caching mechanism.
+// Providers that support caching (Anthropic, Gemini, …) reuse the prefix across
+// back-to-back calls within the cache TTL; providers that don't simply ignore
+// the field, so this is a safe passthrough that never changes the prompt text.
+export function buildCachedSystemMessage(systemPrompt) {
+  return {
+    role: 'system',
+    content: [
+      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
 // OpenRouter API call — automatic model rotation with fallback
 // ---------------------------------------------------------------------------
 async function callOpenRouter(systemPrompt, userMessage) {
@@ -190,8 +212,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
     const body = JSON.stringify({
       model: pinnedModel,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userMessage  },
+        buildCachedSystemMessage(systemPrompt),
+        { role: 'user', content: userMessage },
       ],
       max_tokens: MAX_TOKENS,
     });
@@ -203,7 +225,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
         headers: {
           'Authorization': `Bearer ${key}`,
           'Content-Type':  'application/json',
-          'HTTP-Referer':  'https://github.com/kirklazar-android/hiresignal',
+          'HTTP-Referer':  'https://github.com/santifer/career-ops',
           'X-Title':       'career-ops',
         },
         body,
@@ -249,8 +271,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const body = JSON.stringify({
         model,
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userMessage  }
+          buildCachedSystemMessage(systemPrompt),
+          { role: 'user', content: userMessage },
         ],
         max_tokens: MAX_TOKENS,
       });
@@ -264,7 +286,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
           headers: {
             'Authorization': `Bearer ${key}`,
             'Content-Type':  'application/json',
-            'HTTP-Referer':  'https://github.com/kirklazar-android/hiresignal',
+            'HTTP-Referer':  'https://github.com/santifer/career-ops',
             'X-Title':       'career-ops',
           },
           body,
@@ -404,7 +426,7 @@ async function fetchJobPage(url) {
   // Plain HTTP fallback
   try {
     const r = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; career-ops/1.0)' }
+      headers: { 'User-Agent': DEFAULT_USER_AGENT }
     });
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const html = await r.text();
@@ -516,21 +538,6 @@ function addToPipeline(entries) {
   return newEntries.length;
 }
 
-// ---------------------------------------------------------------------------
-// Report numbering
-// ---------------------------------------------------------------------------
-// Atomically reserved via reserve-report-num.mjs, so two concurrent runs
-// (batch workers, parallel windows) never collide on the same slot — see
-// reserve-report-num.mjs for the O_CREAT|O_EXCL sentinel mechanism.
-function reserveReportNum() {
-  const numStr = execFileSync(process.execPath, [path.join(__dirname, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
-  return parseInt(numStr, 10);
-}
-
-function releaseReportNum(num) {
-  execFileSync(process.execPath, [path.join(__dirname, 'reserve-report-num.mjs'), '--release', String(num).padStart(3, '0')]);
-}
-
 function extractCompanySlug(text, url) {
   // Try to extract from text (e.g. "Senior Engineer at Acme" or "Company: Acme")
   const m = text.match(/(?:at|@|company[:\s]+)\s*([A-Z][A-Za-z0-9]{2,25})/);
@@ -640,9 +647,12 @@ async function cmdEvaluate(input, ctx) {
   tracker.record('evaluation', resultObj.usage);
   const result = resultObj.content;
 
-  let num;
+  let reservedNumbers;
   try {
-    num = reserveReportNum();
+    reservedNumbers = await reserveReportNumbers(1, {
+      rootDir: __dirname,
+      reportsDir: path.join(__dirname, 'reports'),
+    });
   } catch (e) {
     console.error(`Could not reserve a report number: ${e.message}`);
     return null;
@@ -651,8 +661,9 @@ async function cmdEvaluate(input, ctx) {
   try {
     // Save report
     const today   = new Date().toISOString().split('T')[0];
+    const num     = reservedNumbers[0];
     const slug    = extractCompanySlug(jdText, typeof input === 'string' ? input : null);
-    const numStr  = String(num).padStart(3, '0');
+    const numStr  = formatReportNumber(num);
     const relPath = `reports/${numStr}-${slug}-${today}.md`;
 
     // Extract Legitimacy from LLM output or fall back to placeholder
@@ -667,7 +678,12 @@ async function cmdEvaluate(input, ctx) {
     const reportLink  = `[${numStr}](reports/${numStr}-${slug}-${today}.md)`;
     const tsvLine     = `${num}\t${today}\t${companyName}\t(see report)\tEvaluated\t${scoreStr}\t❌\t${reportLink}\t\n`;
     const tsvFile     = `batch/tracker-additions/or-${numStr}-${slug}.tsv`;
-    writeFile(tsvFile, `num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\n${tsvLine}`);
+    // AGENTS.md: a tracker-addition TSV is a SINGLE data line of 9 tab-separated
+    // columns. merge-tracker.mjs reads the whole file as ONE record (no line
+    // splitting), so a leading header row makes parts[4]/parts[5] the literal
+    // "status"/"score" and the evaluation is skipped ("cannot tell score from
+    // status"). Write only the data line.
+    writeFile(tsvFile, tsvLine);
 
     console.log(`\n✅ Report saved: ${relPath}`);
     console.log('\n─── EVALUATION ──────────────────────────────────────\n');
@@ -677,7 +693,7 @@ async function cmdEvaluate(input, ctx) {
     return relPath;
   } finally {
     try {
-      releaseReportNum(num);
+      await releaseReportNumbers(reservedNumbers, { reportsDir: path.join(__dirname, 'reports') });
     } catch (e) {
       console.warn(`Could not release report reservation: ${e.message}`);
     }
@@ -734,6 +750,23 @@ async function cmdApply(ref, ctx) {
   }
 
   if (!reportContent) { console.error('Could not read report content.'); return; }
+
+  // Score-gate: warn and confirm before applying to low-fit roles (AGENTS.md Ethical Use)
+  const scoreMatch = reportContent.match(/^\s*\*?\*?\s*(?:score|puntuaci[oó]n)\s*:\s*\*?\*?\s*(\d+(?:\.\d+)?)\s*\/\s*5/im);
+  const scoreValue = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
+  if (isFinite(scoreValue) && scoreValue < 4.0) {
+    console.log(`\n⚠️  This report scored ${scoreValue.toFixed(1)}/5 — below the 4.0/5 threshold.`);
+    console.log('Strongly discourage low-fit applications. Your time and the recruiter\'s time are both valuable.');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise(resolve => {
+      rl.question('Proceed anyway? (yes/no): ', resolve);
+    });
+    rl.close();
+    if (answer.trim().toLowerCase() !== 'yes') {
+      console.log('Aborted.');
+      return;
+    }
+  }
 
   console.log('Generating application form answers...');
   const systemPrompt = buildSystemPrompt(modeContent, ctx);

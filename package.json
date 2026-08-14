@@ -1,6 +1,6 @@
 {
   "name": "hiresignal",
-  "version": "1.22.0",
+  "version": "1.26.0",
   "description": "HireSignal: a local-first AI career dashboard for resume onboarding, job discovery, and fit scoring",
   "private": true,
   "scripts": {
@@ -76,8 +76,8 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
-    "js-yaml": "^5.2.2",
-    "pdfjs-dist": "^6.0.227",
+    "js-yaml": "^5.2.3",
+    "pdfjs-dist": "^6.2.108",
     "playwright": "1.62.1"
   }
 }

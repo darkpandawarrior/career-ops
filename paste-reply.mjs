@@ -43,13 +43,16 @@
  */
 
 import fs from 'node:fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
-  || path.join(__dirname, 'data', 'reply-candidates.json');
+  || path.join(CAREER_OPS_DATA, 'data', 'reply-candidates.json');
 
 
 /**

@@ -40,8 +40,7 @@
 import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import * as yaml from 'js-yaml'; // js-yaml v5 is ESM-only — no default export
-import { flagValue } from './lib/cli-flags.mjs';
+import * as yaml from 'js-yaml';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SESSIONS_DIR = join(CAREER_OPS, 'interview-prep', 'sessions');
@@ -75,6 +74,29 @@ export function computeDefaultRange(now = new Date()) {
 
 function inRange(dateStr, from, to) {
   return isValidDateStr(dateStr) && dateStr >= from && dateStr <= to;
+}
+
+/**
+ * Value of a value-taking flag, accepting BOTH `--flag value` and `--flag=value`.
+ *
+ * `args.indexOf('--from')` is -1 for the `=` form, so a space-separated-only
+ * lookup silently DISCARDS the bound the caller supplied and the digest then
+ * reports a different week than the one that was asked for — the same silent
+ * discard `computeWeeklyDigest` already refuses to perform for a half-supplied
+ * range. company-history.mjs carries this same note and the same fix.
+ *
+ * @param {string[]} args - argv slice.
+ * @param {string} flag - Flag name including leading dashes, e.g. '--from'.
+ * @returns {string|undefined} The value, or undefined when the flag is absent.
+ */
+export function flagValue(args, flag) {
+  // `--flag=value` first: indexOf() can't see it, so checking it second would
+  // let the space-separated lookup fall through and drop the value.
+  const eq = args.find((a) => a.startsWith(`${flag}=`));
+  if (eq) return eq.slice(flag.length + 1);
+  const idx = args.indexOf(flag);
+  if (idx === -1) return undefined;
+  return args[idx + 1];
 }
 
 // ── Session file parsing ────────────────────────────────────────────
@@ -389,6 +411,16 @@ async function runSelfTest() {
   check(mon.from === '2026-07-20' && mon.to === '2026-07-26', 'computeDefaultRange handles Monday itself as the range start');
   const sun = computeDefaultRange(new Date('2026-07-26T23:00:00Z'));
   check(sun.from === '2026-07-20' && sun.to === '2026-07-26', 'computeDefaultRange handles Sunday itself as the range end');
+
+  // flagValue: both CLI spellings must reach the same value. The `=` form used
+  // to be invisible to indexOf(), so `--from=2020-01-01` silently produced the
+  // CURRENT week's digest instead of the requested one.
+  check(flagValue(['--from', '2020-01-01'], '--from') === '2020-01-01', 'flagValue reads the space-separated form');
+  check(flagValue(['--from=2020-01-01'], '--from') === '2020-01-01', 'flagValue reads the --flag=value form');
+  check(flagValue(['--summary'], '--from') === undefined, 'flagValue returns undefined for an absent flag');
+  check(flagValue(['--from='], '--from') === '', 'flagValue reports an explicitly empty value as empty, not absent');
+  check(flagValue(['--dir=/tmp/x=y'], '--dir') === '/tmp/x=y', 'flagValue keeps later "=" characters in the value');
+  check(flagValue(['--to=2020-01-07', '--from=2020-01-01'], '--from') === '2020-01-01', 'flagValue matches its own flag, not a similarly-shaped neighbour');
 
   // parseSessionFile: well-formed session with two competency tags.
   const goodSession = [

@@ -27,9 +27,9 @@ import { checkLivenessViaApi, isAtsPosting } from './liveness-api.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT). Data paths must use ROOT_DATA, never ROOT.
-const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
-const PIPELINE_PATH = join(ROOT_DATA, 'data', 'pipeline.md');
+// profile's data (CAREER_OPS_ROOT). Data paths must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const PIPELINE_PATH = join(CAREER_OPS_DATA, 'data', 'pipeline.md');
 const ARCHIVE_HEADING = '## Off-topic (auto-purged)';
 
 const USE_BROWSER = process.argv.includes('--browser');

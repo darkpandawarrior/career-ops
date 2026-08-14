@@ -38,7 +38,7 @@ export function ExplorerView({
   appsSnapshot: Application[];
   rootExists: boolean;
 }) {
-  const { filters, setFilters, initFilters, phase, running, offers, discover, status, error, errorCode, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable } = useExplore();
+  const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, error, errorCode, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable } = useExplore();
   const inited = useRef(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [cli, setCli] = useState<{ id: string | null; name?: string }>({ id: null });
@@ -72,6 +72,15 @@ export function ExplorerView({
     if (ai !== null) {
       setMode("ai");
       setAiIntent(ai);
+    } else if (sp.get("view") === "fresh") {
+      // Today's "See all N" hands off here instead of a bare config form — load the
+      // SAME /api/whats-new offers it already showed, through the normal
+      // results-phase UI. The config form (Refine search / Re-cast) stays reachable.
+      // Force scan mode: a session restored in "ai" mode (sessionStorage rehydrate)
+      // must not show the AI-search UI for this scan-only hand-off.
+      setMode("scan");
+      initFilters(seed.filters);
+      void loadFresh();
     } else {
       // Only restore from the URL when it carries REAL filter params — a bare
       // ?profile=slug must fall through to the server seed (the candidate's roles).
@@ -83,7 +92,7 @@ export function ExplorerView({
         void discover();
       }
     }
-  }, [seed.filters, initFilters, setMode, setAiIntent, discover]);
+  }, [seed.filters, initFilters, setMode, setAiIntent, discover, loadFresh]);
 
   const inboxUrls = useMemo(() => new Set(inboxSnapshot.map((j) => j.url)), [inboxSnapshot]);
   const enriched: EnrichedOffer[] = useMemo(

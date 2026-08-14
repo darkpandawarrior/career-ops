@@ -19,9 +19,9 @@ import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use ROOT_DATA, never ROOT.
-const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
-const PROVIDERS_DIR = join(ROOT, 'providers');
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const PROVIDERS_DIR = join(CAREER_OPS, 'providers');
 const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
 
 function add(list, path, message) {
@@ -108,7 +108,7 @@ async function loadProviderIds() {
   // inactive-provider stub). Keep validation aligned with that contract.
   try {
     const { discoverPlugins, pluginRoots, resolveSuccessorIds } = await import('./plugins/_engine.mjs');
-    const manifests = discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT));
+    const manifests = discoverPlugins(pluginRoots(CAREER_OPS), resolveSuccessorIds(CAREER_OPS));
     for (const manifest of manifests) {
       if (manifest.hooks.includes('provider')) ids.add(manifest.id);
     }

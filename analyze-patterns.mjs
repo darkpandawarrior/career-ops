@@ -13,18 +13,18 @@
  *      node analyze-patterns.mjs --self-test
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname, resolve, relative, sep } from 'path';
+import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
-const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
-  ? join(DATA_ROOT, 'data/applications.md')
-  : join(DATA_ROOT, 'applications.md');
-const REPORTS_DIR = join(DATA_ROOT, 'reports');
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+  ? join(CAREER_OPS_DATA, 'data/applications.md')
+  : join(CAREER_OPS_DATA, 'applications.md');
+const REPORTS_DIR = join(CAREER_OPS_DATA, 'reports');
 
 const MACHINE_SUMMARY_FIELDS = new Set([
   'company',
@@ -44,6 +44,8 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'seniority',
   'remote',
   'team_size',
+  // Issue 1380: predicted skip/discard reasons from the agent.
+  'discard_reasons',
   'advertised_comp',
   'via',
   'company_confidential',
@@ -118,37 +120,6 @@ const ADVANCED_STATUSES = new Set(['responded', 'interview', 'offer', 'hired']);
 // Print order for the CONVERSION FUNNEL summary. A status absent here is
 // silently omitted from the printed funnel, so this must track states.yml.
 const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
-
-// --- Tech-stack-gap extraction (shared by the analysis pass and the self-test) ---
-// Canonical display spelling keyed by lowercased alias, so "react native" /
-// "NODEJS" collapse into one bucket rather than one per case variant.
-const TECH_CANONICAL = new Map([
-  'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Java', 'Go', 'Rust',
-  'React Native', 'React', 'Angular', 'Django', 'Flask', 'Rails', 'PHP',
-  'Laravel', 'Symfony', 'Kotlin', 'Swift', 'C++', 'C#', '.NET', 'MongoDB',
-  'MySQL', 'PostgreSQL', 'Redis', 'GraphQL', 'REST', 'AWS', 'GCP', 'Azure',
-  'Docker', 'Kubernetes', 'Terraform', 'Supabase', 'Inngest',
-].map(t => [t.toLowerCase(), t]));
-TECH_CANONICAL.set('node.js', 'Node.js').set('nodejs', 'Node.js');
-TECH_CANONICAL.set('vue.js', 'Vue.js').set('vuejs', 'Vue.js');
-
-// (?<!\w) / (?!\w) lookarounds, NOT \b: a trailing \b never matches after a
-// symbol edge, so "C++", "C#" and ".NET" — three of the most common stacks —
-// were silently never extracted, vanishing from the tech-gap rollup and the
-// "filter out roles requiring X" recommendation. Ordered longest-first
-// (React Native before React) so the specific alternative wins at a position.
-const TECH_MENTION_RE = /(?<!\w)(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React Native|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest)(?!\w)/gi;
-
-/**
- * Canonical tech names mentioned in a gap description.
- * @param {string} description
- * @returns {string[]} Canonical tech names, one entry per mention (may repeat).
- */
-function extractTechMentions(description) {
-  const matches = String(description ?? '').match(TECH_MENTION_RE);
-  if (!matches) return [];
-  return matches.map(m => TECH_CANONICAL.get(m.toLowerCase()) || m);
-}
 
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
@@ -236,6 +207,38 @@ function buildViaChannelAnalysis(submitted, isAdvanced, minSample = MIN_VENDOR_N
   };
 }
 
+// --- Tech-stack-gap extraction (shared by the analysis pass and the self-test) ---
+// Canonical display spelling keyed by lowercased alias, so "react native" /
+// "NODEJS" collapse into one bucket rather than one per case variant.
+const TECH_CANONICAL = new Map([
+  'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Java', 'Go', 'Rust',
+  'React Native', 'React', 'Angular', 'Django', 'Flask', 'Rails', 'PHP',
+  'Laravel', 'Symfony', 'Kotlin', 'Swift', 'C++', 'C#', '.NET', 'MongoDB',
+  'MySQL', 'PostgreSQL', 'Redis', 'GraphQL', 'REST', 'AWS', 'GCP', 'Azure',
+  'Docker', 'Kubernetes', 'Terraform', 'Supabase', 'Inngest',
+].map(t => [t.toLowerCase(), t]));
+TECH_CANONICAL.set('node.js', 'Node.js').set('nodejs', 'Node.js');
+TECH_CANONICAL.set('vue.js', 'Vue.js').set('vuejs', 'Vue.js');
+
+// (?<!\w) / (?!\w) lookarounds, NOT \b: a trailing \b never matches after a
+// symbol edge, so "C++", "C#" and ".NET" — three of the most common stacks —
+// were silently never extracted, vanishing from the tech-gap rollup and the
+// "filter out roles requiring X" recommendation. Same symbol-edge fix that
+// skill-extract.mjs and upskill.mjs already carry. Ordered longest-first
+// (React Native before React) so the specific alternative wins at a position.
+const TECH_MENTION_RE = /(?<!\w)(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React Native|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest)(?!\w)/gi;
+
+/**
+ * Canonical tech names mentioned in a gap description.
+ * @param {string} description
+ * @returns {string[]} Canonical tech names, one entry per mention (may repeat).
+ */
+function extractTechMentions(description) {
+  const matches = String(description ?? '').match(TECH_MENTION_RE);
+  if (!matches) return [];
+  return matches.map(m => TECH_CANONICAL.get(m.toLowerCase()) || m);
+}
+
 function runSelfTest() {
   const summary = parseMachineSummary(`
 ## Machine Summary
@@ -255,6 +258,9 @@ top_strengths:
 risk_level: "Medium"
 confidence: "High"
 next_action: "Follow up on ticket #42 with tailored CV"
+work_auth: "unstated"
+via: "Hays"
+company_confidential: true
 \`\`\`
 `);
 
@@ -264,6 +270,9 @@ next_action: "Follow up on ticket #42 with tailored CV"
   if (!Array.isArray(summary?.hard_stops) || summary.hard_stops.length !== 0) failures.push('empty list was not parsed');
   if (summary?.soft_gaps?.[0] !== 'No direct healthcare domain experience') failures.push('list item was not parsed');
   if (summary?.next_action !== 'Follow up on ticket #42 with tailored CV') failures.push('hash-containing scalar field was not parsed');
+  if (summary?.via !== 'Hays') failures.push('via was not preserved from Machine Summary');
+  if (summary?.company_confidential !== true) failures.push('company_confidential boolean was not preserved from Machine Summary');
+  if (summary?.work_auth !== 'unstated') failures.push('work_auth field was not preserved from Machine Summary');
 
   // Backward compat (#1737): summaries without risk_summary parse as before, key simply absent.
   if ('risk_summary' in (summary ?? {})) failures.push('summary without risk_summary must not gain the key');
@@ -304,7 +313,7 @@ risk_summary:
     ['https://jobs.lever.co/acme/abc-def', 'lever'],
     ['https://jobs.ashbyhq.com/acme/uuid', 'ashby'],
     ['https://acme.wd1.myworkdayjobs.com/en-US/careers/job/R-1', 'workday'],
-    ['https://careers.icims.com/jobs/9/x', null],
+    ['https://careers.icims.com/jobs/9/x', 'icims'],
     ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', null],
     ['not a url', null],
     ['', null],
@@ -352,7 +361,10 @@ risk_summary:
   // is the strongest positive outcome and the furthest advance — it must not be
   // mis-bucketed as 'pending' or dropped from channel yield / the funnel.
   if (classifyOutcome('Hired') !== 'positive') failures.push(`hired: classifyOutcome('Hired') → ${classifyOutcome('Hired')}, expected 'positive'`);
-  if (normalizeStatus('contratado') !== 'hired') failures.push(`hired: normalizeStatus('contratado') → ${normalizeStatus('contratado')}, expected 'hired'`);
+  // Every hired alias must resolve to 'hired' — testing only one lets the others regress silently.
+  for (const alias of ['contratado', 'contratada', 'accepted', 'accept']) {
+    if (normalizeStatus(alias) !== 'hired') failures.push(`hired: normalizeStatus('${alias}') → ${normalizeStatus(alias)}, expected 'hired'`);
+  }
   if (!ADVANCED_STATUSES.has('hired')) failures.push('hired: ADVANCED_STATUSES must include hired (a hire advanced past screening)');
   if (!SUBMITTED_STATUSES.has('hired')) failures.push('hired: SUBMITTED_STATUSES must include hired (a hire was submitted)');
   if (!FUNNEL_ORDER.includes('hired')) failures.push('hired: FUNNEL_ORDER must include hired so it prints in the funnel');
@@ -362,6 +374,90 @@ risk_summary:
   const hiredHays = hiredVia.breakdown.find(a => a.agency === 'Hays');
   if (!hiredHays || hiredHays.advanced !== 1 || hiredHays.advanceRate !== 50) {
     failures.push(`hired: must count as advanced in channel yield (1/2 = 50%) → ${JSON.stringify(hiredHays)}`);
+  }
+
+  // Tech-gap extraction (regression): symbol-edge stacks were silently dropped
+  // because a trailing \b never matches after "+"/"#" (C++, C#, .NET).
+  const techHits = extractTechMentions('Requires C++, C# and .NET, plus React Native and Go');
+  for (const expected of ['C++', 'C#', '.NET', 'React Native', 'Go']) {
+    if (!techHits.includes(expected)) failures.push(`tech extraction dropped "${expected}"`);
+  }
+  // No false positives from substrings ("Go" in "Google", "Java" in "JavaScripting").
+  if (extractTechMentions('Google Cloud and JavaScripting skills').length !== 0) {
+    failures.push('tech extraction false-positived on Google/JavaScripting');
+  }
+  // Case/punctuation variants collapse to one canonical bucket.
+  if (extractTechMentions('nodejs, Node.js, NODEJS').some(t => t !== 'Node.js')) {
+    failures.push('node.js case variants failed to canonicalize');
+  }
+
+  // Remote classifier (regression): the "70+" signal ends in "+", so a
+  // trailing \b silently dropped it and "70+ countries" postings fell to the
+  // weaker 'regional remote' bucket instead of 'global remote'.
+  if (classifyRemote('Fully remote — hiring in 70+ countries') !== 'global remote') {
+    failures.push('classifyRemote did not read "70+ countries" as global remote');
+  }
+  if (classifyRemote('US-only remote') !== 'geo-restricted') {
+    failures.push('classifyRemote geo-restricted precedence regressed');
+  }
+
+  // Reports-root containment: a legit link stays inside reports/, a crafted
+  // traversal link escapes root and must be rejected before parseReport. join()
+  // collapses '..' at the call site, so the candidate is already absolute here.
+  {
+    const legit = join(CAREER_OPS_DATA, 'reports', '042-acme-2026-01-01.md');
+    if (!withinReports(legit)) failures.push('containment: legit reports/ path wrongly rejected');
+    const escape = join(CAREER_OPS_DATA, 'reports/../../../etc/passwd');
+    if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
+    const sibling = join(CAREER_OPS_DATA, 'reports-evil', 'x.md');
+    if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+  }
+
+  // Symlink-escape + missing-file graceful degradation (#2655). realpath
+  // canonicalization must reject a symlink whose target resolves OUTSIDE
+  // reports/ (a lexical-only guard would follow it), while a real file inside
+  // reports/ still passes and a missing candidate degrades gracefully (the
+  // downstream read returns null) rather than throwing.
+  {
+    const reportsDir = join(CAREER_OPS_DATA, 'reports');
+    if (existsSync(reportsDir)) {
+      const tag = `__co2655-${process.pid}-${Date.now()}`;
+      const realReport = join(reportsDir, `${tag}-real.md`);
+      const escapeLink = join(reportsDir, `${tag}-escape.md`);
+      const missing = join(reportsDir, `${tag}-missing.md`);
+      // Missing candidate must not throw and must stay accepted so the
+      // downstream read returns null (pre-#2385 existsSync-removal semantics).
+      try {
+        if (!withinReports(missing)) failures.push('containment: missing report file wrongly rejected (should degrade to a null read, not a hard skip)');
+      } catch (err) {
+        failures.push(`containment: missing report file threw instead of degrading gracefully (${err.code || err.message})`);
+      }
+      try {
+        writeFileSync(realReport, '# real report\n');
+        if (!withinReports(realReport)) failures.push('containment: real file inside reports/ wrongly rejected');
+        // Symlink whose target resolves outside reports/ (this module file);
+        // its lexical path is under reports/ but realpath escapes and must be
+        // rejected. symlinkSync often needs privilege on Windows — skip the
+        // assertion (do not fail) when the platform refuses.
+        let symlinkCreated = false;
+        try {
+          symlinkSync(fileURLToPath(import.meta.url), escapeLink);
+          symlinkCreated = true;
+        } catch (err) {
+          if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'ENOSYS') {
+            console.log(`analyze-patterns self-test: skipping symlink-escape assertion (platform refused symlink creation: ${err.code})`);
+          } else {
+            throw err;
+          }
+        }
+        if (symlinkCreated && withinReports(escapeLink)) {
+          failures.push('containment: symlink escaping reports/ was accepted (realpath containment broken)');
+        }
+      } finally {
+        rmSync(realReport, { force: true });
+        rmSync(escapeLink, { force: true });
+      }
+    }
   }
 
   if (failures.length > 0) {
@@ -387,10 +483,55 @@ function parseTracker() {
   return entries;
 }
 
+// Canonical reports-root containment. A tracker link resolves to a candidate
+// path; accept it only if it stays inside the repo's reports/ directory. Two
+// layers: a cheap lexical traversal guard (no stat) rejects a crafted link like
+// reports/../../etc/passwd, which join() collapses to a repo-relative path that
+// no longer starts with reports/; then realpath canonicalization rejects a
+// symlink whose target escapes reports/ (a lexical-only check would follow it).
+// realpathSync throws ENOENT/ENOTDIR for a not-yet-created candidate or a
+// missing reports root — both are non-fatal: a missing candidate falls through
+// to the downstream read (which returns null, preserving prior semantics), a
+// missing root means there are simply no reports. Only genuinely unexpected
+// errors rethrow, matching readTextIfExists. Identical to the guard in
+// upskill.mjs so both sites behave the same.
+function withinReports(candidate) {
+  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
+  let realRoot;
+  try {
+    realRoot = realpathSync(join(CAREER_OPS_DATA, 'reports'));
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+    throw err;
+  }
+  let realCandidate;
+  try {
+    realCandidate = realpathSync(candidate);
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return true;
+    throw err;
+  }
+  const rootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+  return realCandidate === realRoot || realCandidate.startsWith(rootWithSep);
+}
+
+// Read a file, returning null when it does not exist. A pre-flight existsSync
+// costs a full stat per report and races with the read (#2385); attempting the
+// read and handling the missing-file error costs the same as a bare read.
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
+
 // --- Parse a single report file ---
 function parseReport(reportPath) {
-  if (!existsSync(reportPath)) return null;
-  const content = readFileSync(reportPath, 'utf-8');
+  const content = readTextIfExists(reportPath);
+  if (content === null) return null;
   const report = {
     company: null,
     role: null,
@@ -407,6 +548,7 @@ function parseReport(reportPath) {
     confidence: null,
     nextAction: null,
     topStrengths: [],
+    discardReasons: [],
     scores: {},
     gaps: [],
   };
@@ -427,6 +569,7 @@ function parseReport(reportPath) {
     report.confidence = normalizeScalar(machineSummary.confidence) || report.confidence;
     report.nextAction = normalizeScalar(machineSummary.next_action) || report.nextAction;
     report.topStrengths = normalizeList(machineSummary.top_strengths);
+    report.discardReasons = normalizeList(machineSummary.discard_reasons);
 
     if (typeof machineSummary.score === 'number') {
       report.scores.global = machineSummary.score;
@@ -550,8 +693,8 @@ function classifyRemote(raw) {
 // (which needs the full posting path to build an API URL) — a tracker report's
 // URL may point at a board/careers page, not a canonical posting.
 //
-// SCOPE (intentional): only community ATS with clean, public URL fingerprints —
-// Greenhouse, Lever, Ashby, Workday. White-labeled ATS (iCIMS/UKG/Dayforce) are
+// SCOPE (intentional): only ATS with clean, public URL fingerprints — Greenhouse,
+// Lever, Ashby, Workday, iCIMS. White-labeled ATS (UKG, Dayforce, and similar) are
 // NOT detectable from the URL alone and are deferred until the community adds a
 // reliable signal (e.g. confirmation-email domain). Undetected → 'unknown'.
 const VENDOR_HOST_PATTERNS = [
@@ -559,6 +702,7 @@ const VENDOR_HOST_PATTERNS = [
   { id: 'lever',      test: (h) => h === 'jobs.lever.co' || h.endsWith('.lever.co') },
   { id: 'ashby',      test: (h) => h === 'jobs.ashbyhq.com' || h.endsWith('.ashbyhq.com') },
   { id: 'workday',    test: (h) => h.endsWith('.myworkdayjobs.com') || h.endsWith('.myworkdaysite.com') },
+  { id: 'icims',      test: (h) => h.endsWith('.icims.com') },
 ];
 
 function detectVendor(rawUrl) {
@@ -613,17 +757,21 @@ function analyze() {
     const reportMatch = e.report.match(/\]\(([^)]+)\)/);
     // Tracker links are relative to the tracker file's own directory (see
     // merge-tracker.mjs link normalization); fall back to repo root for
-    // legacy root-relative links, and only accept paths that stay under reports/.
-    let reportPath = null;
+    // legacy root-relative links. Each candidate is guarded to reports/
+    // before the read is attempted; parseReport returns null for a missing
+    // file, so no pre-flight existsSync is needed (#2385).
+    let reportData = null;
     if (reportMatch) {
-      const fromTracker = join(dirname(APPS_FILE), reportMatch[1]);
-      const candidate = existsSync(fromTracker) ? fromTracker : join(DATA_ROOT, reportMatch[1]);
-      const repoRelative = relative(DATA_ROOT, candidate).split(sep).join('/');
-      if (repoRelative.startsWith('reports/') && !repoRelative.includes('..')) {
-        reportPath = existsSync(candidate) ? candidate : null;
+      const candidates = new Set([
+        join(dirname(APPS_FILE), reportMatch[1]),
+        join(CAREER_OPS_DATA, reportMatch[1]),
+      ]);
+      for (const candidate of candidates) {
+        if (!withinReports(candidate)) continue;
+        reportData = parseReport(candidate);
+        if (reportData) break;
       }
     }
-    const reportData = reportPath ? parseReport(reportPath) : null;
     const outcome = classifyOutcome(e.status);
     const trackerScore = parseFloat(e.score);
     const score = Number.isFinite(trackerScore)
@@ -799,7 +947,7 @@ function analyze() {
 
   const identifiedCount = submitted.length - (vendorMap.get('unknown')?.total || 0);
   const vendorAnalysis = {
-    scope: ['greenhouse', 'lever', 'ashby', 'workday'],
+    scope: ['greenhouse', 'lever', 'ashby', 'workday', 'icims'],
     minSampleForClaim: MIN_VENDOR_N,
     submitted: submitted.length,
     identified: identifiedCount,
@@ -830,6 +978,42 @@ function analyze() {
       : 'N/A',
   };
 
+  // --- Generate recommendations ---
+  const recommendations = [];
+
+  // --- Discard reason analysis (Issue 1380) ---
+
+  // Aggregates user-committed `DISCARD: <reason>` or `SKIP: <reason>` tags in the Notes column.
+  const discardReasonCounts = new Map();
+  for (const e of enriched) {
+    if (e.outcome !== 'self_filtered' && e.outcome !== 'negative') continue;
+    // From tracker Notes column: "DISCARD: <reason>" or "SKIP: <reason>"
+    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
+    if (notesMatch) {
+      for (const m of notesMatch) {
+        const key = m.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
+        if (key) discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
+      }
+    }
+  }
+  const discardReasonStats = [...discardReasonCounts.entries()]
+    .map(([reason, frequency]) => ({
+      reason,
+      frequency,
+      percentage: Math.round((frequency / enriched.length) * 100),
+    }))
+    .sort((a, b) => b.frequency - a.frequency);
+
+  // Recommend updating _custom.md when a single reason dominates
+  const topDiscardReason = discardReasonStats[0];
+  if (topDiscardReason && topDiscardReason.frequency >= Math.max(3, Math.ceil(enriched.length * 0.15))) {
+    recommendations.push({
+      action: `Add "${topDiscardReason.reason}" filter to modes/_custom.md to avoid wasting evaluation effort`,
+      reasoning: `"${topDiscardReason.reason}" is the most frequent discard reason (${topDiscardReason.frequency}x, ${topDiscardReason.percentage}% of all applications).`,
+      impact: 'high',
+    });
+  }
+
   // --- Tech stack gaps (from negative + self_filtered outcomes) ---
   const stackGapCounts = new Map();
   for (const e of enriched) {
@@ -845,9 +1029,6 @@ function analyze() {
     .map(([skill, frequency]) => ({ skill, frequency }))
     .sort((a, b) => b.frequency - a.frequency)
     .slice(0, 15);
-
-  // --- Generate recommendations ---
-  const recommendations = [];
 
   // Geo-restriction recommendation
   const geoBlocker = blockerAnalysis.find(b => b.blocker === 'geo-restriction');
@@ -964,6 +1145,7 @@ function analyze() {
     viaChannelAnalysis,
     scoreThreshold,
     techStackGaps,
+    discardReasonStats,
     recommendations,
   };
 }
@@ -975,7 +1157,7 @@ function printSummary(result) {
     return;
   }
 
-  const { metadata, funnel, scoreComparison, archetypeBreakdown, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, recommendations } = result;
+  const { metadata, funnel, scoreComparison, archetypeBreakdown, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, discardReasonStats, recommendations } = result;
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  Pattern Analysis — ${metadata.analysisDate}`);
@@ -1023,6 +1205,15 @@ function printSummary(result) {
     console.log('-'.repeat(40));
     for (const g of techStackGaps.slice(0, 10)) {
       console.log(`  ${g.skill.padEnd(20)} ${g.frequency}x`);
+    }
+  }
+
+  // Discard reasons
+  if (discardReasonStats && discardReasonStats.length > 0) {
+    console.log('\nTOP DISCARD / SKIP REASONS');
+    console.log('-'.repeat(40));
+    for (const d of discardReasonStats.slice(0, 10)) {
+      console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
     }
   }
 

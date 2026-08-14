@@ -17,10 +17,10 @@ import { readFileSync, existsSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath } from './tracker-utils.mjs';
+import { openTrackerTransaction, rebuildRow, resolvePdfIndexPath, resolveTrackerPath } from './tracker-utils.mjs';
 // Upstream keeps openTrackerTransaction in tracker-utils.mjs; this fork's lock
 // primitives live in tracker-lock.mjs (same split as acquireTrackerLock).
-import { openTrackerTransaction } from './tracker-lock.mjs';
+
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE

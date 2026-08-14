@@ -50,15 +50,16 @@ import {
 import { randomUUID } from 'crypto';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
+import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { resolveTrackerPath } from './tracker-utils.mjs';
-import { acquireTrackerLock, canonicalizeTrackerPath, lockDirFor } from './tracker-lock.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath } from './tracker-utils.mjs';
+import { lockDirFor } from './tracker-lock.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use ROOT_DATA, never ROOT.
-const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const MAX_SENTINEL_AGE_MS = 4 * 60 * 60 * 1000;
 const MAX_RETRIES = 50;
 const MAX_COUNT = 50;
@@ -75,13 +76,13 @@ export function formatReportNumber(num) {
 function reportsDirFor(options = {}) {
   return resolve(options.reportsDir
     || process.env.CAREER_OPS_REPORTS_DIR
-    || join(options.rootDir || ROOT, 'reports'));
+    || join(options.rootDir || CAREER_OPS, 'reports'));
 }
 
 function trackerPathFor(options = {}) {
   return options.trackerPath
     ? canonicalizeTrackerPath(options.trackerPath)
-    : resolveTrackerPath(options.rootDir || ROOT);
+    : resolveTrackerPath(options.rootDir || CAREER_OPS);
 }
 
 function trackerLockOptions(trackerPath, options = {}) {
@@ -178,55 +179,25 @@ function parseMarkdownLinks(value) {
   return links;
 }
 
-/**
- * Extract report IDs referenced by one tracker Report cell (markdown label
- * and/or the linked report filename). External URLs are ignored even when
- * their path happens to contain a reports/ segment.
- *
- * @param {string} reportCell - Raw Report cell value.
- * @returns {number[]} Unique positive report IDs in encounter order.
- */
-function extractTrackerReportNumbers(reportCell) {
-  const value = String(reportCell ?? '').trim();
-  if (!value || value === '-' || value === '—') return [];
-
-  const numbers = new Set();
-  const numberFromTarget = (rawTarget) => {
-    const target = String(rawTarget).trim().replace(/^<|>$/g, '');
-    if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
-    const pathname = target.split(/[?#]/, 1)[0];
-    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i)
-      || pathname.match(/(?:^|[\\/])0*(\d+)-[^\\/]*\.md$/i);
-    if (!match) return null;
-    const num = parseInt(match[1], 10);
-    return Number.isInteger(num) && num > 0 ? num : null;
-  };
-
-  const markdownLinks = parseMarkdownLinks(value);
-  for (const link of markdownLinks) {
-    const pathNum = numberFromTarget(link.target);
-    if (pathNum == null) continue;
-    const label = link.label.trim();
-    if (/^\d+$/.test(label)) {
-      const labelNum = parseInt(label, 10);
-      if (labelNum > 0) numbers.add(labelNum);
-    }
-    numbers.add(pathNum);
-  }
-
-  if (markdownLinks.length === 0) {
-    const pathNum = numberFromTarget(value);
-    if (pathNum != null) numbers.add(pathNum);
-  }
-  return [...numbers];
-}
 
 // ── occupancy + slot claiming ────────────────────────────────────────────────
+
+// A bare date file is not a report. `scan-ats-full.mjs --md-out reports/` writes
+// its digest as `reports/YYYY-MM-DD.md`, which matches `/^(\d+)-/` and is read
+// as report #2026 — pushing every later reservation to 2027+, silently and
+// permanently.
+//
+// Deliberately narrow: report filenames in the wild are not all
+// `NNN-slug-DATE.md` (`1001-taken.md` and `NNN-RESERVED.md` are both real), so
+// requiring a trailing date would drop legitimate occupancy. Exclude only names
+// that are *entirely* a date. See tests/reserve-report-num.test.mjs.
+const BARE_DATE_FILE_RE = /^\d{4}-\d{2}-\d{2}\.md$/;
 
 function occupiedFromReports(reportsDir) {
   const occupied = new Set();
   if (!existsSync(reportsDir)) return occupied;
   for (const name of readdirSync(reportsDir)) {
+    if (BARE_DATE_FILE_RE.test(name)) continue;
     const match = name.match(/^(\d+)-/);
     if (!match) continue;
     const num = parseInt(match[1], 10);

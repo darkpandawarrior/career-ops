@@ -27,8 +27,12 @@ import { pathToFileURL } from 'url';
 
 console.log('\ntracker writer lock (a953da2 #1912 — shared lock serialization)');
 
+// tracker-utils.mjs is the canonical home for these: upstream ships them and
+// this fork's byte-identical copies in tracker-lock.mjs were removed in favour
+// of the shared implementation. tracker-lock.mjs now holds only lockDirFor,
+// whose signature genuinely differs from upstream's pipeline-lock version.
 const { acquireTrackerLock, openTrackerTransaction } =
-  await import(pathToFileURL(join(ROOT, 'tracker-lock.mjs')).href);
+  await import(pathToFileURL(join(ROOT, 'tracker-utils.mjs')).href);
 
 const CONCURRENT_ROW = '| 99 | 2026-01-03 | ConcurrentCo | Keeper | 4.3/5 | Applied | ❌ | [99](reports/099-concurrent.md) | preserve me |';
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
