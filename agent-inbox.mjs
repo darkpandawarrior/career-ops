@@ -30,10 +30,13 @@ import {
   readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync,
   openSync, fstatSync, readSync, closeSync,
 } from 'fs';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 
-const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+
+const PATH = process.env.CAREER_OPS_INBOX || join(CAREER_OPS_DATA, 'data/agent-inbox.md');
 
 const HEADER = [
   '# Agent Inbox',

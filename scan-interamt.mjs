@@ -18,14 +18,18 @@
  */
 
 import { chromium } from 'playwright';
+import { join } from 'path';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import * as yaml from 'js-yaml';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
 
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+
 // ── Config ───────────────────────────────────────────────────────────
 
 const PORTALS_PATH    = 'portals.yml';
-const SCAN_HISTORY    = 'data/scan-history.tsv';
+const SCAN_HISTORY    = join(CAREER_OPS_DATA, 'data/scan-history.tsv');
 const INTERAMT_HOME   = 'https://interamt.de/koop/app/';
 // Direct offer URL — constructed from StellenangebotId.
 // Wicket adds a session version number (?28&id=...) during live navigation,

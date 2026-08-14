@@ -35,6 +35,7 @@
  */
 
 import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { createHash } from 'crypto';
 import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
@@ -43,7 +44,9 @@ import { resolveColumns } from './tracker-parse.mjs';
 import { writeFileAtomic } from './tracker-utils.mjs';
 import { canonicalizeTrackerPath, openTrackerTransaction } from './tracker-lock.mjs';
 
-const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+
+const MD_PATH = process.env.CAREER_OPS_TRACKER || join(CAREER_OPS_DATA, 'data/applications.md');
 const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
   || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
 

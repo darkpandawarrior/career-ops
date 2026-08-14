@@ -78,7 +78,20 @@ export function sourceFiles(root = ROOT) {
  * data/ at all.)
  */
 function touchesProfileData(src) {
-  return /['"]data\/[a-z-]|join\([^)]*['"]data['"]|resolveTrackerPath/.test(src);
+  // Module scope only. A data path built inside a function almost always takes
+  // its root as a parameter and is therefore already correct — onboarding-cli
+  // takes root from process.argv[3], seed-fixture from mkdtempSync(tmpdir()).
+  // Flagging those is the false positive that trains an operator to ignore the
+  // check, which is worse than not having it.
+  const moduleScope = src.split('\n').filter(l => /^(const|let|var) /.test(l)).join('\n');
+  if (!/['"]data\/[a-z-]|join\([^)]*['"]data['"]|resolveTrackerPath/.test(moduleScope)) return false;
+  // Engine-level state is CORRECTLY engine-relative: a model blacklist is a
+  // property of this checkout, not of whichever profile is active.
+  const ENGINE_STATE = /model-blacklist/;
+  const profileish = moduleScope.split('\n')
+    .filter(l => /['"]data\/[a-z-]|join\([^)]*['"]data['"]|resolveTrackerPath/.test(l))
+    .filter(l => !ENGINE_STATE.test(l));
+  return profileish.length > 0;
 }
 
 export const ADAPTATIONS = [

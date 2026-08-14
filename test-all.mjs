@@ -187,6 +187,12 @@ const scripts = [
   // as the bare verify-portals.mjs run directly above: confirms the module
   // loads and its default-path guard exits cleanly without touching network.
   { name: 'fix-slugs.mjs', expectExit: 0 },
+  // The fork's layer over upstream, as a gate. Exits 1 naming any adaptation a
+  // sync overwrote — the failure mode that otherwise ships silently with a
+  // green suite (upstream #75 restored a wrong-profile read across 25 scripts
+  // exactly that way). Green as of the normalisation pass; a red here means a
+  // sync dropped something, not that the checker is noisy.
+  { name: 'fork-adaptations.mjs', expectExit: 0 },
 ];
 
 for (const { name, allowFail, skipIfMissing } of scripts) {

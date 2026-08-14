@@ -12,6 +12,7 @@
  */
 
 import fs from 'node:fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -20,10 +21,12 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
 import { openTrackerTransaction } from './tracker-lock.mjs';
 
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_CANDIDATES_PATH = path.join(__dirname, 'data', 'reply-candidates.json');
+const DEFAULT_CANDIDATES_PATH = path.join(CAREER_OPS_DATA, 'data', 'reply-candidates.json');
 const APPS_FILE = resolveTrackerPath(__dirname);
-const FOLLOWUPS_FILE = path.join(__dirname, 'data', 'follow-ups.md');
+const FOLLOWUPS_FILE = path.join(CAREER_OPS_DATA, 'data', 'follow-ups.md');
 
 // Helper to ask a question in the CLI
 function askQuestion(query) {
