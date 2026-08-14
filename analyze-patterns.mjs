@@ -14,17 +14,17 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { join, dirname, resolve, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
-const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
-  ? join(DATA_ROOT, 'data/applications.md')
-  : join(DATA_ROOT, 'applications.md');
-const REPORTS_DIR = join(DATA_ROOT, 'reports');
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+  ? join(CAREER_OPS_DATA, 'data/applications.md')
+  : join(CAREER_OPS_DATA, 'applications.md');
+const REPORTS_DIR = join(CAREER_OPS_DATA, 'reports');
 
 const MACHINE_SUMMARY_FIELDS = new Set([
   'company',
@@ -617,8 +617,8 @@ function analyze() {
     let reportPath = null;
     if (reportMatch) {
       const fromTracker = join(dirname(APPS_FILE), reportMatch[1]);
-      const candidate = existsSync(fromTracker) ? fromTracker : join(DATA_ROOT, reportMatch[1]);
-      const repoRelative = relative(DATA_ROOT, candidate).split(sep).join('/');
+      const candidate = existsSync(fromTracker) ? fromTracker : join(CAREER_OPS_DATA, reportMatch[1]);
+      const repoRelative = relative(CAREER_OPS_DATA, candidate).split(sep).join('/');
       if (repoRelative.startsWith('reports/') && !repoRelative.includes('..')) {
         reportPath = existsSync(candidate) ? candidate : null;
       }

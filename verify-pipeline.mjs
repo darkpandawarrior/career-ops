@@ -30,23 +30,23 @@ import {
 } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
 // CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
 const APPS_FILE = process.env.CAREER_OPS_TRACKER
   ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(DATA_ROOT, 'data/applications.md'))
-    ? join(DATA_ROOT, 'data/applications.md')
-    : join(DATA_ROOT, 'applications.md');
+  : existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+    ? join(CAREER_OPS_DATA, 'data/applications.md')
+    : join(CAREER_OPS_DATA, 'applications.md');
 const ADDITIONS_DIR = join(CAREER_OPS, 'batch/tracker-additions');
 // CAREER_OPS_REPORTS overrides the reports dir (used by tests, mirrors CAREER_OPS_TRACKER).
-const REPORTS_DIR = process.env.CAREER_OPS_REPORTS || join(DATA_ROOT, 'reports');
+const REPORTS_DIR = process.env.CAREER_OPS_REPORTS || join(CAREER_OPS_DATA, 'reports');
 const STATES_FILE = existsSync(join(CAREER_OPS, 'templates/states.yml'))
   ? join(CAREER_OPS, 'templates/states.yml')
   : join(CAREER_OPS, 'states.yml');
 
 // Ensure required directories exist (fresh setup)
-mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
+mkdirSync(join(CAREER_OPS_DATA, 'data'), { recursive: true });
 mkdirSync(REPORTS_DIR, { recursive: true });
 
 const CANONICAL_STATUSES = [

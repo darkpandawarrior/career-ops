@@ -117,7 +117,29 @@ export const ADAPTATIONS = [
        + 'directory, so a wholesale copy reads the wrong profile\'s tracker and reports an '
        + 'empty pipeline instead of erroring — invisible in a single-checkout install, and '
        + 'invisible to the test suite (upstream #75 shipped it across 25 scripts).',
-    autofix: false, // the call sites differ per script; flag, never guess
+    // Autofixable ONLY because the shape was normalised: all 37 call sites now
+    // use one canonical destructure with one pair of names, so re-applying it
+    // after a sync is a deterministic rewrite rather than a per-file guess.
+    // Before normalisation there were TEN shapes across these files, which is
+    // exactly why an automated resolver silently dropped the adaptation in 14
+    // of 17 files it claimed to have resolved.
+    autofix: true,
+    fix(src) {
+      if (!/^#!.*\bnode\b/.test(src)) return src;
+      if (!touchesProfileData(src)) return src;
+      if (/resolveCareerOpsRoot|CAREER_OPS_ROOT/.test(src)) return src;
+      // Upstream's shape -> the fork's canonical shape, plus the import.
+      const anchored = src.replace(
+        /^const CAREER_OPS = dirname\(fileURLToPath\(import\.meta\.url\)\);$/m,
+        'const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);',
+      );
+      if (anchored === src) return src;          // no anchor: leave for a human
+      const m = /^import .*?;\n/m.exec(anchored);
+      if (!m) return anchored;
+      return anchored.slice(0, m.index + m[0].length)
+        + "import { resolveCareerOpsRoot } from './path-resolver.mjs';\n"
+        + anchored.slice(m.index + m[0].length);
+    },
     violations(src, file) {
       if (!/^[^/]+\.mjs$/.test(file)) return [];        // root scripts only
       if (/\.test\.mjs$|-tests\.mjs$/.test(file)) return []; // fixtures use their own roots

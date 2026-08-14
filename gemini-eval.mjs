@@ -55,25 +55,25 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
-// ROOT: script location — also where system-layer files (modes/_shared.md,
+// CAREER_OPS: script location — also where system-layer files (modes/_shared.md,
 // modes/oferta.md, the skill doc, and sibling scripts like merge-tracker.mjs)
-// live. DATA_ROOT: user-layer files (cv.md, modes/_profile.md, config/,
+// live. CAREER_OPS_DATA: user-layer files (cv.md, modes/_profile.md, config/,
 // reports/, data/, batch/tracker-additions/) — CAREER_OPS_ROOT in a
-// multi-profile setup, else the same as ROOT. See AGENTS.md's Data Contract.
-const { engineRoot: ROOT, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+// multi-profile setup, else the same as CAREER_OPS. See AGENTS.md's Data Contract.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 const PATHS = {
   // Primary evaluation logic lives in these two mode files (system-layer)
-  shared:      join(ROOT, 'modes', '_shared.md'),
-  oferta:      join(ROOT, 'modes', 'oferta.md'),
+  shared:      join(CAREER_OPS, 'modes', '_shared.md'),
+  oferta:      join(CAREER_OPS, 'modes', 'oferta.md'),
   // Canonical skill path referenced in Issue #344 (system-layer)
-  evaluate:    join(ROOT, '.claude', 'skills', 'career-ops', 'SKILL.md'),
-  cv:          join(DATA_ROOT, 'cv.md'),
-  profile:     join(DATA_ROOT, 'modes', '_profile.md'),
-  profileYml:  join(DATA_ROOT, 'config', 'profile.yml'),
-  reports:     join(DATA_ROOT, 'reports'),
-  tracker:     join(DATA_ROOT, 'data', 'applications.md'),
-  trackerAdditions: join(DATA_ROOT, 'batch', 'tracker-additions'),
+  evaluate:    join(CAREER_OPS, '.claude', 'skills', 'career-ops', 'SKILL.md'),
+  cv:          join(CAREER_OPS_DATA, 'cv.md'),
+  profile:     join(CAREER_OPS_DATA, 'modes', '_profile.md'),
+  profileYml:  join(CAREER_OPS_DATA, 'config', 'profile.yml'),
+  reports:     join(CAREER_OPS_DATA, 'reports'),
+  tracker:     join(CAREER_OPS_DATA, 'data', 'applications.md'),
+  trackerAdditions: join(CAREER_OPS_DATA, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -188,12 +188,12 @@ function readFile(path, label) {
  * @returns {string} Zero-padded report number string, e.g. "042" or "1001".
  */
 function reserveReportNumber() {
-  return execFileSync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
+  return execFileSync(process.execPath, [join(CAREER_OPS, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
 }
 
 /** Release the sentinel for a previously-reserved report number. */
 function releaseReportNumber(num) {
-  execFileSync(process.execPath, [join(ROOT, 'reserve-report-num.mjs'), '--release', num]);
+  execFileSync(process.execPath, [join(CAREER_OPS, 'reserve-report-num.mjs'), '--release', num]);
 }
 
 function validateEvaluationShape(text) {
@@ -469,11 +469,11 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
 
   if (reportSaved) {
     try {
-      const mergeOutput = execFileSync(process.execPath, [join(ROOT, 'merge-tracker.mjs')], {
-        cwd: ROOT,
+      const mergeOutput = execFileSync(process.execPath, [join(CAREER_OPS, 'merge-tracker.mjs')], {
+        cwd: CAREER_OPS,
         // Forward the resolved data root so merge-tracker.mjs merges into the
         // SAME tracker this script just wrote a TSV into, not the engine root's.
-        env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT },
+        env: { ...process.env, CAREER_OPS_ROOT: CAREER_OPS_DATA },
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'pipe'],
       });

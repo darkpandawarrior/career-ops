@@ -24,10 +24,10 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT). Data paths must use ROOT_DATA, never ROOT.
-const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
+// profile's data (CAREER_OPS_ROOT). Data paths must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
-const DEFAULT_CONFIG = join(ROOT_DATA, 'config', 'cv-facts.json');
+const DEFAULT_CONFIG = join(CAREER_OPS_DATA, 'config', 'cv-facts.json');
 const TOOL_PROSE_WORDS = new Set([
   'a', 'an', 'and', 'at', 'built', 'by', 'containerized', 'deployment',
   'deployments', 'for', 'from', 'in', 'of', 'on', 'production', 'project',

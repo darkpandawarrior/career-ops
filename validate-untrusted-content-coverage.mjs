@@ -33,7 +33,7 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 // modes/ and AGENTS.md are ENGINE-layer content (they ship with the checkout,
 // not per-profile), so they resolve from engineRoot and never dataRoot —
 // otherwise this validator reads a profile directory and passes vacuously.
-const { engineRoot: ROOT } = resolveCareerOpsRoot(import.meta.url);
+const { engineRoot: CAREER_OPS } = resolveCareerOpsRoot(import.meta.url);
 
 const MARKER = 'Untrusted External Content';
 const CANONICAL_HEADING = `## ${MARKER} (CRITICAL)`;
@@ -229,7 +229,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(0);
   }
 
-  const agentsPath = join(ROOT, 'AGENTS.md');
+  const agentsPath = join(CAREER_OPS, 'AGENTS.md');
   if (!existsSync(agentsPath)) {
     console.error('FAIL: AGENTS.md not found');
     process.exit(1);
@@ -242,7 +242,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     problems.push(`AGENTS.md is missing the canonical heading "${CANONICAL_HEADING}"`);
   }
 
-  const sharedPath = join(ROOT, 'modes/_shared.md');
+  const sharedPath = join(CAREER_OPS, 'modes/_shared.md');
   if (!existsSync(sharedPath)) {
     problems.push('modes/_shared.md not found');
   } else if (!hasDirectiveMarker(readFileSync(sharedPath, 'utf-8'))) {
@@ -250,14 +250,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   const candidates = [
-    ...globSync('modes/**/*.md', { cwd: ROOT }),
-    ...globSync('batch/*.md', { cwd: ROOT }),
+    ...globSync('modes/**/*.md', { cwd: CAREER_OPS }),
+    ...globSync('batch/*.md', { cwd: CAREER_OPS }),
   ].map((p) => p.split(sep).join('/'));
 
-  const required = deriveIngestingModes(candidates, (rel) => readFileSync(join(ROOT, rel), 'utf-8'));
+  const required = deriveIngestingModes(candidates, (rel) => readFileSync(join(CAREER_OPS, rel), 'utf-8'));
 
   for (const rel of required) {
-    if (!hasDirectiveMarker(readFileSync(join(ROOT, rel), 'utf-8'))) {
+    if (!hasDirectiveMarker(readFileSync(join(CAREER_OPS, rel), 'utf-8'))) {
       problems.push(`${rel} ingests external text but does not reference "${MARKER}"`);
     }
   }

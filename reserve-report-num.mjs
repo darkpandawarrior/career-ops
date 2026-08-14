@@ -57,8 +57,8 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use ROOT_DATA, never ROOT.
-const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const MAX_SENTINEL_AGE_MS = 4 * 60 * 60 * 1000;
 const MAX_RETRIES = 50;
 const MAX_COUNT = 50;
@@ -75,13 +75,13 @@ export function formatReportNumber(num) {
 function reportsDirFor(options = {}) {
   return resolve(options.reportsDir
     || process.env.CAREER_OPS_REPORTS_DIR
-    || join(options.rootDir || ROOT, 'reports'));
+    || join(options.rootDir || CAREER_OPS, 'reports'));
 }
 
 function trackerPathFor(options = {}) {
   return options.trackerPath
     ? canonicalizeTrackerPath(options.trackerPath)
-    : resolveTrackerPath(options.rootDir || ROOT);
+    : resolveTrackerPath(options.rootDir || CAREER_OPS);
 }
 
 function trackerLockOptions(trackerPath, options = {}) {

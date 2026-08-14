@@ -77,21 +77,21 @@ const parseYaml = yaml.load;
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const { engineRoot: _SCAN_ENGINE, dataRoot: _SCAN_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(_SCAN_DATA_ROOT, 'portals.yml');
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(_SCAN_DATA_ROOT, 'config/profile.yml');
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(CAREER_OPS_DATA, 'portals.yml');
+const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(CAREER_OPS_DATA, 'config/profile.yml');
 // Overridable for the same reason the two inputs above are (#2271). A second
 // search lane - a bridge/income track, a career-change track, a partner sharing
 // the checkout - already gets its own portals.yml and profile, but without these
 // two it still writes into the one inbox and the one dedup history. That is not
 // just untidy: scan-history.tsv IS the dedup source, so a posting surfaced in
 // lane A is silently counted as a duplicate in lane B and never shown at all.
-const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(_SCAN_DATA_ROOT, 'data/scan-history.tsv');
-const SCAN_RUNS_PATH = path.join(_SCAN_DATA_ROOT, 'data/scan-runs.tsv');
-const PORTAL_HEALTH_PATH = path.join(_SCAN_DATA_ROOT, 'data/portal-health.tsv');
-const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(_SCAN_DATA_ROOT, 'data/pipeline.md');
-const APPLICATIONS_PATH = path.join(_SCAN_DATA_ROOT, 'data/applications.md');
-const PROVIDERS_DIR = path.resolve(_SCAN_ENGINE, 'providers');
+const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(CAREER_OPS_DATA, 'data/scan-history.tsv');
+const SCAN_RUNS_PATH = path.join(CAREER_OPS_DATA, 'data/scan-runs.tsv');
+const PORTAL_HEALTH_PATH = path.join(CAREER_OPS_DATA, 'data/portal-health.tsv');
+const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(CAREER_OPS_DATA, 'data/pipeline.md');
+const APPLICATIONS_PATH = path.join(CAREER_OPS_DATA, 'data/applications.md');
+const PROVIDERS_DIR = path.resolve(CAREER_OPS, 'providers');
 
 // Ensure required directories exist (fresh setup). Stays literal: the paths that
 // are NOT overridable still live here. The two that are need no equivalent -
@@ -99,7 +99,7 @@ const PROVIDERS_DIR = path.resolve(_SCAN_ENGINE, 'providers');
 // is created by acquirePipelineLock, which runs before the first pipeline write.
 // tests/scan-output-paths.test.mjs pins that, so an override into a directory
 // that does not exist yet keeps working if either of those changes.
-mkdirSync(path.join(_SCAN_DATA_ROOT, 'data'), { recursive: true });
+mkdirSync(path.join(CAREER_OPS_DATA, 'data'), { recursive: true });
 
 const CONCURRENCY = 10;
 
@@ -1366,7 +1366,7 @@ function readIfExists(filePath) {
  *
  * The two leading positional parameters are unchanged, so existing callers keep
  * working. The extra sources are injectable via the trailing options object: the
- * module-level paths are relative to `_SCAN_DATA_ROOT`, so a test that passes only a
+ * module-level paths are relative to `CAREER_OPS_DATA`, so a test that passes only a
  * sandbox tracker would otherwise pick up the developer's real scan-history and
  * pipeline.
  *
@@ -1647,7 +1647,7 @@ export function appendToScanHistory(offers, date, status = 'added') {
 
 // ── Company blacklist (#1742) ───────────────────────────────────────
 
-const BLACKLIST_PATH = path.join(_SCAN_DATA_ROOT, 'data/blacklist.md');
+const BLACKLIST_PATH = path.join(CAREER_OPS_DATA, 'data/blacklist.md');
 
 /**
  * Parse the user's do-not-apply list (data/blacklist.md, user layer, opt-in).

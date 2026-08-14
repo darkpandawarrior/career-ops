@@ -18,12 +18,12 @@ import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
-const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
-  ? join(DATA_ROOT, 'data/applications.md')
-  : join(DATA_ROOT, 'applications.md');
-const FOLLOWUPS_FILE = join(DATA_ROOT, 'data/follow-ups.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+  ? join(CAREER_OPS_DATA, 'data/applications.md')
+  : join(CAREER_OPS_DATA, 'applications.md');
+const FOLLOWUPS_FILE = join(CAREER_OPS_DATA, 'data/follow-ups.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS_DATA, 'config/profile.yml');
 
 
 // --- CLI args ---

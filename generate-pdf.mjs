@@ -30,13 +30,13 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const PDF_PAGE_MARGIN = '0.6in';
 
-// engineRoot: script location, also where the shared fonts/ assets live.
-// __dirname: the user-data root (output/, data/, cv.md) — CAREER_OPS_ROOT in a
-// multi-profile setup, else the same as engineRoot.
-const { engineRoot, dataRoot: __dirname } = resolveCareerOpsRoot(import.meta.url);
+// CAREER_OPS: script location, also where the shared fonts/ assets live.
+// CAREER_OPS_DATA: the user-data root (output/, data/, cv.md) — CAREER_OPS_ROOT in a
+// multi-profile setup, else the same as CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // Ensure output directory exists (fresh setup)
-mkdirSync(resolve(__dirname, 'output'), { recursive: true });
+mkdirSync(resolve(CAREER_OPS_DATA, 'output'), { recursive: true });
 
 /**
  * Normalize text for ATS compatibility by converting problematic Unicode.
@@ -289,7 +289,7 @@ function countRenderedPdfPages(pdfBuffer) {
  */
 export function repoRelativeManifestPath(pathValue) {
   if (!pathValue) return '';
-  const rel = relative(__dirname, resolve(pathValue));
+  const rel = relative(CAREER_OPS_DATA, resolve(pathValue));
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return '';
   return rel.split(sep).join('/');
 }
@@ -332,8 +332,8 @@ export function injectPrintPageCss(html, format = 'a4') {
  * gitignored output/ artifacts and is meaningless on another machine.
  */
 function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
-  const manifestPath = resolve(__dirname, 'data', 'pdf-index.tsv');
-  const toRel = (p) => relative(__dirname, p).split(sep).join('/');
+  const manifestPath = resolve(CAREER_OPS_DATA, 'data', 'pdf-index.tsv');
+  const toRel = (p) => relative(CAREER_OPS_DATA, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
   const relHTML = repoRelativeManifestPath(htmlPath);
   const date = new Date().toISOString().slice(0, 10);
@@ -428,7 +428,7 @@ async function generatePDF() {
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
   try {
-    cvMarkdown = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+    cvMarkdown = await readFile(resolve(CAREER_OPS_DATA, 'cv.md'), 'utf-8');
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
@@ -469,7 +469,7 @@ async function generatePDF() {
 export async function inlineLocalFonts(html) {
   const FONT_REF = /url\(\s*(['"]?)\.\/fonts\/([^'")\s]+)\1\s*\)/g;
   const MIME = { woff2: 'font/woff2', woff: 'font/woff', otf: 'font/otf', ttf: 'font/ttf' };
-  const fontsDir = resolve(engineRoot, 'fonts');
+  const fontsDir = resolve(CAREER_OPS, 'fonts');
   const names = [...new Set([...html.matchAll(FONT_REF)].map((m) => m[2]))];
   const dataUrls = new Map();
   for (const name of names) {

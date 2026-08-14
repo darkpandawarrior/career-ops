@@ -34,8 +34,8 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use ROOT_DATA, never ROOT.
-const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // "008" and "8" are the same report — zero-padded report-link form vs unpadded
 // tracker-# form (same normalization as the manifest writer in generate-pdf.mjs).
@@ -166,7 +166,7 @@ function main() {
     return;
   }
 
-  const trackerPath = process.env.CAREER_OPS_TRACKER || resolve(ROOT_DATA, 'data', 'applications.md');
+  const trackerPath = process.env.CAREER_OPS_TRACKER || resolve(CAREER_OPS_DATA, 'data', 'applications.md');
   if (!existsSync(trackerPath)) {
     console.error(`Error: ${trackerPath} not found — nothing to search.`);
     process.exitCode = 1;
@@ -174,7 +174,7 @@ function main() {
   }
   const rows = parseTrackerRows(readFileSync(trackerPath, 'utf-8'));
 
-  // Derived from the tracker resolved just above, not from ROOT_DATA: a
+  // Derived from the tracker resolved just above, not from CAREER_OPS_DATA: a
   // redirected CAREER_OPS_TRACKER must not be searched against this
   // install's manifest (#2471).
   const manifestPath = resolvePdfIndexPath(trackerPath);

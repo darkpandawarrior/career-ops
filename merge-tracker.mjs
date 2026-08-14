@@ -25,20 +25,20 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
 import { normalizeCompany, resolveWorkspaceRoot } from './tracker-utils.mjs';
 
-const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
 // CAREER_OPS_TRACKER overrides the path (used by tests and non-standard layouts).
 const APPS_FILE_RAW = process.env.CAREER_OPS_TRACKER
   ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(DATA_ROOT, 'data/applications.md'))
-    ? join(DATA_ROOT, 'data/applications.md')
-    : join(DATA_ROOT, 'applications.md');
+  : existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+    ? join(CAREER_OPS_DATA, 'data/applications.md')
+    : join(CAREER_OPS_DATA, 'applications.md');
 const APPS_FILE = canonicalizeTrackerPath(APPS_FILE_RAW);
 const TRACKER_DIR = dirname(APPS_FILE);
 // CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
 const ADDITIONS_DIR = process.env.CAREER_OPS_ADDITIONS
   ? process.env.CAREER_OPS_ADDITIONS
-  : join(DATA_ROOT, 'batch/tracker-additions');
+  : join(CAREER_OPS_DATA, 'batch/tracker-additions');
 const MERGED_DIR = join(ADDITIONS_DIR, 'merged');
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY = process.argv.includes('--verify');
@@ -69,7 +69,7 @@ const REPORTS_ROOT = resolveWorkspaceRoot(APPS_FILE);
 const normalizeReportLink = (reportField) => normalizeLink(reportField, TRACKER_DIR, REPORTS_ROOT);
 
 // Ensure required directories exist (fresh setup)
-mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
+mkdirSync(join(CAREER_OPS_DATA, 'data'), { recursive: true });
 mkdirSync(ADDITIONS_DIR, { recursive: true });
 
 /**

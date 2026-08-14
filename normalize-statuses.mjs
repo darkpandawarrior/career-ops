@@ -19,12 +19,12 @@ import { openTrackerTransaction } from './tracker-lock.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const { dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
-const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
 const DRY_RUN = process.argv.includes('--dry-run');
 
 // Ensure required directories exist (fresh setup)
-mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
+mkdirSync(join(CAREER_OPS_DATA, 'data'), { recursive: true });
 
 // Canonical status mapping
 let statesCache = null;
@@ -32,7 +32,7 @@ let statesCache = null;
 function canonicalStates() {
   if (statesCache) return statesCache;
   try {
-    statesCache = loadCanonicalStates(join(DATA_ROOT, 'templates', 'states.yml'));
+    statesCache = loadCanonicalStates(join(CAREER_OPS_DATA, 'templates', 'states.yml'));
   } catch {
     statesCache = []; // broken install: fall through to "unknown", never a stale copy
   }

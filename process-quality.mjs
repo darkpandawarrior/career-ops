@@ -32,17 +32,18 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { flagValue } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Multi-profile support: mirrors analyze-patterns.mjs's DATA_ROOT resolution
+// Multi-profile support: mirrors analyze-patterns.mjs's CAREER_OPS_DATA resolution
 // so this script honors CAREER_OPS_ROOT the same way every sibling tool does.
-const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
-const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
-  ? join(DATA_ROOT, 'data/active-interviews.md')
-  : join(DATA_ROOT, 'active-interviews.md');
+const CAREER_OPS_DATA = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS_DATA, 'data/active-interviews.md'))
+  ? join(CAREER_OPS_DATA, 'data/active-interviews.md')
+  : join(CAREER_OPS_DATA, 'active-interviews.md');
 
 const FRICTION_TAG = /\[process-friction(?::\s*([^\]]+))?\]/i;
 

@@ -28,19 +28,19 @@ try {
 } catch { /* dotenv optional */ }
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT). Data paths must use ROOT_DATA, never ROOT.
-const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
+// profile's data (CAREER_OPS_ROOT). Data paths must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 const PATHS = {
-  shared:   join(ROOT, 'modes', '_shared.md'),
-  pdfMode:  join(ROOT, 'modes', 'pdf.md'),
-  cv:       join(ROOT_DATA, 'cv.md'),
-  profile:  join(ROOT_DATA, 'config', 'profile.yml'),
-  template: join(ROOT, 'templates', 'cv-template.html'),
-  output:   join(ROOT_DATA, 'output'),
+  shared:   join(CAREER_OPS, 'modes', '_shared.md'),
+  pdfMode:  join(CAREER_OPS, 'modes', 'pdf.md'),
+  cv:       join(CAREER_OPS_DATA, 'cv.md'),
+  profile:  join(CAREER_OPS_DATA, 'config', 'profile.yml'),
+  template: join(CAREER_OPS, 'templates', 'cv-template.html'),
+  output:   join(CAREER_OPS_DATA, 'output'),
 };
 
 // ---------------------------------------------------------------------------

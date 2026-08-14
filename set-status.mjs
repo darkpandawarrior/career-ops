@@ -46,6 +46,7 @@
  */
 
 import { readFileSync, existsSync, writeFileSync, renameSync, rmSync, copyFileSync, appendFileSync } from 'fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { join, dirname, basename, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
@@ -55,15 +56,13 @@ import { rebuildRow } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Same multi-profile resolution pattern as analyze-patterns.mjs/invite-match.mjs.
-const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = process.env.CAREER_OPS_TRACKER
   ? process.env.CAREER_OPS_TRACKER
-  : existsSync(join(DATA_ROOT, 'data/applications.md'))
-    ? join(DATA_ROOT, 'data/applications.md')
-    : join(DATA_ROOT, 'applications.md');
-const STATES_FILE = join(DATA_ROOT, 'templates/states.yml');
+  : existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+    ? join(CAREER_OPS_DATA, 'data/applications.md')
+    : join(CAREER_OPS_DATA, 'applications.md');
+const STATES_FILE = join(CAREER_OPS_DATA, 'templates/states.yml');
 
 const EXIT_OK = 0;
 const EXIT_USAGE = 1;

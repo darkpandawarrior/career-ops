@@ -18,11 +18,11 @@ import { openTrackerTransaction } from './tracker-lock.mjs';
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const { dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md
 // (original). CAREER_OPS_TRACKER lets tests point the script at an isolated
 // fixture so the real user tracker is never touched.
-const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
 
 // ── CLI args ────────────────────────────────────────────────────────
 // Same shape as scan-ats-full.mjs (#1633/PR #1635) and reply-watch.mjs

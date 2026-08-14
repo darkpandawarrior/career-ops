@@ -41,18 +41,18 @@ try {
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use ROOT_DATA, never ROOT.
-const { engineRoot: ROOT, dataRoot: ROOT_DATA } = resolveCareerOpsRoot(import.meta.url);
+// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 const PATHS = {
-  shared:  join(ROOT, 'modes', '_shared.md'),
-  oferta:  join(ROOT, 'modes', 'oferta.md'),
-  cv:      join(ROOT_DATA, 'cv.md'),
-  profileYml: join(ROOT_DATA, 'config', 'profile.yml'),
-  reports: join(ROOT_DATA, 'reports'),
+  shared:  join(CAREER_OPS, 'modes', '_shared.md'),
+  oferta:  join(CAREER_OPS, 'modes', 'oferta.md'),
+  cv:      join(CAREER_OPS_DATA, 'cv.md'),
+  profileYml: join(CAREER_OPS_DATA, 'config', 'profile.yml'),
+  reports: join(CAREER_OPS_DATA, 'reports'),
 };
 
 // ---------------------------------------------------------------------------
@@ -155,12 +155,12 @@ function readFile(path, label) {
  * @returns {string} Zero-padded report number string, e.g. "042" or "1001".
  */
 function reserveReportNumber() {
-  return execFileSync(process.execPath, [join(ROOT, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
+  return execFileSync(process.execPath, [join(CAREER_OPS, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
 }
 
 /** Release the sentinel for a previously-reserved report number. */
 function releaseReportNumber(num) {
-  execFileSync(process.execPath, [join(ROOT, 'reserve-report-num.mjs'), '--release', num]);
+  execFileSync(process.execPath, [join(CAREER_OPS, 'reserve-report-num.mjs'), '--release', num]);
 }
 
 // ---------------------------------------------------------------------------

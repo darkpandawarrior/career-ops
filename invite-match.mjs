@@ -34,6 +34,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { execFileSync } from 'child_process';
@@ -44,10 +45,10 @@ const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Data root: same multi-profile resolution as set-status.mjs and
 // analyze-patterns.mjs, so CAREER_OPS_ROOT points reads AND --apply's writes
 // at the same profile.
-const DATA_ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
-const APPS_FILE = existsSync(join(DATA_ROOT, 'data/applications.md'))
-  ? join(DATA_ROOT, 'data/applications.md')
-  : join(DATA_ROOT, 'applications.md');
+const CAREER_OPS_DATA = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
+  ? join(CAREER_OPS_DATA, 'data/applications.md')
+  : join(CAREER_OPS_DATA, 'applications.md');
 
 // --- CLI args ---
 const args = process.argv.slice(2);
