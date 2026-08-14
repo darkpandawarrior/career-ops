@@ -19,7 +19,37 @@
 ![Built on career-ops](https://img.shields.io/badge/built_on-career--ops-6366f1?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)
 
+**[Screenshots](#screenshots)** · **[Why](#why-hiresignal-exists)** · **[Features](#features)** · **[Quick start](#quick-start)** · **[Architecture](#architecture)** · **[Upstream relationship](#relationship-to-upstream-updates)** · **[Privacy](#data--privacy)**
+
+**Built on:** [santifer/career-ops](https://github.com/santifer/career-ops) &nbsp;·&nbsp; **Portfolio:** [cv-siddharth.vercel.app](https://cv-siddharth.vercel.app/)
+
 </div>
+
+---
+
+<details>
+<summary><b>Table of contents</b></summary>
+
+- [What is this](#what-is-this)
+- [Screenshots](#screenshots)
+- [Why HireSignal exists](#why-hiresignal-exists)
+- [Features](#features)
+- [The 2.0 dashboard](#the-20-dashboard-web)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+- [Architecture](#architecture)
+- [How HireSignal uses career-ops](#how-hiresignal-uses-career-ops)
+- [Relationship to upstream updates](#relationship-to-upstream-updates)
+- [Data & privacy](#data--privacy)
+- [Ethics](#ethics)
+- [Version history](#version-history)
+
+</details>
+
+> **At a glance** — **77** zero-auth job-board providers · **2,741** engine tests · **6** machine-checked
+> fork adaptations · **28,746** ATS boards per full sweep, of which **~46%** are permanently dead and
+> skipped from `data/dead-boards.tsv`. Local-first: no hosted service, no account, your data never
+> leaves the machine.
 
 ---
 
@@ -47,6 +77,41 @@ routing (`?profile=slug` registry + switcher), in-process scoring, and a full
 surface (Today command center · Board · Pipeline · Ops · Intel · Portals ·
 Analytics · CV · Onboarding · ⌘K palette). **This README's "modern dashboard"
 notes describe `web/`.**
+
+---
+
+## Screenshots
+
+> Every frame is rendered from a **synthetic demo profile** — fictional employers, invented
+> scores, `example.com` URLs. No real job search, tracker row or report appears anywhere in this
+> README, and the seeder builds the fixture from scratch rather than transforming real data, so
+> there is no field anyone could forget to redact.
+>
+> **Reproduce the whole set:**
+> ```bash
+> mkdir -p /tmp/hs-demo && node demo-seed.mjs /tmp/hs-demo
+> CAREER_OPS_ROOT=/tmp/hs-demo npm --prefix web run dev
+> ```
+> The seed is deterministic (fixed clock), so a regenerated set diffs cleanly instead of churning.
+
+<table>
+<tr>
+<td width="50%" valign="top"><b>Job board — scored, not just listed</b><br/><sub>12 roles scored against the profile, banded excellent → low, with the matched skills that drove each score. The number is explainable, which is the point: it is a reason to open a posting, not a ranking to trust blindly.</sub><br/><br/><img src="docs/assets/screens/board.png" alt="Job board showing 12 scored roles, 4 excellent, score bands and matched-skill chips"/></td>
+<td width="50%" valign="top"><b>Analytics — where the funnel actually leaks</b><br/><sub>Stage distribution, score distribution and top companies over the tracked set. Built to answer &ldquo;am I being rejected, or ignored?&rdquo; — those need different fixes.</sub><br/><br/><img src="docs/assets/screens/analytics.png" alt="Analytics with pipeline-by-stage, score distribution and top companies"/></td>
+</tr>
+<tr>
+<td valign="top"><b>Pipeline — the inbox of pending decisions</b><br/><sub>Discovered postings waiting on a call, separate from applications already in flight. Keeping them apart is what stops &ldquo;applied&rdquo; from quietly meaning &ldquo;still owes a screening step&rdquo;.</sub><br/><br/><img src="docs/assets/screens/pipeline.png" alt="Pipeline view listing pending discovered postings"/></td>
+<td valign="top"><b>Today — the command center</b><br/><sub>What needs a human right now, and nothing else. When there is genuinely nothing, it says so rather than manufacturing a task list.</sub><br/><br/><img src="docs/assets/screens/today.png" alt="Today command center"/></td>
+</tr>
+<tr>
+<td valign="top"><b>Ops — the engine's own health</b><br/><sub>Scan runs, portal health and the state of the local data contract. A scanner that silently stops finding things looks identical to a quiet market; this is where the difference shows.</sub><br/><br/><img src="docs/assets/screens/ops.png" alt="Ops view with scan runs and portal health"/></td>
+<td valign="top"><b>Portals — what is actually being scanned</b><br/><sub>Configured companies and boards, with which ones have ever produced a match. Low is not the same as broken, and the view says so.</sub><br/><br/><img src="docs/assets/screens/portals.png" alt="Portals configuration view"/></td>
+</tr>
+<tr>
+<td valign="top"><b>Intel — company research surface</b><br/><sub>Per-company context gathered alongside the pipeline, kept local.</sub><br/><br/><img src="docs/assets/screens/intel.png" alt="Intel company research view"/></td>
+<td valign="top"><b>CV — the source of truth, rendered</b><br/><sub>`cv.md` is canonical; the dashboard renders and checks it rather than holding a second copy that can drift.</sub><br/><br/><img src="docs/assets/screens/cv.png" alt="CV view rendering cv.md"/></td>
+</tr>
+</table>
 
 ---
 
