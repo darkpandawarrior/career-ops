@@ -18,8 +18,7 @@ import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { matchCandidates, classifyReply } from './reply-matcher.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
-import { openTrackerTransaction } from './tracker-lock.mjs';
+import { openTrackerTransaction, rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
 
 const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 

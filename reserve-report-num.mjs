@@ -50,9 +50,10 @@ import {
 import { randomUUID } from 'crypto';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
+import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { resolveTrackerPath } from './tracker-utils.mjs';
-import { acquireTrackerLock, canonicalizeTrackerPath, lockDirFor } from './tracker-lock.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath } from './tracker-utils.mjs';
+import { lockDirFor } from './tracker-lock.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
@@ -178,48 +179,6 @@ function parseMarkdownLinks(value) {
   return links;
 }
 
-/**
- * Extract report IDs referenced by one tracker Report cell (markdown label
- * and/or the linked report filename). External URLs are ignored even when
- * their path happens to contain a reports/ segment.
- *
- * @param {string} reportCell - Raw Report cell value.
- * @returns {number[]} Unique positive report IDs in encounter order.
- */
-function extractTrackerReportNumbers(reportCell) {
-  const value = String(reportCell ?? '').trim();
-  if (!value || value === '-' || value === '—') return [];
-
-  const numbers = new Set();
-  const numberFromTarget = (rawTarget) => {
-    const target = String(rawTarget).trim().replace(/^<|>$/g, '');
-    if (!target || /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(target)) return null;
-    const pathname = target.split(/[?#]/, 1)[0];
-    const match = pathname.match(/(?:^|[\\/])reports[\\/]0*(\d+)-/i)
-      || pathname.match(/(?:^|[\\/])0*(\d+)-[^\\/]*\.md$/i);
-    if (!match) return null;
-    const num = parseInt(match[1], 10);
-    return Number.isInteger(num) && num > 0 ? num : null;
-  };
-
-  const markdownLinks = parseMarkdownLinks(value);
-  for (const link of markdownLinks) {
-    const pathNum = numberFromTarget(link.target);
-    if (pathNum == null) continue;
-    const label = link.label.trim();
-    if (/^\d+$/.test(label)) {
-      const labelNum = parseInt(label, 10);
-      if (labelNum > 0) numbers.add(labelNum);
-    }
-    numbers.add(pathNum);
-  }
-
-  if (markdownLinks.length === 0) {
-    const pathNum = numberFromTarget(value);
-    if (pathNum != null) numbers.add(pathNum);
-  }
-  return [...numbers];
-}
 
 // ── occupancy + slot claiming ────────────────────────────────────────────────
 

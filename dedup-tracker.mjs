@@ -13,8 +13,8 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { rebuildRow, resolveTrackerPath, normalizeCompany } from './tracker-utils.mjs';
-import { openTrackerTransaction } from './tracker-lock.mjs';
+import { normalizeCompany, openTrackerTransaction, rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
+
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 

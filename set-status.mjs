@@ -52,9 +52,9 @@ import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import { load as yamlLoad } from 'js-yaml';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow } from './tracker-utils.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath, rebuildRow } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
+import { lockDirFor } from './tracker-lock.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = process.env.CAREER_OPS_TRACKER

@@ -14,8 +14,8 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { rebuildRow, resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
-import { openTrackerTransaction } from './tracker-lock.mjs';
+import { loadCanonicalStates, openTrackerTransaction, rebuildRow, resolveCanonicalState, resolveTrackerPath } from './tracker-utils.mjs';
+
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 

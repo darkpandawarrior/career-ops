@@ -148,7 +148,7 @@ ok('exactly at recheck boundary is re-probed', !shouldSkip({ misses: 99, lastChe
   ok('writes a header', readFileSync(file, 'utf-8').startsWith('ats\tslug'));
   eq('missing file yields empty map', loadDeadBoards(join(dir, 'nope.tsv')).size, 0);
 
-  writeFileSync(file, '  garbage');
+  writeFileSync(file, '  garbage');
   eq('corrupt file yields empty map', loadDeadBoards(file).size, 0);
   rmSync(dir, { recursive: true, force: true });
 }

@@ -22,8 +22,8 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { LEGACY_COLMAP, detectColumns, normalizeVia, resolveScoreStatus, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
-import { normalizeCompany, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { lockDirFor } from './tracker-lock.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath, normalizeCompany, resolveWorkspaceRoot } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);

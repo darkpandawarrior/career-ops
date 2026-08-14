@@ -41,8 +41,7 @@ import { dirname, resolve, join } from 'path';
 import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { resolveColumns } from './tracker-parse.mjs';
-import { writeFileAtomic } from './tracker-utils.mjs';
-import { canonicalizeTrackerPath, openTrackerTransaction } from './tracker-lock.mjs';
+import { canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic } from './tracker-utils.mjs';
 
 const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 

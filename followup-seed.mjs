@@ -59,7 +59,8 @@ import { pathToFileURL } from 'url';
 import { randomUUID } from 'crypto';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { lockDirFor, acquireTrackerLock, canonicalizeTrackerPath } from './tracker-lock.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath } from './tracker-utils.mjs';
+import { lockDirFor } from './tracker-lock.mjs';
 import {
   resolveCadenceConfig,
   normalizeStatus,
