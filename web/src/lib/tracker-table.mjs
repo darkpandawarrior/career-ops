@@ -15,6 +15,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Canonical tracker-parse field name → web Application field. The web type
@@ -47,8 +48,21 @@ const aliasCache = new Map();
  * @param {string} rootDir - career-ops root (careerOpsRoot() on the web side).
  * @returns {Record<string, string>}
  */
+// tracker-aliases.json is an ENGINE file (system layer), not user data. Under
+// multi-profile the active data root is a profile directory that has no copy of
+// it, so resolving it only from rootDir yields {} -> no header row is detected
+// -> parseApplications falls back to the legacy fixed 9-column order. A tracker
+// carrying the optional Via column then reads Score and Status from the wrong
+// cells, and the dashboard shows zeros while the engine parses the same file
+// correctly. Try the data root first (so a profile CAN override), then the
+// engine root next to this module.
+const ENGINE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
 export function loadHeaderAliases(rootDir) {
-  const file = path.resolve(rootDir, "tracker-aliases.json");
+  const candidates = [path.resolve(rootDir, "tracker-aliases.json"),
+                      path.resolve(ENGINE_ROOT, "tracker-aliases.json")];
+  const file = candidates.find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } })
+    ?? candidates[0];
   try {
     const { mtimeMs, size } = fs.statSync(file);
     const cached = aliasCache.get(file);

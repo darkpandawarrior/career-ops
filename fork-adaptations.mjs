@@ -96,6 +96,17 @@ function touchesProfileData(src) {
   return profileish.length > 0;
 }
 
+/** Resolve a relative specifier against the importing file's directory. */
+function normalizeRel(dir, spec) {
+  const parts = (dir + spec.replace(/^\.\//, '')).split('/');
+  const out = [];
+  for (const p of parts) {
+    if (p === '..') out.pop();
+    else if (p && p !== '.') out.push(p);
+  }
+  return out.join('/');
+}
+
 export const ADAPTATIONS = [
   {
     id: 'yaml-namespace-import',
@@ -179,13 +190,35 @@ export const ADAPTATIONS = [
        + 'from the tree every run.',
     autofix: false,
     violations(src, file, ctx) {
-      if (!file.endsWith('.mjs')) return [];
+      // .ts and .tsx count: web/src/lib/core/text-key.ts imported a .mjs that was
+      // never ported, and every dashboard page except one returned HTTP 500. The
+      // engine suite cannot see that, and `node --check` parses the importer fine
+      // — it was found only by running the app. A .ts -> .mjs edge is exactly the
+      // seam between the two halves of this repo, so it is the MOST likely to
+      // break in a sync, not the least.
+      if (!/\.(mjs|ts|tsx)$/.test(file)) return [];
       const out = [];
-      const importRe = /import\s*\{([^}]*)\}\s*from\s*['"](\.\/[^'"]+\.mjs)['"]/g;
-      for (const m of src.matchAll(importRe)) {
-        const target = m[2].slice(2);
+      // Relative specifiers resolve against the importing file's directory, so a
+      // web file reaching ./x.mjs means web/<dir>/x.mjs, not repo-root x.mjs.
+      const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : '';
+      // Strip comments first: a JSDoc usage example ("import {x} from './y.mjs'")
+      // is documentation, not an edge. seeds/vc-portfolios.mjs documents its own
+      // import that way and was reported as importing itself.
+      const code = src
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+      const importRe = /import\s*\{([^}]*)\}\s*from\s*['"](\.\.?\/[^'"]+\.mjs)['"]/g;
+      for (const m of code.matchAll(importRe)) {
+        const target = normalizeRel(dir, m[2]);
         const targetSrc = ctx?.read(target);
-        if (targetSrc == null) continue;                    // not ours / generated
+        if (targetSrc == null) {
+          // A relative specifier that resolves to NOTHING is the failure this
+          // rule exists for — treating it as "not ours" is how the dashboard
+          // 500 slipped through: text-key.ts imported a .mjs that was never
+          // ported, and the check silently skipped it.
+          out.push(`${file}: imports ${m[2]}, which does not exist`);
+          continue;
+        }
         if (/^export\s+\*/m.test(targetSrc)) continue;      // re-export, can't resolve cheaply
         const exported = new Set([
           ...[...targetSrc.matchAll(/^export\s+(?:async\s+)?(?:function|class)\s+(\w+)/gm)].map(x => x[1]),
