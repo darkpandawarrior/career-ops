@@ -577,6 +577,8 @@ function onboardingState(root) {
   const templates = [
     { target: 'modes/_profile.md', template: 'modes/_profile.template.md' },
     { target: 'modes/_custom.md', template: 'modes/_custom.template.md' },
+    // Fork-only: upstream tracks voice-dna.md directly. See .gitignore for why.
+    { target: 'voice-dna.md', template: 'voice-dna.template.md' },
   ];
   for (const { target, template } of templates) {
     const targetPath = join(root, ...target.split('/'));

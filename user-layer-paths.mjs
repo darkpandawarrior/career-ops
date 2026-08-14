@@ -25,6 +25,7 @@ export const USER_PATHS = [
   'article-digest.md',
   'interview-prep/',
   'data/',
+  'documents/',
   'reports/',
   'output/',
   'jds/',

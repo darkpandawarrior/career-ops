@@ -64,6 +64,8 @@ export function sourceFiles(root = ROOT) {
       else if (/\.(mjs|ts|tsx)$/.test(name)) out.push(relative(root, full));
     }
   })(root);
+  // .gitignore is not source, but one rule asserts a line in it.
+  out.push('.gitignore');
   return out.sort();
 }
 
@@ -198,6 +200,24 @@ export const ADAPTATIONS = [
         }
       }
       return out;
+    },
+  },
+  {
+    id: 'voice-dna-not-tracked',
+    why: 'Upstream ships voice-dna.md TRACKED, as a starting template. DATA_CONTRACT '
+       + 'lists it as User Layer, so the moment it is personalized those edits are '
+       + 'committed — and the sibling darkpandawarrior/career-ops fork is PUBLIC, so '
+       + 'that publishes the user\'s writing voice. This fork splits it: '
+       + 'voice-dna.template.md is tracked, voice-dna.md is gitignored, and doctor.mjs '
+       + 'copies template -> working copy on first run (same convention upstream already '
+       + 'uses for modes/_profile.md). A sync that re-tracks voice-dna.md silently undoes '
+       + 'that, which is why this is checked rather than trusted.',
+    autofix: false,
+    violations(src, file) {
+      if (file !== '.gitignore') return [];
+      return /^voice-dna\.md$/m.test(src)
+        ? []
+        : ['.gitignore: voice-dna.md is not ignored — the working copy would be tracked and personalization published'];
     },
   },
   {

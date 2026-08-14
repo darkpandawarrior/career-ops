@@ -177,3 +177,16 @@ docs/superpowers/
 # Playwright run output (cv-visual harness) — derived, never committed
 test-results/
 playwright-report/
+
+# Personal source documents for the intake flow (master CV, LinkedIn export,
+# diplomas, references). User Layer: never committed. Declared here BEFORE the
+# feature is ported so a later sync cannot land the directory unprotected.
+documents/
+!documents/.gitkeep
+!documents/README.md
+
+# Your writing-voice profile. Upstream ships voice-dna.md tracked; this fork
+# splits it into a tracked template + a gitignored working copy, because
+# DATA_CONTRACT lists it as User Layer and the sibling darkpandawarrior/career-ops
+# fork is PUBLIC — personalizing a tracked file would publish your voice.
+voice-dna.md
