@@ -118,15 +118,57 @@ export function compileKeyword(kw) {
   return (lower) => lower.includes(kw);
 }
 
+// An AND-group: " + " (whitespace-delimited) between terms means EVERY term
+// must appear in the title, in any order. `title_filter.positive` is otherwise
+// matched by compileKeyword — a plain substring, EXCEPT for a 2-3 letter
+// keyword ("AI", "ML", "VP"), which is anchored on word boundaries so it
+// cannot hit inside another word. Either way an entry expresses one exact
+// spelling and nothing else, and real titles vary in separator and word order:
+//
+//   "Director of Engineering" misses  Director - Software Engineering
+//                                     Director Engineering (Mobile Platform)
+//                                     Senior Director, Platform Engineering
+//
+// The combinations are {level} x {, - of none} x {optional domain word}: no
+// hand-maintained list of literal spellings converges, and every miss is
+// silent — the summary reports one "filtered by title" count that cannot tell
+// a well-tuned filter from a leaking one (#2544).
+//
+// The separator REQUIRES surrounding whitespace on purpose. A bare split('+')
+// would turn the perfectly ordinary keyword "C++" into "c", which matches
+// almost every title — trading a silent drop for a silent flood.
+const AND_SEPARATOR = /\s+\+\s+/;
+
+/**
+ * Compile one `positive` entry into a matcher.
+ *
+ * Entries without " + " keep their exact previous behaviour, so existing
+ * configs are unaffected.
+ *
+ * @param {string} keyword - already trimmed and lowercased.
+ * @returns {(lower: string) => boolean}
+ */
+export function compilePositiveKeyword(keyword) {
+  if (!AND_SEPARATOR.test(keyword)) return compileKeyword(keyword);
+  const terms = keyword.split(AND_SEPARATOR).map(t => t.trim()).filter(Boolean);
+  if (terms.length === 0) return compileKeyword(keyword);
+  // Each term keeps compileKeyword's own rule, so a short term like "vp" is
+  // still matched on a word boundary and cannot hit "vp" inside another word.
+  const matchers = terms.map(compileKeyword);
+  return (lower) => matchers.every(m => m(lower));
+}
+
+
 export function buildTitleFilter(titleFilter) {
   // Normalize defensively: a malformed title_filter (a null, numeric, or otherwise
   // non-string entry in the YAML) must not crash the scan via k.toLowerCase().
-  const normalize = (arr) => (Array.isArray(arr) ? arr : [])
+  const normalize = (arr, compile = compileKeyword) => (Array.isArray(arr) ? arr : [])
     .filter(k => typeof k === 'string')
     .map(k => k.trim().toLowerCase())
     .filter(k => k.length > 0)
-    .map(compileKeyword);
-  const positive = normalize(titleFilter?.positive);
+    .map(compile);
+  // Positives support AND-groups ("android + kotlin"); negatives stay plain.
+  const positive = normalize(titleFilter?.positive, compilePositiveKeyword);
   const negative = normalize(titleFilter?.negative);
 
   return (title) => {
@@ -570,6 +612,96 @@ export const DEFAULT_VISA_NEGATIVE = [
   'sponsorship not available',
   'not offer visa sponsorship',
 ];
+
+// ── Country-eligibility filter (#2093) ──────────────────────────────
+// Optional, opt-in. If `country_eligibility_filter` is absent from
+// portals.yml, all jobs pass — byte-identical to pre-#2093 behavior.
+//
+// Problem it solves: `location_filter` only reads the ATS provider's
+// STRUCTURED location field (e.g. "Remote"), which many US companies use
+// identically regardless of actual country eligibility. The real
+// restriction — "US-based candidates only" vs. "US or Canada eligible" —
+// often lives only in the JD DESCRIPTION body text, which this filter reads
+// (same field `content_filter` already reads — `job.description`).
+//
+// Semantics (case-insensitive substring), mirroring location_filter's
+// "don't penalize missing data" discipline exactly:
+//   - Candidate's own `location.country` (config/profile.yml) is "United
+//     States" → always pass, unconditionally. An exclusionary "US only"
+//     phrase can never legitimately block a US-based candidate, so the
+//     filter no-ops entirely rather than special-casing every keyword check.
+//   - Empty / whitespace-only / non-string description → pass (no signal).
+//   - No `exclusionary` phrase matched → pass (ambiguous stays ambiguous,
+//     never guessed — this also means an `inclusive`-only match with no
+//     exclusionary wording present is a no-op pass, same as having no
+//     signal at all).
+//   - `exclusionary` phrase matched AND an `inclusive` phrase is also
+//     present → pass (the posting explicitly widens eligibility).
+//   - `exclusionary` phrase matched AND the candidate's own country is
+//     literally named in the JD text (e.g. a Canadian candidate scanning a
+//     posting that separately mentions "Canada" elsewhere) → pass.
+//   - `exclusionary` phrase matched, no `inclusive` phrase, and the
+//     candidate's own country isn't named → reject.
+//
+// Config shape (portals.yml):
+//   country_eligibility_filter:
+//     exclusionary: ["must be located in the united states", ...]
+//     inclusive: ["united states or canada", "north america", ...]
+//
+// Kept as a sibling block to `content_filter` rather than folded into its
+// positive/negative shape: this filter cross-references
+// `config/profile.yml`'s `location.country` and has its own three-way
+// exclusionary/inclusive/candidate-country-named semantics, which doesn't
+// fit content_filter's simpler two-list reject/require shape.
+
+export function buildCountryEligibilityFilter(countryEligibilityFilter, candidateCountry) {
+  if (!countryEligibilityFilter) return () => true;
+
+  const candidateCountryLower = typeof candidateCountry === 'string'
+    ? candidateCountry.toLowerCase().trim()
+    : '';
+
+  // A "US-based candidates only" restriction can never legitimately exclude
+  // a candidate who is themselves US-based — no-op the whole filter rather
+  // than relying on the literal-country-name check below (which would miss
+  // phrasing like "US-based candidates only" that never spells out "united
+  // states").
+  if (candidateCountryLower === 'united states') return () => true;
+
+  const exclusionary = normalizeKeywordList(countryEligibilityFilter.exclusionary);
+  const inclusive = normalizeKeywordList(countryEligibilityFilter.inclusive);
+
+  return (description) => {
+    if (typeof description !== 'string' || description.trim() === '') return true;
+    const lower = description.toLowerCase();
+
+    if (exclusionary.length === 0) return true;
+    if (!exclusionary.some(k => lower.includes(k))) return true;
+    if (inclusive.length > 0 && inclusive.some(k => lower.includes(k))) return true;
+    if (candidateCountryLower && lower.includes(candidateCountryLower)) return true;
+
+    return false;
+  };
+}
+
+// Reads config/profile.yml's `location.country` (already a documented
+// profile field — see config/profile.example.yml) for the country-
+// eligibility filter (#2093). Missing file, missing field, or a malformed
+// profile all resolve to '' — buildCountryEligibilityFilter treats an empty
+// candidate country the same as "not the candidate's own country's US
+// no-op" and simply skips the literal-country-name pass-through, which is
+// the same conservative "don't penalize missing data" default used
+// throughout this file.
+export function loadCandidateCountry(profilePath = PROFILE_PATH) {
+  if (!existsSync(profilePath)) return '';
+  try {
+    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const country = raw?.location?.country;
+    return typeof country === 'string' ? country.trim() : '';
+  } catch {
+    return '';
+  }
+}
 
 export function buildVisaFilter(visaFilter) {
   if (!visaFilter || visaFilter.enabled === false) return () => true;
@@ -1702,7 +1834,31 @@ export function loadBlacklist(filePath = BLACKLIST_PATH) {
 // always 'completed' in v1; a follow-up wires failure-path writes so trend
 // stats can exclude survivorship bias. Consumers MUST parse by header name,
 // never by position — columns may be appended in later versions.
-export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\n';
+export const SCAN_RUNS_HEADER = 'timestamp\tstatus\tcompanies\tboards\tfound\tfiltered_title\tfiltered_tier\tfiltered_location\tfiltered_posting_age\tfiltered_salary\tfiltered_content\tfiltered_cooldown\tdupes\tnew_added\terrors\tfiltered_blacklist\tfiltered_visa\tfiltered_posted_date\tfiltered_country_eligibility\n';
+
+// Failure-path writes (#2643). main() registers a snapshot closure once the
+// sweep's counters exist (never on --dry-run, never before the sweep starts —
+// a config error is not a run). The fatal catch and the SIGINT handler both
+// call writeRunFailureRow; the snapshot is consumed on first use so the two
+// signals can never double-write. Best-effort by design: a failure to record
+// the failure must not mask the original error, so everything is swallowed.
+let runFailureSnapshot = null;
+
+export function registerRunFailureSnapshot(fn) {
+  runFailureSnapshot = typeof fn === 'function' ? fn : null;
+}
+
+export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH) {
+  const snapshot = runFailureSnapshot;
+  runFailureSnapshot = null;
+  if (!snapshot) return false;
+  try {
+    appendScanRunSummary({ ...snapshot(), status }, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
@@ -1718,6 +1874,8 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     c.filteredVisa ?? 0,
     // filtered_posted_date appended at the END for the same reason.
     c.filteredPostedDate ?? 0,
+    // filtered_country_eligibility appended at the END for the same reason.
+    c.filteredCountryEligibility ?? 0,
   ].join('\t') + '\n';
   appendFileSync(filePath, row, 'utf-8');
 }
@@ -2091,6 +2249,8 @@ async function main() {
   const salaryFilter = buildSalaryFilter(config.salary_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
   const contentFilter = buildContentFilter(config.content_filter);
+  const candidateCountry = loadCandidateCountry();
+  const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
   const visaEnabled = Boolean(config.visa_filter) && config.visa_filter.enabled !== false;
 
@@ -2178,6 +2338,7 @@ async function main() {
   let totalFilteredPostedDate = 0;
   let totalFilteredSalary = 0;
   let totalFilteredContent = 0;
+  let totalFilteredCountryEligibility = 0;
   let totalFilteredBlacklist = 0;
   let annotatedBlacklisted = 0;
   let totalFilteredVisa = 0;
@@ -2283,6 +2444,10 @@ async function main() {
         }
         if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
           totalFilteredContent++;
+          continue;
+        }
+        if (!countryEligibilityFilter(job.description)) {
+          totalFilteredCountryEligibility++;
           continue;
         }
         if (!visaFilter(job.description)) {
@@ -2635,6 +2800,7 @@ async function main() {
       filteredBlacklist: totalFilteredBlacklist,
       filteredVisa: totalFilteredVisa,
       filteredPostedDate: totalFilteredPostedDate,
+      filteredCountryEligibility: totalFilteredCountryEligibility,
     });
   }
 

@@ -2018,6 +2018,7 @@ try {
       filteredTitle: 5, filteredTier: 1, filteredLocation: 2, filteredPostingAge: 7,
       filteredSalary: 0, filteredContent: 3, filteredCooldown: 4, dupes: 6, newAdded: 29,
       errors: 0, filteredBlacklist: 8, filteredVisa: 2, filteredPostedDate: 1,
+      filteredCountryEligibility: 4,
     }, runsFile);
     const content = readFileSync(runsFile, 'utf-8');
     const lines = content.trim().split('\n');
@@ -2027,10 +2028,12 @@ try {
       fail(`appendScanRunSummary header mismatch — got: ${lines[0]}`);
     }
     const cols = lines[1].split('\t');
-    // filtered_blacklist/filtered_visa/filtered_posted_date land in the three
-    // trailing columns (16/17/18), per the header-name append-only contract.
-    if (cols.length === 18 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed'
-        && cols[13] === '29' && cols[15] === '8' && cols[16] === '2' && cols[17] === '1') {
+    // filtered_blacklist/filtered_visa/filtered_posted_date/filtered_country_eligibility
+    // land in the four trailing columns (16-19), per the header-name append-only
+    // contract: an older file keeps parsing, the extra cells are simply unnamed there.
+    if (cols.length === 19 && cols[0] === '2026-07-08T00:00:00.000Z' && cols[1] === 'completed'
+        && cols[13] === '29' && cols[15] === '8' && cols[16] === '2' && cols[17] === '1'
+        && cols[18] === '4') {
       pass('appendScanRunSummary writes one tab-delimited row with the run counters');
     } else {
       fail(`appendScanRunSummary row shape wrong: ${JSON.stringify(cols)}`);
