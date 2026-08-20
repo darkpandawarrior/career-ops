@@ -235,6 +235,7 @@ risk_level: "{Low | Medium | High}"
 confidence: "{Low | Medium | High}"
 next_action: "{one concrete next step}"
 advertised_comp: "{the JD's own salary figure, verbatim, e.g. '80-90k EUR'}" # or null if the JD states none — never estimated, never researched
+reports_to: "{the JD's stated reporting line, verbatim, e.g. 'VP of Marketing'}" # or null if the JD names none — never inferred from title, team size, or company research
 ```
 
 Rules:
@@ -243,6 +244,7 @@ Rules:
 - `final_decision` must reflect the full evaluation, not only the CV match.
 - Do not invent missing data. If confidence is limited, set `confidence: "Low"` and explain the limitation in the human-readable sections.
 - `advertised_comp` is the JD's own figure verbatim, never a researched estimate — it seeds the advertised-compensation observation `node salary-gap.mjs` reads.
+- `reports_to` is the reporting line the JD itself states, in the JD's own wording; `null` when the JD names none — never infer it from the title, the team size, or company research. It records the seat's altitude, which the title alone does not: an IC seat reporting to a Head of Marketing and one reporting to the CEO are different roles.
 
 ### Step 3 — Save Report .md
 
@@ -287,6 +289,7 @@ risk_level: "{Low | Medium | High}"
 confidence: "{Low | Medium | High}"
 next_action: "{one concrete next step}"
 advertised_comp: "{the JD's own salary figure, verbatim, e.g. '80-90k EUR'}" # or null if the JD states none — never estimated, never researched
+reports_to: "{the JD's stated reporting line, verbatim, e.g. 'VP of Marketing'}" # or null if the JD names none — never inferred from title, team size, or company research
 ```
 
 ## A) Role Summary
@@ -433,6 +436,8 @@ TSV format (a single line, no header, 9 tab-separated columns):
 | 9 | notes | string | `APPLY HIGH...` | 1-sentence summary |
 
 **IMPORTANT:** The TSV order has status BEFORE score (col 5→status, col 6→score). In applications.md the order is reversed (col 5→score, col 6→status). merge-tracker.mjs handles the conversion.
+
+**Posting date in notes:** when the pipeline entry for this offer carries a `| posted: {YYYY-MM-DD}` segment (the scanner writes it from the provider's `offer.postedAt`, see `modes/pipeline.md`), carry it into `notes` as its own trailing segment — `…the sentence; posted: 2026-08-07`. It is the only path by which requisition age reaches the tracker, and the dashboard's POSTED column reads it from there. Copy the date verbatim; never infer one when the pipeline entry has no segment, and never write today's date as a stand-in — an absent date renders as `—`, which is honest, while a guessed one silently reports a stale req as fresh. Keep it a segment (`;`-separated, `posted:` first): prose like "recruiter posted an update 2026-07-20" is a contact date, not a posting date, and is read as such.
 
 **Valid canonical statuses:** `Evaluada`, `Aplicado`, `Respondido`, `Entrevista`, `Oferta`, `Rechazado`, `Descartado`, `NO APLICAR`
 

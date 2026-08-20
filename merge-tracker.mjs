@@ -20,7 +20,7 @@ import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { LEGACY_COLMAP, detectColumns, normalizeVia, resolveScoreStatus, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, detectColumns, isHeaderRow, normalizeVia, resolveScoreStatus, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
 import { acquireTrackerLock, canonicalizeTrackerPath, normalizeCompany, resolveWorkspaceRoot } from './tracker-utils.mjs';
@@ -182,12 +182,21 @@ function validateStatus(status) {
  * equality is confirmed by the caller. This helper reads links such as
  * `[123](../reports/123-company-role-date.md)` and returns the numeric id.
  *
+ * Layouts whose header has no dedicated Report column (e.g. a customized
+ * `… | Materials | Apply Link | Follow-up | Notes` shape) embed the link in
+ * Notes prose instead (see buildRow), so the Notes cell is scanned as a
+ * fallback — scoped to links that point into reports/ so a job-posting URL in
+ * the same prose can't match.
+ *
  * @param {string} reportStr - Raw report cell from applications.md or TSV input.
+ * @param {string} [notesStr] - Notes cell, scanned when the report cell has none.
  * @returns {number|null} Parsed report number, or null when absent.
  */
-function extractReportNum(reportStr) {
-  const m = reportStr.match(/\[(\d+)\]/);
-  return m ? parseInt(m[1]) : null;
+function extractReportNum(reportStr, notesStr = '') {
+  const m = String(reportStr ?? '').match(/\[(\d+)\]/);
+  if (m) return parseInt(m[1]);
+  const n = String(notesStr ?? '').match(/\[(\d+)\]\([^)]*reports\/[^)]+\)/);
+  return n ? parseInt(n[1]) : null;
 }
 
 /**
@@ -216,8 +225,19 @@ function resolveReportUrl(reportField) {
   // [ \t]* NOT \s*: \s matches newlines, so an empty `**URL:**` header swallowed
   // the line break and captured the NEXT header's text. Every such report then
   // minted the same bogus key (`**Legitimacy:**`), and the backfill counted it
-  // as a successful fill.
-  const m = readFileSync(reportPath, 'utf-8').match(/^\*\*URL:\*\*[ \t]*(\S+)/m);
+  // as a successful fill. `\S+` cannot cross a newline, so an empty header now
+  // just fails to match at that position instead of reaching into the next line.
+  //
+  // Deliberately NOT anchored to line start. AGENTS.md requires `**URL:**` "in
+  // the header (between Score and PDF)" — that is, INLINE:
+  //   **Score:** 4.1/5 | **URL:** https://… | **Legitimacy:** High | **PDF:** …
+  // which a `^`-anchored pattern cannot see. Every report written in the
+  // documented format reported "no **URL:** header" and silently fell back to
+  // fuzzy company+role dedup — the exact matching that let a new Google req
+  // overwrite a different, concurrently-live one. Checked against all 399
+  // reports: 376 match both ways and agree on the URL 376/376, so dropping the
+  // anchor cannot change a URL that already resolved.
+  const m = readFileSync(reportPath, 'utf-8').match(/\*\*URL:\*\*[ \t]*(\S+)/);
   if (!m) return { url: '', reason: 'no-url' };
   // Strip a markdown autolink wrapper and trailing punctuation, then require a
   // real http(s) URL. `**URL:** N/A` is legitimate for recruiter-sourced roles,
@@ -366,6 +386,15 @@ function parseScore(s) {
 // the detected layout once the table is read (below).
 let COLMAP = LEGACY_COLMAP;
 
+// Total cell count of the tracker's ACTUAL header row, set once the table is
+// read. Writes are driven by this width rather than by a hardcoded column list
+// so a tracker carrying columns career-ops has no field for (Apply Link,
+// Follow-up, or anything else a user adds) still round-trips: the row keeps the
+// header's shape and the unknown cells are filled with the tracker's own "no
+// data" marker instead of being dropped. Null until detected; falls back to the
+// width implied by COLMAP.
+let HEADER_WIDTH = null;
+
 // Neutralize characters that would corrupt the applications.md table. Both this
 // file and tracker-parse.mjs read rows with a raw `line.split('|')`, so a literal
 // pipe or a newline in a free-text value (company/role/location/notes) would shift
@@ -376,18 +405,68 @@ function cell(v) {
   return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' / ').trim();
 }
 
-// Build a tracker row string matching the detected layout (with or without the
-// optional Via and Location columns) so writes round-trip through the same
-// schema. Optional columns follow the documented positions: Via after Company
-// (#1596), Location after Role (#946).
+// Build a tracker row string matching the detected layout. Every field
+// career-ops knows about is placed at ITS OWN detected index, and any column
+// the header declares but career-ops has no value for becomes '—'.
+//
+// The previous implementation appended a fixed tail (score, status, pdf,
+// report, notes, [url]) after the optional Via/Location columns. That silently
+// produced a row NARROWER than the header on any tracker with extra columns —
+// e.g. a 10-column `… | Materials | Apply Link | Follow-up | Notes` layout got
+// 9-cell rows. Such rows are unparseable by set-status.mjs (its column map is
+// header-derived), so those applications became unaddressable: the status could
+// no longer be changed through the supported path.
 function buildRow(o) {
-  const cells = [o.num, o.date, cell(o.company)];
-  if (COLMAP.via != null) cells.push(cell(o.via) || '—');
-  cells.push(cell(o.role));
-  if (COLMAP.location != null) cells.push(cell(o.location) || '—');
-  cells.push(o.score, o.status, o.pdf, o.report, cell(o.notes));
+  const width = HEADER_WIDTH ?? (Math.max(...Object.values(COLMAP)) + 2);
+  // index 0 is the empty string left of the leading pipe; index `width - 1` is
+  // the one right of the trailing pipe. Data cells live in between.
+  const cells = new Array(Math.max(0, width - 2)).fill('—');
+  // Rebuilding an EXISTING row (PDF sync, re-evaluation update, URL backfill):
+  // start from the row's current cells so values in columns career-ops has no
+  // field for — a hand-entered Apply Link, a Follow-up date — survive the
+  // rebuild. parseAppLine only carries the mapped fields, so without this the
+  // '—' fill above would overwrite those user-owned cells on every update.
+  // Copied verbatim (empty cells included); the put() calls below then
+  // overwrite only the fields career-ops owns. New rows pass no `raw` and keep
+  // the plain '—' fill.
+  if (o.raw) {
+    const prev = String(o.raw).split('|').map(s => s.trim());
+    for (let i = 0; i < cells.length; i++) {
+      if (prev[i + 1] !== undefined) cells[i] = prev[i + 1];
+    }
+  }
+  const put = (key, value) => {
+    const idx = COLMAP[key];
+    if (idx == null) return false;
+    const at = idx - 1; // shift past the pre-pipe empty cell
+    if (at < 0 || at >= cells.length) return false;
+    cells[at] = value;
+    return true;
+  };
+
+  put('num', o.num);
+  put('date', o.date);
+  put('company', cell(o.company));
+  put('via', cell(o.via) || '—');
+  put('role', cell(o.role));
+  put('location', cell(o.location) || '—');
+  put('score', o.score);
+  put('status', o.status);
+  put('pdf', o.pdf);
   // Optional trailing URL column — the stable natural key.
-  if (COLMAP.url != null) cells.push(cell(o.url) || '');
+  put('url', cell(o.url) || '');
+
+  // A layout with no dedicated Report column keeps the link in Notes, mirroring
+  // how extractReportNum already READS it back. Without this the link would be
+  // dropped outright on such trackers.
+  let notes = cell(o.notes);
+  if (!put('report', o.report) && o.report && String(o.report).trim() !== '—') {
+    const link = String(o.report).trim();
+    if (notes && !notes.includes(link)) notes = `${notes.replace(/\s*$/, '')} Report: ${link}.`;
+    else if (!notes) notes = `Report: ${link}.`;
+  }
+  put('notes', notes);
+
   return `| ${cells.join(' | ')} |`;
 }
 
@@ -433,8 +512,10 @@ function parseAppLine(line) {
     location: COLMAP.location != null ? parts[COLMAP.location] : '',
     score: parts[COLMAP.score],
     status: parts[COLMAP.status],
-    pdf: parts[COLMAP.pdf],
-    report: parts[COLMAP.report],
+    // Null-safe: a header without dedicated PDF/Report columns leaves those
+    // keys off COLMAP entirely (see extractReportNum's Notes fallback).
+    pdf: COLMAP.pdf != null ? (parts[COLMAP.pdf] ?? '') : '',
+    report: COLMAP.report != null ? (parts[COLMAP.report] ?? '') : '',
     notes: COLMAP.notes != null ? (parts[COLMAP.notes] || '') : '',
     // The posting URL, when the tracker carries the column.
     url: COLMAP.url != null ? (parts[COLMAP.url] || '') : '',
@@ -661,9 +742,24 @@ const appLines = appContent.split('\n');
 // both work whether the table uses the original 9-column layout or a customized
 // one (e.g. with a Location column after Role). Falls back to the legacy layout.
 COLMAP = detectColumns(appLines) || LEGACY_COLMAP;
+// Capture the header's real width so buildRow emits rows of exactly that shape
+// (see HEADER_WIDTH). Detected from the same line detectColumns matched, so the
+// two can never disagree.
+HEADER_WIDTH = (() => {
+  for (const line of appLines) {
+    if (line.startsWith('|') && isHeaderRow(line)) return line.split('|').length;
+  }
+  return null;
+})();
 if (COLMAP.location != null) console.log('🧭 Detected Location column.');
 if (COLMAP.via != null) console.log('🧭 Detected Via column.');
 if (COLMAP.url != null) console.log('🧭 Detected URL column (deterministic dedup active).');
+if (HEADER_WIDTH != null && HEADER_WIDTH - 2 > Object.keys(COLMAP).length) {
+  console.log(
+    `🧭 Header has ${HEADER_WIDTH - 2} columns; ${HEADER_WIDTH - 2 - Object.keys(COLMAP).length} ` +
+    'not mapped to a career-ops field — those cells are written as "—".',
+  );
+}
 const existingApps = [];
 let maxNum = 0;
 
@@ -782,7 +878,7 @@ for (const file of tsvFiles) {
   // 0. Exact normalized posting URL (deterministic, authoritative)
   // 1. Exact report number match
   // 2. Company + role fuzzy match
-  const reportNum = extractReportNum(addition.report);
+  const reportNum = extractReportNum(addition.report, addition.notes);
   let duplicate = null;
   // Tier-1 only. A report-number match (plus the company guard below) means the
   // addition is provably the SAME evaluation as the existing row, so its role
@@ -844,7 +940,7 @@ for (const file of tsvFiles) {
     duplicate = existingApps.find(app => {
       // Provable tier: only a CONFLICT disqualifies, never a missing key.
       if (urlDiffers(app)) return false;
-      const existingReportNum = extractReportNum(app.report);
+      const existingReportNum = extractReportNum(app.report, app.notes);
       return existingReportNum === reportNum && companiesMatch(app.company, addition.company);
     });
     if (duplicate) reportNumMatched = true;
@@ -921,7 +1017,7 @@ for (const file of tsvFiles) {
     // verbatim and first, so a second downgrade preserves the earlier marker
     // rather than overwriting it.
     const downgrade = newScore < oldScore;
-    const oldReportNum = extractReportNum(duplicate.report);
+    const oldReportNum = extractReportNum(duplicate.report, duplicate.notes);
     const supersededNote = downgrade && oldReportNum && oldReportNum !== reportNum
       ? `Superseded report [${oldReportNum}] (was ${oldScore}/5)`
       : '';
@@ -946,6 +1042,8 @@ for (const file of tsvFiles) {
       // with an empty URL cell and the posting loses the very key that matched
       // it, silently demoting every later merge back to the fuzzy tiers.
       url: addition.url || duplicate.url || '',
+      // Preserve the row's unmapped custom-column cells across the rebuild.
+      raw: duplicate.raw,
     });
     if (replaceTrackerLine(duplicate.raw, updatedLine)) {
       // Refresh the cached row from the line just written (#2392). `raw` was

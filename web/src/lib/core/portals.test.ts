@@ -260,11 +260,19 @@ location_filter:
     fs.mkdirSync(path.join(root, "config"), { recursive: true });
     fs.writeFileSync(
       path.join(root, "config", "profile.yml"),
+      // Real shape (config/profile.example.yml, and what api/profile/route.ts
+      // itself writes): `primary` is a LIST, `archetypes` is a list of
+      // {name, level, fit} objects — profile-keywords.mjs only reads that shape.
       `target_roles:
-  primary: Staff Android Engineer
+  primary:
+    - Staff Android Engineer
   archetypes:
-    - Mobile Platform Lead
-    - Principal Engineer
+    - name: Mobile Platform Lead
+      level: Senior
+      fit: primary
+    - name: Principal Engineer
+      level: Staff
+      fit: adjacent
 `,
       "utf8",
     );
@@ -285,7 +293,7 @@ location_filter:
     fs.mkdirSync(path.join(root, "config"), { recursive: true });
     fs.writeFileSync(
       path.join(root, "config", "profile.yml"),
-      `target_roles:\n  primary: Backend Engineer\n`,
+      `target_roles:\n  primary:\n    - Backend Engineer\n`,
       "utf8",
     );
     const { filters, seededFrom } = seedExploreFilters(root);

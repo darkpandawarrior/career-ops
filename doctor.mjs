@@ -13,9 +13,40 @@ import { discoverPlugins, pluginRoots, pluginStatus } from './plugins/_engine.mj
 import { resolveExtractorMode } from './browser-extract.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import dotenv from 'dotenv';
+import { validateFlags } from './lib/cli-flags.mjs';
+import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
+
+// CLI resolution inputs. This fork ships config dirs for more CLIs than
+// upstream (.agents, .antigravitycli, .cursor, .opencode), so knowing WHICH
+// one is active is what makes the MCP check meaningful rather than
+// Claude-only.
+const VALID_CLIS = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini'];
+
+// --help ran the full diagnostic and printed the report at exit 0 (#2856), so
+// a mistyped flag was indistinguishable from a clean run — and --targe
+// silently diagnosed THIS checkout instead of the one asked for. Handled via
+// lib/cli-flags.mjs's validateFlags() (#2775), which rejects unrecognized
+// flags before --help so `--help --bogus` still errors.
+const KNOWN_FLAGS = ['--target', '--json', '--strict', '--cli', '--help', '-h'];
+
+// Both take their value as the next argv token.
+const VALUE_FLAGS = ['--target', '--cli'];
+
+const USAGE = `Usage:
+  node doctor.mjs                    # run the setup diagnostic
+  node doctor.mjs --json             # machine-readable onboarding state
+  node doctor.mjs --strict           # also probe portals.yml ATS slugs (network)
+  node doctor.mjs --target <path>    # diagnose another career-ops checkout
+  node doctor.mjs --cli <name>       # check a specific CLI's integration
+  node doctor.mjs --help             # show this message
+
+CLIs: ${VALID_CLIS.join(', ')}`;
+
+validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
 const targetIdx = argv.indexOf('--target');
 // Falls back to CAREER_OPS_ROOT (same pattern as scan.mjs's _SCAN_DATA_ROOT) so
 // a spawned `doctor.mjs --json` scoped to a non-default profile (web's
@@ -26,11 +57,6 @@ const projectRoot =
     ? argv[targetIdx + 1]
     : process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : __dirname;
 const JSON_OUT = argv.includes('--json');
-// CLI resolution inputs. This fork ships config dirs for more CLIs than
-// upstream (.agents, .antigravitycli, .cursor, .opencode), so knowing WHICH
-// one is active is what makes the MCP check meaningful rather than
-// Claude-only.
-const VALID_CLIS = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'qwen', 'kimi', 'copilot', 'gemini'];
 const cliIdx = argv.indexOf('--cli');
 const cliFlag = cliIdx !== -1 ? argv[cliIdx + 1] : null;
 // --strict adds a live ATS-slug probe of portals.yml (network). Opt-in so the
@@ -511,13 +537,18 @@ async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
 
+  const { cli: activeCli } = resolveActiveCli();
+
   const checks = [
     checkNodeVersion(),
+    // Returns null unless the active CLI is Gemini: the filter(Boolean) below
+    // discards it, so no other user sees a check that doesn't apply to them.
+    geminiNodeFloor(activeCli, process.versions.node),
     checkBillingSource(),
     checkDependencies(),
     checkWebDependencies(),
     await checkPlaywright(),
-    checkPlaywrightMcp(projectRoot, resolveActiveCli().cli),
+    checkPlaywrightMcp(projectRoot, activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
     checkFonts(),
@@ -526,7 +557,7 @@ async function main() {
     checkAutoDir('output'),
     checkAutoDir('reports'),
     checkPlugins(projectRoot),
-  ];
+  ].filter(Boolean);
 
   // Network-bound ATS slug probe — only under --strict.
   if (STRICT) {

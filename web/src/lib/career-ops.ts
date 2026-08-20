@@ -3,6 +3,9 @@ import path from "node:path";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { parseReport } from "@/lib/format";
 import { loadHeaderAliases } from "@/lib/tracker-table.mjs";
+// One definition of the `{n}-RESERVED.md` convention, shared with
+// run-cli-support.mjs — see report-files.mjs for why it lives there.
+import { isReservedReportFile } from "@/lib/report-files.mjs";
 
 /**
  * Resolve the career-ops "home" — the directory holding the user's sibling

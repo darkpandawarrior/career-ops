@@ -651,6 +651,7 @@ kirklazar-android/hiresignal --state merged`.
 | [`docs/PLUGINS.md`](docs/PLUGINS.md) | Optional external-integration plugin system |
 | [`docs/liveness-bot-block-policy.md`](docs/liveness-bot-block-policy.md) | Bot-block-aware liveness signatures per job board |
 | [`docs/local-parser-cookbook.md`](docs/local-parser-cookbook.md) | Writing a new local/parser-based scanner provider |
+| [`docs/WINDOWS.md`](docs/WINDOWS.md) | Platform-specific setup and known sharp edges on Windows — Git Bash discovery, line endings, Task Scheduler |
 | [`docs/PUBLIC_DASHBOARD_*.md`](docs/) | Dashboard architecture, privacy, setup, scoring, and search-strategy notes |
 | [`desktop/README.md`](desktop/README.md) | Electron shell packaging notes |
 

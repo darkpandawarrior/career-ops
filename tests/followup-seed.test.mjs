@@ -211,16 +211,20 @@ function cleanup(sandbox) {
   else fail('4. tracker date column never used — got column date');
   cleanup(sb);
 
-  // Unit-level: resolveAppliedDate directly.
+  // Unit-level: resolveAppliedDate directly. Returns {appliedDate, appDateSource}
+  // so a caller can tell a measured date from a proxy or a guess.
   const mod = await import(pathToFileURL(SCRIPT).href);
   const rowWithNotes = { notes: 'Applied 2026-06-20. Some other text.' };
-  if (mod.resolveAppliedDate(rowWithNotes, null) === '2026-06-20') pass('4. resolveAppliedDate: notes beat today (no explicit date)');
-  else fail('4. resolveAppliedDate: notes beat today');
-  if (mod.resolveAppliedDate(rowWithNotes, '2026-07-01') === '2026-07-01') pass('4. resolveAppliedDate: explicit date wins over notes');
-  else fail('4. resolveAppliedDate: explicit date wins over notes');
+  const fromNotes = mod.resolveAppliedDate(rowWithNotes, null);
+  if (fromNotes.appliedDate === '2026-06-20' && fromNotes.appDateSource === 'notes') pass('4. resolveAppliedDate: notes beat today (no explicit date)');
+  else fail(`4. resolveAppliedDate: notes beat today — got ${JSON.stringify(fromNotes)}`);
+  const explicit = mod.resolveAppliedDate(rowWithNotes, '2026-07-01');
+  if (explicit.appliedDate === '2026-07-01' && explicit.appDateSource === 'explicit') pass('4. resolveAppliedDate: explicit date wins over notes');
+  else fail(`4. resolveAppliedDate: explicit date wins over notes — got ${JSON.stringify(explicit)}`);
   const rowNoNotes = { notes: 'no date here' };
-  if (mod.resolveAppliedDate(rowNoNotes, null) === todayStr()) pass('4. resolveAppliedDate: falls back to today');
-  else fail('4. resolveAppliedDate: falls back to today');
+  const fallback = mod.resolveAppliedDate(rowNoNotes, null);
+  if (fallback.appliedDate === todayStr() && fallback.appDateSource === 'today') pass('4. resolveAppliedDate: falls back to today');
+  else fail(`4. resolveAppliedDate: falls back to today — got ${JSON.stringify(fallback)}`);
 }
 
 // ── Test 5: missing file gets exact canonical header; append preserves bytes ──

@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { paramsToFilters, paramsToAi, hasExploreParams, type ExploreFilters } from "@/lib/explore";
+import { isScannerMissing } from "@/lib/explore-error.mjs";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -284,11 +285,14 @@ function EmptyState({ tone, title, body, onRerun, rerunLabel }: { tone: "good" |
 }
 
 function FailedCard({ msg, code, onRetry }: { msg: string; code?: string; onRetry: () => void }) {
-  // The scanner-missing 400 (data-only / pre-scan-ats-full checkout) must NOT
+  // The scanner-missing case (data-only / pre-scan-ats-full checkout) must NOT
   // offer a "Try again" that re-fails forever — give a real next step instead.
-  // Prefer the structured code from the API; fall back to the regex for paths
-  // (e.g. discoverAI's stream errors) that don't carry a code yet.
-  const scannerMissing = code === "scanner_missing" || /isn'?t available|data only|complete career-ops checkout|scanner/i.test(msg);
+  // Decided from the response body's SCANNER_MISSING code, never from the error
+  // text and never from the bare 400: a runtime scan error ("The scanner
+  // returned no readable output.") mentions the scanner too, and 400 is a
+  // shared channel that also carries malformed-request and MODE_MISSING
+  // failures. Neither may be misreported as a broken checkout.
+  const scannerMissing = isScannerMissing({ code });
   if (scannerMissing) {
     return (
       <div className="rounded-2xl border border-border bg-surface/30 px-6 py-10 text-center">

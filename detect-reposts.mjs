@@ -28,7 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 import { roleFuzzyMatch, roleTokens, BASELINE_TOKENS } from './role-matcher.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { flagValue } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
@@ -38,6 +38,9 @@ const SCAN_HISTORY_PATH = join(CAREER_OPS_DATA, 'data/scan-history.tsv');
 const DEFAULT_WINDOW_DAYS = 90;
 
 // --- CLI args ---
+
+const KNOWN_FLAGS = ['--window', '--summary', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--window'];
 
 const USAGE = `Usage:
   node detect-reposts.mjs                       # full JSON repost clusters to stdout
@@ -470,10 +473,16 @@ function runSelfTest() {
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
+  // Replaces a bare --help check that never looked at the other flags, so a
+  // mistyped --window was ignored and the scan silently used the 90-day
+  // default instead of the window that was asked for (#2919). validateFlags
+  // also runs the unrecognized-flag check BEFORE --help, so `--help --bogus`
+  // errors rather than exiting 0 unread.
+  //
+  // Inside the main-module guard, not at import time: company-history.mjs
+  // imports detectReposts/parseScanHistory from here, so a top-level check
+  // would judge the IMPORTER's argv.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
 
   if (selfTestMode) {
     runSelfTest();

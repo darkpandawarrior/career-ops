@@ -23,21 +23,13 @@
 
 const HOME_URL = 'https://www.startup.ch/';
 const LIST_URL = 'https://www.startup.ch/jobs';
+import { decodeEntities } from './_html-entities.mjs';
+
 const BROWSER_HEADERS = {
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'accept-language': 'en-US,en;q=0.9,de;q=0.8',
 };
-
-function decodeEntities(s) {
-  // Unescape `&amp;` LAST so it can't double-unescape entities produced by the
-  // other replacements (CodeQL: double escaping/unescaping).
-  return s
-    .replace(/&#39;/g, "'").replace(/&#x27;/g, "'")
-    .replace(/&quot;/g, '"').replace(/&auml;/g, 'ä').replace(/&ouml;/g, 'ö')
-    .replace(/&uuml;/g, 'ü').replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&').trim();
-}
 
 /** @type {Provider} */
 export default {
@@ -92,10 +84,10 @@ export default {
       const location = card.match(/location\.png[\s\S]{0,160}?<p[^>]*>([^<]+)<\/p>/i)?.[1] || '';
       seen.add(jid);
       out.push({
-        title: decodeEntities(title),
+        title: decodeEntities(title).trim(),
         url: `https://www.startup.ch/index.cfm?page=137888${pid ? `&profil_id=${pid}` : ''}&JobID=${jid}`,
-        company: decodeEntities(company),
-        location: decodeEntities(location),
+        company: decodeEntities(company).trim(),
+        location: decodeEntities(location).trim(),
       });
     }
     return out;

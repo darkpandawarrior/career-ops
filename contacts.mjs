@@ -45,6 +45,7 @@ import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'pat
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
@@ -53,14 +54,28 @@ const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRo
 const CONTACTS_PATH = join(CAREER_OPS_DATA, 'data/contacts.tsv');
 const DEFAULT_VCF = join(CAREER_OPS_DATA, 'output/contacts.vcf');
 
+// --- CLI args ---
+const KNOWN_FLAGS = ['--summary', '--self-test', '--caller-id', '--vcf', '--help', '-h'];
+
+const USAGE = `Usage:
+  node contacts.mjs                     # JSON: contacts + quality + total
+  node contacts.mjs --summary           # human-readable table
+  node contacts.mjs --vcf [path]        # write vCard, default output/contacts.vcf
+  node contacts.mjs --vcf --caller-id   # FN as "Jane Doe (Acme recruiter)"
+  node contacts.mjs --self-test         # run the in-memory test suite
+  node contacts.mjs --help              # print this usage block and exit`;
+
 const args = process.argv.slice(2);
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--vcf'] });
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const callerIdMode = args.includes('--caller-id');
-const vcfIdx = args.indexOf('--vcf');
-const vcfMode = vcfIdx !== -1;
-// Optional path argument: the token right after --vcf, unless it is another flag.
-const vcfPathArg = vcfMode && args[vcfIdx + 1] && !args[vcfIdx + 1].startsWith('--') ? args[vcfIdx + 1] : null;
+const vcfMode = hasFlag(args, '--vcf');
+const vcfPathArg = (() => {
+  if (!vcfMode) return null;
+  const val = flagValue(args, '--vcf');
+  return val === undefined || val.startsWith('--') ? null : val || null;
+})();
 
 const VALID_TYPES = new Set(['recruiter', 'hiring-manager', 'peer', 'interviewer', 'other']);
 

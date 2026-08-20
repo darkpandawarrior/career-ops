@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { parseClaudeEvent } from "@/lib/run-cli-support.mjs";
 
 /**
  * /api/run ORCHESTRATES the real career-ops engine: it spawns the chosen AI CLI
@@ -24,8 +25,10 @@ import path from "node:path";
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "co-run-route-"));
 
 class FakeChild extends EventEmitter {
-  stdout = new EventEmitter();
-  stderr = new EventEmitter();
+  // route.ts calls stdout/stderr.setEncoding("utf8") so multi-byte UTF-8 chunks
+  // can't split mid-sequence (#2185) — a plain EventEmitter has no such method.
+  stdout = Object.assign(new EventEmitter(), { setEncoding: vi.fn() });
+  stderr = Object.assign(new EventEmitter(), { setEncoding: vi.fn() });
   kill = vi.fn();
 }
 
@@ -33,7 +36,7 @@ const h = vi.hoisted(() => ({
   lastChild: null as InstanceType<typeof FakeChild> | null,
   lastSpawnArgs: null as { cmd: string; args: string[]; opts: Record<string, unknown> } | null,
   spawnMock: vi.fn(),
-  resolved: null as { spec: { name: string; args: (p: string) => string[] }; binPath: string } | null,
+  resolved: null as { spec: { name: string; args: (p: string) => string[]; parseEvent?: typeof parseClaudeEvent }; binPath: string } | null,
   memory: "" as string,
 }));
 
@@ -59,8 +62,15 @@ vi.mock("@/lib/profile-registry", () => ({
 
 import { POST } from "./route";
 
+// Claude's spec carries the REAL parseClaudeEvent — as spec.parseEvent does in
+// clis.ts's KNOWN registry — so the "claude stream-json → NDJSON events" tests
+// below actually exercise stream-json parsing, not raw passthrough. A CLI named
+// anything else stays parseEvent-less, matching every other KNOWN entry.
 function fakeResolved(name = "Claude Code") {
-  return { spec: { name, args: (p: string) => [p] }, binPath: "/usr/local/bin/claude" };
+  return {
+    spec: { name, args: (p: string) => [p], ...(name === "Claude Code" ? { parseEvent: parseClaudeEvent } : {}) },
+    binPath: "/usr/local/bin/claude",
+  };
 }
 
 function delta(text: string): string {
@@ -200,7 +210,7 @@ describe("POST /api/run — checkout / prerequisite gates", () => {
     fs.rmSync(ROOT, { recursive: true, force: true });
     fs.mkdirSync(ROOT, { recursive: true });
     const { res, events } = await run({ kind: "research", input: "my portfolio", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", Buffer.from(delta("looks strong")));
+      child.stdout.emit("data", delta("looks strong"));
       child.emit("close", 0);
     });
     expect(res.status).toBe(200);
@@ -211,7 +221,7 @@ describe("POST /api/run — checkout / prerequisite gates", () => {
 describe("POST /api/run — claude stream-json → NDJSON events", () => {
   it("maps content_block_delta text into {type:'text'} events", async () => {
     const { res, events } = await run({ kind: "research", input: "https://x.test/job", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", Buffer.from(delta("Hello") + delta(" world")));
+      child.stdout.emit("data", delta("Hello") + delta(" world"));
       child.emit("close", 0);
     });
     expect(res.status).toBe(200);
@@ -224,7 +234,7 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
     const toolStart =
       JSON.stringify({ type: "stream_event", event: { type: "content_block_start", content_block: { type: "tool_use", name: "WebFetch" } } }) + "\n";
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", Buffer.from(toolStart + delta("done")));
+      child.stdout.emit("data", toolStart + delta("done"));
       child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "tool", name: "WebFetch" });
@@ -234,7 +244,7 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
     const initLine = JSON.stringify({ type: "system", subtype: "init" }) + "\n";
     const resultLine = JSON.stringify({ type: "result" }) + "\n";
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", Buffer.from(initLine + delta("hi") + resultLine));
+      child.stdout.emit("data", initLine + delta("hi") + resultLine);
       child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "status", label: "Agent ready" });
@@ -249,7 +259,7 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
         total_cost_usd: 0.0042,
       }) + "\n";
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", Buffer.from(delta("hi") + resultLine));
+      child.stdout.emit("data", delta("hi") + resultLine);
       child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "done", tokens: 160, costUsd: 0.0042 });
@@ -259,8 +269,8 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
     const line = delta("buffered text");
     const cut = Math.floor(line.length / 2);
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", Buffer.from(line.slice(0, cut)));
-      child.stdout.emit("data", Buffer.from(line.slice(cut)));
+      child.stdout.emit("data", line.slice(0, cut));
+      child.stdout.emit("data", line.slice(cut));
       child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "text", text: "buffered text" });
@@ -270,8 +280,8 @@ describe("POST /api/run — claude stream-json → NDJSON events", () => {
 describe("POST /api/run — stderr / close honesty", () => {
   it("emits {type:'error'} for an auth-shaped stderr line", async () => {
     const { events } = await run({ kind: "research", input: "x", cliId: "claude" }, (child) => {
-      child.stderr.emit("data", Buffer.from("Error: not authenticated — run login\n"));
-      child.stdout.emit("data", Buffer.from(delta("partial")));
+      child.stderr.emit("data", "Error: not authenticated — run login\n");
+      child.stdout.emit("data", delta("partial"));
       child.emit("close");
     });
     const err = events.find((e) => e.type === "error");
@@ -310,7 +320,7 @@ describe("POST /api/run — evaluate persistence honesty", () => {
     // reports/ starts empty (setupFullCheckout makes the dir but no .md). The
     // worker emits text but never writes a report → countReports stays equal.
     const { events } = await run({ kind: "evaluate", input: "https://x.test/job", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", Buffer.from(delta("VERDICT: 4/5 — strong fit")));
+      child.stdout.emit("data", delta("VERDICT: 4/5 — strong fit"));
       child.emit("close", 0);
     });
     const err = events.find((e) => e.type === "error");
@@ -320,7 +330,7 @@ describe("POST /api/run — evaluate persistence honesty", () => {
 
   it("emits {type:'done'} when an evaluate run actually writes a new report file", async () => {
     const { events } = await run({ kind: "evaluate", input: "https://x.test/job", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", Buffer.from(delta("scoring...")));
+      child.stdout.emit("data", delta("scoring..."));
       // Simulate the worker persisting a canonical report before close.
       fs.writeFileSync(path.join(ROOT, "reports", "035-acme-2026-06-30.md"), "# report\n");
       child.emit("close", 0);
@@ -334,7 +344,7 @@ describe("POST /api/run — non-claude raw passthrough", () => {
   it("wraps raw stdout as {type:'text'} for a non-claude cli", async () => {
     h.resolved = fakeResolved("Gemini CLI");
     const { events } = await run({ kind: "research", input: "x", cliId: "gemini" }, (child) => {
-      child.stdout.emit("data", Buffer.from("raw output chunk"));
+      child.stdout.emit("data", "raw output chunk");
       child.emit("close", 0);
     });
     expect(events).toContainEqual({ type: "text", text: "raw output chunk" });
@@ -349,7 +359,7 @@ describe("POST /api/run — cancel() safety (#1155)", () => {
     await reader.cancel(); // simulates a client disconnect → cancel()
     // Late events after cancel() must not throw "Controller is already closed".
     expect(() => {
-      child.stdout.emit("data", Buffer.from(delta("late text")));
+      child.stdout.emit("data", delta("late text"));
       child.emit("close", 0);
     }).not.toThrow();
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
@@ -360,7 +370,7 @@ describe("POST /api/run — spawn wiring", () => {
   it("spawns claude with write-capable tools + the data root for an evaluate run", async () => {
     await run({ kind: "evaluate", input: "https://x.test/job", cliId: "claude" }, (child) => {
       fs.writeFileSync(path.join(ROOT, "reports", "036-x-2026-06-30.md"), "# r\n");
-      child.stdout.emit("data", Buffer.from(delta("x")));
+      child.stdout.emit("data", delta("x"));
       child.emit("close", 0);
     });
     const { cmd, args, opts } = h.lastSpawnArgs!;

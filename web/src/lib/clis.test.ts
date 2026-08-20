@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 
 describe("KNOWN registry", () => {
-  it("lists the seven agnostic CLIs with stable ids", () => {
+  it("lists the eight agnostic CLIs with stable ids", () => {
     expect(KNOWN.map((c) => c.id)).toEqual([
       "claude",
       "codex",
@@ -42,6 +42,7 @@ describe("KNOWN registry", () => {
       "copilot",
       "qwen",
       "antigravity",
+      "grok",
     ]);
   });
 

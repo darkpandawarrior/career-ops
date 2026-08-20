@@ -207,7 +207,16 @@ export const ADAPTATIONS = [
       const code = src
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .split('\n').filter(l => !/^\s*(\/\/|\*)/.test(l)).join('\n');
-      const importRe = /import\s*\{([^}]*)\}\s*from\s*['"](\.\.?\/[^'"]+\.mjs)['"]/g;
+      // Anchored to the start of a (whitespace-trimmed) line: a real ES import is
+      // always its own statement there. Without the anchor, an import-shaped
+      // STRING embedded mid-line — e.g. tests/providers/rss-entity-decoding
+      // .test.mjs's `const IMPORT_LINE = "import {...} from './x.mjs';"`, used to
+      // check OTHER providers' source for the private-decoder regression this
+      // same rule guards — reads as a real edge and resolves it relative to the
+      // wrong (importing) file's directory. Comment-stripping above already
+      // established this rule only wants real statements; this closes the same
+      // gap for a string literal instead of a comment.
+      const importRe = /^\s*import\s*\{([^}]*)\}\s*from\s*['"](\.\.?\/[^'"]+\.mjs)['"]/gm;
       for (const m of code.matchAll(importRe)) {
         const target = normalizeRel(dir, m[2]);
         const targetSrc = ctx?.read(target);

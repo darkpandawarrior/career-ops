@@ -4,6 +4,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { requestRoot } from "@/lib/profile-registry";
 import { PROFILE_CADENCE_KEYS, type ProfileCadenceKey } from "@/lib/followups";
 
 export const runtime = "nodejs";
@@ -67,7 +68,7 @@ async function readCoreDefaults(): Promise<Partial<Record<ProfileCadenceKey, num
 }
 
 export async function GET() {
-  const file = path.join(careerOpsRoot(), "config", "profile.yml");
+  const file = path.join(await requestRoot(), "config", "profile.yml");
   const overrides: Partial<Record<ProfileCadenceKey, number>> = {};
   if (fs.existsSync(file)) {
     let profile: Record<string, unknown> = {};
@@ -109,7 +110,7 @@ export async function POST(req: Request) {
   }
   if (Object.keys(cadence).length === 0) return Response.json({ error: "nothing to write" }, { status: 400 });
 
-  const root = careerOpsRoot();
+  const root = await requestRoot();
   const file = path.join(root, "config", "profile.yml");
   let base: Record<string, unknown> = {};
   if (!fs.existsSync(file)) {

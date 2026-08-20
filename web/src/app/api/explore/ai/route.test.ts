@@ -36,26 +36,55 @@ const h = vi.hoisted(() => ({
 
 class FakeChildCtor extends FakeChild {}
 
+// route.ts gates cliId "codex" on supportsSafeCodexExec(binPath), which probes
+// `codex --help` and `codex exec --help` (via the SAME mocked spawn) before the
+// real exec ever runs. Auto-satisfy those two probe spawns with output carrying
+// every flag the gate checks for, so every existing codex-flavored test still
+// reaches the real exec spawn without having to drive the probes by hand.
+const CODEX_GLOBAL_HELP = "--ask-for-approval <policy> --search";
+const CODEX_EXEC_HELP =
+  "--sandbox read-only --strict-config --ignore-user-config --ephemeral --skip-git-repo-check --output-last-message <file>";
+
 h.spawnMock.mockImplementation((bin: string, args: string[], opts: Record<string, unknown>) => {
-  h.lastChild = new FakeChildCtor();
+  const child = new FakeChildCtor();
+  h.lastChild = child;
   h.lastSpawn = { bin, args, opts };
-  return h.lastChild as unknown as ReturnType<typeof import("node:child_process").spawn>;
+  if (args[0] === "--help") {
+    queueMicrotask(() => {
+      child.stdout.emit("data", Buffer.from(CODEX_GLOBAL_HELP));
+      child.emit("close");
+    });
+  } else if (args[0] === "exec" && args[1] === "--help") {
+    queueMicrotask(() => {
+      child.stdout.emit("data", Buffer.from(CODEX_EXEC_HELP));
+      child.emit("close");
+    });
+  }
+  return child as unknown as ReturnType<typeof import("node:child_process").spawn>;
 });
 
 vi.mock("node:child_process", () => ({ spawn: h.spawnMock }));
 
-vi.mock("node:fs", () => ({
-  default: {
-    readFileSync: (..._a: unknown[]) => {
-      if (h.mode === null) throw new Error("ENOENT modes/discover.md");
-      return h.mode;
-    },
-  },
-  readFileSync: (..._a: unknown[]) => {
+vi.mock("node:fs", async (importOriginal) => {
+  // Real fs for everything else — codex runs need a REAL isolated tmp workspace
+  // (mkdtempSync/rmSync under os.tmpdir()), only discover.md and the capability
+  // probe's binary stat are faked.
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const readFileSync = (..._a: unknown[]) => {
     if (h.mode === null) throw new Error("ENOENT modes/discover.md");
     return h.mode;
-  },
-}));
+  };
+  // supportsSafeCodexExec stats the binary to key its capability cache; any
+  // stable-looking stat is fine, the mtime/size values themselves are unused
+  // by the assertions here.
+  const statSync = (..._a: unknown[]) => ({ mtimeMs: 1, size: 1 });
+  return {
+    ...actual,
+    default: { ...actual, readFileSync, statSync },
+    readFileSync,
+    statSync,
+  };
+});
 
 vi.mock("@/lib/clis", () => ({
   resolveCli: vi.fn(() => h.resolved),
@@ -106,8 +135,11 @@ beforeEach(() => {
   h.dataRoot = "/fake/data/root";
   h.dedup = { urls: new Set<string>(), lines: [] };
   h.memory = "";
-  // Default resolved CLI: a generic (non-claude) runner whose stdout is passed through.
-  h.resolved = { spec: { name: "Codex", args: (p: string) => ["exec", p] }, binPath: "/usr/local/bin/codex" };
+  // Default resolved CLI: a generic (non-claude, non-codex) runner whose stdout
+  // is passed through verbatim. cliId "codex" now triggers its OWN dedicated
+  // safety-gated + isolated-workspace flow (#2361, see the describe block
+  // below), so it is no longer a valid stand-in for "any non-claude CLI".
+  h.resolved = { spec: { name: "OpenCode", args: (p: string) => ["run", p] }, binPath: "/usr/local/bin/opencode" };
 });
 
 afterEach(() => {
@@ -158,7 +190,7 @@ describe("POST /api/explore/ai — input validation", () => {
 
 describe("POST /api/explore/ai — streaming (generic CLI)", () => {
   it("passes stdout through verbatim for a non-claude CLI", async () => {
-    const text = await collect(makeReq({ query: "android jobs", cliId: "codex" }), (child) => {
+    const text = await collect(makeReq({ query: "android jobs", cliId: "opencode" }), (child) => {
       child.stdout.emit("data", Buffer.from("hunting boards... "));
       child.stdout.emit("data", Buffer.from("found one"));
       child.emit("close");
@@ -168,10 +200,10 @@ describe("POST /api/explore/ai — streaming (generic CLI)", () => {
 
   it("spawns the resolved binary with the spec's args and the prompt, scoped to the data root via env", async () => {
     h.dataRoot = "/profiles/alex";
-    await collect(makeReq({ query: "staff android", cliId: "codex" }), (child) => child.emit("close"));
-    expect(h.lastSpawn!.bin).toBe("/usr/local/bin/codex");
-    // spec.args(prompt) => ["exec", <prompt>]; the prompt embeds the user intent.
-    expect(h.lastSpawn!.args[0]).toBe("exec");
+    await collect(makeReq({ query: "staff android", cliId: "opencode" }), (child) => child.emit("close"));
+    expect(h.lastSpawn!.bin).toBe("/usr/local/bin/opencode");
+    // spec.args(prompt) => ["run", <prompt>]; the prompt embeds the user intent.
+    expect(h.lastSpawn!.args[0]).toBe("run");
     expect(h.lastSpawn!.args[1]).toContain("staff android");
     const env = h.lastSpawn!.opts.env as Record<string, string>;
     expect(env.CAREER_OPS_ROOT).toBe("/profiles/alex");
@@ -179,20 +211,20 @@ describe("POST /api/explore/ai — streaming (generic CLI)", () => {
   });
 
   it("emits the no-output placeholder when the child closes having produced nothing", async () => {
-    const text = await collect(makeReq({ query: "x", cliId: "codex" }), (child) => child.emit("close"));
+    const text = await collect(makeReq({ query: "x", cliId: "opencode" }), (child) => child.emit("close"));
     expect(text).toBe("_(no output — is the CLI authenticated?)_");
   });
 
   it("surfaces stderr lines that look like errors, prefixed with the CLI name", async () => {
-    const text = await collect(makeReq({ query: "x", cliId: "codex" }), (child) => {
+    const text = await collect(makeReq({ query: "x", cliId: "opencode" }), (child) => {
       child.stderr.emit("data", Buffer.from("fatal: not authenticated\n"));
       child.emit("close");
     });
-    expect(text).toContain("[Codex] fatal: not authenticated");
+    expect(text).toContain("[OpenCode] fatal: not authenticated");
   });
 
   it("ignores benign stderr noise (no error keyword)", async () => {
-    const text = await collect(makeReq({ query: "x", cliId: "codex" }), (child) => {
+    const text = await collect(makeReq({ query: "x", cliId: "opencode" }), (child) => {
       child.stderr.emit("data", Buffer.from("loading model weights\n"));
       child.stdout.emit("data", Buffer.from("ok"));
       child.emit("close");
@@ -202,16 +234,55 @@ describe("POST /api/explore/ai — streaming (generic CLI)", () => {
   });
 
   it("emits a launch-error notice when the child errors before output", async () => {
-    const text = await collect(makeReq({ query: "x", cliId: "codex" }), (child) => {
+    const text = await collect(makeReq({ query: "x", cliId: "opencode" }), (child) => {
       child.emit("error", new Error("spawn ENOENT"));
     });
-    expect(text).toContain("error launching Codex: spawn ENOENT");
+    expect(text).toContain("error launching OpenCode: spawn ENOENT");
+  });
+});
+
+describe("POST /api/explore/ai — codex-specific safety (#2361)", () => {
+  beforeEach(() => {
+    h.resolved = { spec: { name: "Codex", args: (p: string) => ["exec", p] }, binPath: "/usr/local/bin/codex" };
+  });
+
+  it("400s CODEX_UNSUPPORTED, without ever running the real exec, when the installed codex is missing a required read-only flag", async () => {
+    // Override the module-default auto-satisfying probe stub for this test only:
+    // the exec-help probe answers WITHOUT --sandbox read-only, which must fail
+    // closed rather than fall back to a weaker invocation.
+    const defaultImpl = h.spawnMock.getMockImplementation()!;
+    h.spawnMock.mockImplementation((bin: string, args: string[], opts: Record<string, unknown>) => {
+      const child = new FakeChildCtor();
+      h.lastChild = child;
+      h.lastSpawn = { bin, args, opts };
+      if (args[0] === "--help") {
+        queueMicrotask(() => {
+          child.stdout.emit("data", Buffer.from(CODEX_GLOBAL_HELP));
+          child.emit("close");
+        });
+      } else if (args[0] === "exec" && args[1] === "--help") {
+        queueMicrotask(() => {
+          child.stdout.emit("data", Buffer.from("--strict-config --ignore-user-config")); // no --sandbox read-only
+          child.emit("close");
+        });
+      }
+      return child as unknown as ReturnType<typeof import("node:child_process").spawn>;
+    });
+
+    const res = await POST(makeReq({ query: "x", cliId: "codex" }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe("CODEX_UNSUPPORTED");
+    // Only the two --help probes ran — the real (unsafe) exec never spawned.
+    expect(h.spawnMock).toHaveBeenCalledTimes(2);
+
+    h.spawnMock.mockImplementation(defaultImpl);
   });
 });
 
 describe("POST /api/explore/ai — cancel() safety (#1155)", () => {
   it("does not throw when the child emits data/close after the client disconnects", async () => {
-    const res = await POST(makeReq({ query: "x", cliId: "codex" }));
+    const res = await POST(makeReq({ query: "x", cliId: "opencode" }));
     const child = h.lastChild!; // start() already ran synchronously during POST
     const reader = res.body!.getReader();
     await reader.cancel(); // simulates a client disconnect → cancel()
@@ -278,7 +349,7 @@ describe("POST /api/explore/ai — prompt assembly", () => {
       urls: new Set(["https://x.test/a"]),
       lines: ["Companies already in the user's pipeline: Acme, Beta."],
     };
-    await collect(makeReq({ query: "remote android", cliId: "codex" }), (child) => child.emit("close"));
+    await collect(makeReq({ query: "remote android", cliId: "opencode" }), (child) => child.emit("close"));
     const prompt = h.lastSpawn!.args[1];
     expect(prompt).toContain("Prefers fully-remote Android lead roles.");
     expect(prompt).toContain("Acme, Beta");

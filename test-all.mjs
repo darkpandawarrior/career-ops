@@ -187,6 +187,8 @@ const scripts = [
   // as the bare verify-portals.mjs run directly above: confirms the module
   // loads and its default-path guard exits cleanly without touching network.
   { name: 'fix-slugs.mjs', expectExit: 0 },
+  // career-ops 1.27.0 sync: new standalone tool with an inline self-test.
+  { name: 'negotiation-roi.mjs --self-test', expectExit: 0 },
   // The fork's layer over upstream, as a gate. Exits 1 naming any adaptation a
   // sync overwrote — the failure mode that otherwise ships silently with a
   // green suite (upstream #75 restored a wrong-profile read across 25 scripts

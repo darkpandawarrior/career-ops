@@ -17,6 +17,7 @@ describe("CANONICAL_STATES", () => {
       "Responded",
       "Interview",
       "Offer",
+      "Hired",
       "Rejected",
       "Discarded",
       "SKIP",

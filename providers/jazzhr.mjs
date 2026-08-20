@@ -16,6 +16,8 @@
 // There is no pagination on this page — JazzHR renders the full open-job
 // list in one response.
 
+import { decodeEntities } from './_html-entities.mjs';
+
 const ALLOWED_JAZZHR_HOST_RE = /^[a-z0-9][a-z0-9-]*\.applytojob\.com$/;
 
 function resolveListUrl(entry) {
@@ -30,18 +32,6 @@ function resolveListUrl(entry) {
   if (parsed.protocol !== 'https:') return null;
   if (!ALLOWED_JAZZHR_HOST_RE.test(parsed.hostname)) return null;
   return `https://${parsed.hostname}/apply/jobs/`;
-}
-
-const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
-/** @param {string} s */
-function decodeEntities(s) {
-  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z0-9]+);/g, (m, body) => {
-    if (body[0] === '#') {
-      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
-    }
-    return NAMED[body.toLowerCase()] ?? m;
-  });
 }
 
 /** @param {string} s */

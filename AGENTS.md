@@ -118,11 +118,13 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `modes/interview-redflag.md` | `interview-redflag` mode — scores interviewer-side red-flag signals from session transcripts (None/Caution/Warning) |
 | `reply-watch.mjs` | Classifies employer replies against the tracker and prints a review digest, with prompted status-update approval |
 | `salary-gap.mjs` | Desired vs. advertised vs. actual compensation analyzer — folds report `advertised_comp`, `data/salary-observations.tsv`, and `config/profile.yml` comp target (`--summary` for the human table) |
+| `negotiation-roi.mjs` | Salary-negotiation talking-point generator — anchors an ask in a quantified `interview-prep/story-bank.md` achievement, kept only if the same number also appears verbatim in `cv.md` (v1 safety gate), converted to an estimated annualized dollar value from an explicit wage/frequency input (never guessed); read-only, draft-only (JSON or `--summary`) |
 | `stats.mjs` | Lifetime pipeline stats aggregator — funnel, scan totals, portal coverage, follow-up compliance (`--summary` for the human table) |
 | `fingerprint-core.mjs` | Zero-dependency JD-content fingerprinting (SimHash) used by `scan.mjs`'s cross-listing check to catch an agency re-post of a direct listing |
 | `browser-extract.mjs` | Headless Playwright JD/listing reader — compact JSON instead of a full a11y-tree snapshot; strictly read-only |
 | `upskill.mjs` | Aggregate skill-gap analysis from tracked reports — which missing skills recur across evaluated roles (JSON; `--self-test`) |
 | `funnel-velocity.mjs` | Own funnel + stage velocity vs. market benchmarks (`templates/benchmarks.yml` / `config/benchmarks.yml`; `--summary`, `--self-test`) |
+| `company-history.mjs` | Read-only per-company evidence card joining the tracker, follow-ups, scan history and `data/status-log.tsv` (JSON or `--summary`) |
 | `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
 | `img-to-pdf.mjs` | Convert a screenshot/image into a single-page PDF for ATS uploads (Playwright; `--self-test`) |
 | `assessment-log.mjs` | Skills-assessment event log with staleness signal (JSON; `--self-test`) |

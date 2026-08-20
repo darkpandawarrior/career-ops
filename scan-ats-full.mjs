@@ -62,6 +62,7 @@ import {
 } from './scan.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -211,8 +212,40 @@ const SOURCES = {
 
 // ── CLI args ────────────────────────────────────────────────────────
 
+const KNOWN_FLAGS = [
+  '--since', '--limit', '--ats', '--seeds', '--dry-run', '--liveness',
+  '--verbose', '--md-out', '--json', '--include-undated', '--include-blacklisted',
+  '--shuffle', '--resume', '--help', '-h',
+];
+
+// Flags that consume the next argv token as a value (space-separated form —
+// the `--flag=value` form is self-contained and never needs this).
+const VALUE_FLAGS = ['--since', '--limit', '--ats', '--seeds', '--md-out'];
+
+const USAGE = `Usage:
+  node scan-ats-full.mjs                      # scan all ATS directories, last 3 days
+  node scan-ats-full.mjs --since 7            # postings from the last 7 days
+  node scan-ats-full.mjs --ats greenhouse,workday  # subset of sources
+  node scan-ats-full.mjs --limit 200          # max companies per ATS (default: all)
+  node scan-ats-full.mjs --dry-run            # preview without writing files
+  node scan-ats-full.mjs --liveness           # Playwright-verify matches before writing
+  node scan-ats-full.mjs --include-blacklisted # audit: let data/blacklist.md matches through, annotated
+  node scan-ats-full.mjs --verbose            # log per-board fetch failures
+  node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
+  node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
+  node scan-ats-full.mjs --help               # print this usage block and exit`;
+
 function parseArgs(argv) {
   const args = argv.slice(2);
+
+  // Shared with reply-watch.mjs/dedup-tracker.mjs/scan.mjs via
+  // lib/cli-flags.mjs (#2775). This also fixes a latent ordering bug this
+  // script had before the pattern was consolidated: the unrecognized-flag
+  // check now runs BEFORE --help, so `--help --bogus` still errors instead
+  // of exiting 0 having never looked at `--bogus` (the same ordering
+  // CodeRabbit flagged on #2745/#2746).
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+
   const valueOf = (flag) => {
     const idx = args.indexOf(flag);
     if (idx !== -1 && args[idx + 1] && !args[idx + 1].startsWith('--')) return args[idx + 1];

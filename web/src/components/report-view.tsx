@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
+import { cleanHeading, splitSections } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
@@ -20,16 +21,14 @@ import { EmptyState } from "@/components/ui/empty-state";
 // extracted" tail. A reader deciding "should I apply?" needs Verdict + Role
 // Summary + Match; the rest is depth-on-demand. Native <details> only — no
 // client JS, still a server component.
-type Section = { heading: string; letter: string | null; content: string };
+//
+// Splitting and heading cleanup live in lib/report-sections.mjs so the
+// author-letter range has one definition shared with the rest of the app —
+// duplicating it here is what let a bare-letter H-block ("## H) Draft
+// Application Answers") render with its letter still attached while every
+// other section rendered clean (#2324).
 
 const LEAD_LETTERS = new Set(["A", "B"]);
-
-function cleanHeading(h: string): string {
-  return h
-    .replace(/^\s*(?:Block\s+)?[A-H][).:]\s*[-—]?\s*/i, "")
-    .replace(/\s*\((?:lead|verdict)\)\s*$/i, "")
-    .trim() || h.trim();
-}
 
 // Machine artifacts (YAML dump, submit log — for devs) vs human content
 // (collapsed only because there's a lot of it).
@@ -51,27 +50,6 @@ function preview(md: string): string {
     .replace(/\s+/g, " ")
     .trim();
   return text.length > 80 ? text.slice(0, 80).trimEnd() + "…" : text;
-}
-
-function splitSections(body: string): { intro: string; sections: Section[] } {
-  const intro: string[] = [];
-  const sections: Section[] = [];
-  let cur: { heading: string; letter: string | null; lines: string[] } | null = null;
-  for (const line of body.split("\n")) {
-    const h = line.match(/^##\s+(.*)$/);
-    if (h) {
-      if (cur) sections.push({ heading: cur.heading, letter: cur.letter, content: cur.lines.join("\n").trim() });
-      const heading = h[1].trim();
-      const letter = heading.match(/^(?:Block\s+)?([A-H])[).:\s]/i)?.[1]?.toUpperCase() ?? null;
-      cur = { heading, letter, lines: [] };
-    } else if (cur) {
-      cur.lines.push(line);
-    } else {
-      intro.push(line);
-    }
-  }
-  if (cur) sections.push({ heading: cur.heading, letter: cur.letter, content: cur.lines.join("\n").trim() });
-  return { intro: intro.join("\n").trim(), sections };
 }
 
 export function ReportView({

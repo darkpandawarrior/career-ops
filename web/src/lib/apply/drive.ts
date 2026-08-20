@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import type { Page, Frame } from "playwright-core";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
@@ -57,7 +57,7 @@ async function snapshot(frame: Frame): Promise<{ text: string; n: number }> {
 /** One planner turn. Args are built by the caller (CLI-agnostic). */
 function plannerTurn(binPath: string, args: string[]): Promise<{ out: string; sessionId: string | null }> {
   return new Promise((resolve) => {
-    const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
+    const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: process.env, shell: process.platform === "win32" });
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});

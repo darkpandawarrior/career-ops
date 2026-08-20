@@ -29,7 +29,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/portal-health.tsv` | Consecutive reachability status per scanned portal (`timestamp\tcompany\tstatus`; appended by `scan.mjs`, read by `stats.mjs` to flag portals persistently down) |
 | `data/dead-boards.tsv` | Dead-board memory for the reverse-ATS sweep (`ats\tslug\tmisses\tlast_checked`; written and read by `scan-ats-full.mjs`). Records only boards that returned 404, so repeat sweeps skip them instead of re-probing; re-probed every 30 days. No personal data — public ATS slugs only. Regenerable: deleting it costs a few slower sweeps, nothing more. |
 | `data/follow-ups.md` | Your follow-up history |
-| `data/status-log.tsv` | Your status-transition ledger (`report#\tdate\tfrom\tto\tset-status\t`; appended by `set-status.mjs`, read by `funnel-velocity.mjs`) |
+| `data/status-log.tsv` | Your status-transition ledger (`report#\tdate\tfrom\tto\tset-status\t`; appended by `set-status.mjs`, read by `funnel-velocity.mjs` and `company-history.mjs`) |
 | `data/apply-queue.md` | Your ranked apply queue (generated from your pipeline + profile) |
 | `data/salary-observations.tsv` | Your append-only compensation observation log (desired/advertised/actual pay per application; read by `salary-gap.mjs`) |
 | `data/blacklist.md` | Your do-not-apply list (companies to skip; read by `scan.mjs`, opt-in via `--include-blacklisted`) |

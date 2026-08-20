@@ -316,6 +316,7 @@ console.log('\n--- 9. CLI behavior ---');
 
 const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'contacts.mjs');
 const resolverPath = join(dirname(fileURLToPath(import.meta.url)), 'path-resolver.mjs');
+const libCliFlagsPath = join(dirname(fileURLToPath(import.meta.url)), 'lib/cli-flags.mjs');
 
 try {
   execFileSync('node', [scriptPath, '--self-test'], { encoding: 'utf-8', timeout: 10000 });
@@ -324,6 +325,28 @@ try {
   ok('--self-test exits 0', false);
   console.log(`    exit code: ${e.status}, stderr: ${e.stderr?.slice(0, 200)}`);
 }
+
+// --help / -h and unknown-flag rejection
+const spawnContacts = (...argv) => spawnSync('node', [scriptPath, ...argv], { encoding: 'utf-8', timeout: 10000 });
+
+const helpR = spawnContacts('--help');
+const hR = spawnContacts('-h');
+ok('--help exits 0', helpR.status === 0);
+ok('-h exits 0', hR.status === 0);
+ok('--help prints Usage:', helpR.stdout.includes('Usage:'));
+ok('-h output matches --help', hR.stdout === helpR.stdout);
+ok('--help writes nothing to stderr', helpR.stderr === '');
+
+const typoR = spawnContacts('--sumary');
+ok('unknown flag exits 1', typoR.status === 1);
+ok('unknown flag names the bad flag', typoR.stderr.includes('--sumary'));
+ok('unknown flag prints Valid flags:', typoR.stderr.includes('Valid flags:'));
+ok('unknown flag writes nothing to stdout', typoR.stdout === '');
+
+const helpBogusR = spawnContacts('--help', '--bogus');
+ok('--help --bogus exits 1 (unknown flag checked before --help)', helpBogusR.status === 1);
+ok('--help --bogus names the bad flag in stderr', helpBogusR.stderr.includes('--bogus'));
+ok('--help --bogus writes nothing to stdout', helpBogusR.stdout === '');
 
 // contacts.mjs resolves its paths through path-resolver.mjs, so the copy needs
 // that one sibling next to it. With both present, a temp dir is still a fully
@@ -339,6 +362,8 @@ const tmpScript = join(tmpRoot, 'contacts.mjs');
 try {
   copyFileSync(scriptPath, tmpScript);
   copyFileSync(resolverPath, join(tmpRoot, 'path-resolver.mjs'));
+  mkdirSync(join(tmpRoot, 'lib'), { recursive: true });
+  copyFileSync(libCliFlagsPath, join(tmpRoot, 'lib/cli-flags.mjs'));
   mkdirSync(join(tmpRoot, 'data'), { recursive: true });
   writeFileSync(join(tmpRoot, 'data/contacts.tsv'), [
     '# name\tcompany\ttype\ttitle\tphone\temail\tlinkedin\ttracker\tnotes',
@@ -377,6 +402,13 @@ try {
 
   const customOut = execFileSync('node', [tmpScript, '--vcf', 'output/custom.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
   ok('--vcf accepts a custom in-project path', existsSync(join(tmpRoot, 'output/custom.vcf')) && customOut.includes('custom.vcf'));
+
+  // Regression: --vcf=path (attached form) must be honored — the path was
+  // previously ignored because indexOf('--vcf') returned -1 for that token.
+  const eqFormOut = execFileSync('node', [tmpScript, '--vcf=output/eq-form.vcf'], { encoding: 'utf-8', timeout: 10000, cwd: tmpRoot });
+  ok('--vcf=path (attached =) writes to the specified path', existsSync(join(tmpRoot, 'output/eq-form.vcf')));
+  ok('--vcf=path confirmation message names the eq-form path', eqFormOut.includes('eq-form.vcf'));
+  ok('--vcf=path file contains valid vCard content', readFileSync(join(tmpRoot, 'output/eq-form.vcf'), 'utf-8').includes('BEGIN:VCARD'));
 
   // Path-traversal guard: the escaped target must never be written. Anchor it in
   // a UNIQUE sibling temp dir (outside tmpRoot, i.e. outside the project) so the
@@ -446,6 +478,8 @@ const emptyRoot = realpathSync(mkdtempSync(join(tmpdir(), 'contacts-empty-')));
 try {
   copyFileSync(scriptPath, join(emptyRoot, 'contacts.mjs'));
   copyFileSync(resolverPath, join(emptyRoot, 'path-resolver.mjs'));
+  mkdirSync(join(emptyRoot, 'lib'), { recursive: true });
+  copyFileSync(libCliFlagsPath, join(emptyRoot, 'lib/cli-flags.mjs'));
   const emptyJson = JSON.parse(execFileSync('node', [join(emptyRoot, 'contacts.mjs')], { encoding: 'utf-8', timeout: 10000 }));
   eq('missing store: JSON total = 0', emptyJson.total, 0);
   eq('missing store: contacts = []', emptyJson.contacts, []);

@@ -159,10 +159,14 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(f),
       });
-      if (r.status === 400) {
+      // Every non-OK response is decided from the parsed body, not the status.
+      // A failed response never carries a scan stream, so reading one would
+      // parse a JSON error object as scan events and report "no readable
+      // output" instead of the server's actual message.
+      if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "The scanner isn't available.";
         sawErrorCode = d.code || "";
+        sawError = d.error || `Discovery failed (${r.status}).`;
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
@@ -379,6 +383,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setAiTrace([]);
     setAiCost({ searches: 0, candidates: 0, fetches: 0 });
     setError("");
+    setErrorCode("");
     setStatus("Casting across the open web…");
     if (typeof window !== "undefined") window.history.replaceState(null, "", `/explore?${aiToParams(intent)}`);
 
@@ -393,6 +398,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
 
     const acc: DiscoveredOffer[] = [];
     let sawError = "";
+    let sawErrorCode = "";
     const handle = (chunks: AiTraceChunk[]) => {
       for (const ch of chunks) {
         if (ch.kind === "offer") {
@@ -424,9 +430,15 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         setPhase("blocked");
         return;
       }
-      if (r.status === 400) {
+      // Same rule as the scan path, and this is the call site the status-based
+      // check actually broke: /api/explore/ai returns three different 400s
+      // (malformed JSON, missing parameters, MODE_MISSING), and all three were
+      // reported as "this checkout has no scanner". MODE_MISSING carries its own
+      // copy about AI search, which the scanner panel overwrote.
+      if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        sawError = d.error || "AI search isn't available.";
+        sawErrorCode = d.code || "";
+        sawError = d.error || `AI search failed (${r.status}).`;
       } else if (!r.body) {
         sawError = "No response stream.";
       } else {
@@ -451,6 +463,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
       window.setTimeout(() => setPhase("results"), 850);
     } else if (sawError) {
       setError(sawError);
+      setErrorCode(sawErrorCode);
       setPhase("failed");
     } else {
       setPhase("empty-loose");

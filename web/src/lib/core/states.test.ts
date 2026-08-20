@@ -247,12 +247,22 @@ describe("canonicalizeStatus", () => {
     expect(canonicalizeStatus("not-a-real-state")).toBeNull();
   });
 
-  it("resolves the documented FALLBACK aliases when running off the fallback list", async () => {
+  it("the fallback list has labels only, no aliases (#2282 drift risk) — a real alias 404s until states.yml is readable again", async () => {
     const dir = fs.mkdtempSync(path.join(ROOT, "fbalias-"));
     currentRoot = dir; // no file -> FALLBACK
     const { canonicalizeStatus } = await freshStates();
-    expect(canonicalizeStatus("no aplicar")).toBe("SKIP");
-    expect(canonicalizeStatus("oferta")).toBe("Offer");
-    expect(canonicalizeStatus("entrevista")).toBe("Interview");
+    // Labels (and ids, which are just the lowercased label) still resolve.
+    expect(canonicalizeStatus("SKIP")).toBe("SKIP");
+    expect(canonicalizeStatus("offer")).toBe("Offer");
+    expect(canonicalizeStatus("Interview")).toBe("Interview");
+    expect(canonicalizeStatus("hired")).toBe("Hired");
+    // A real states.yml alias (Spanish "oferta"/"entrevista"/"no aplicar") is
+    // NOT in FALLBACK — that second hardcoded alias list is exactly what drifted
+    // 31 aliases behind and shipped without "hired" (#2282). Degrading to
+    // "labels only" for a call this only reaches when states.yml is unreadable
+    // is a deliberate trade, not a bug.
+    expect(canonicalizeStatus("no aplicar")).toBeNull();
+    expect(canonicalizeStatus("oferta")).toBeNull();
+    expect(canonicalizeStatus("entrevista")).toBeNull();
   });
 });

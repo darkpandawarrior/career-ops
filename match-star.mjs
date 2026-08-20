@@ -15,6 +15,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { fileURLToPath } from 'url';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -94,7 +95,16 @@ function parseStories(content) {
  * @returns {string[]}
  */
 function tokenize(text) {
-  return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  // Letters, marks and digits of ANY script. The previous `[^a-z0-9\s]` class
+  // deleted every non-Latin character, so a story bank written in Russian,
+  // Hindi, Greek or Ukrainian tokenized to [] and scored 0 against a question
+  // in the same language — the matcher was inert, not degraded, for anyone whose
+  // `language.output` is not English (#2847).
+  //
+  // \p{M} is included deliberately: without it Devanagari matras become spaces
+  // and shatter a word into fragments that match nothing (the mistake caught in
+  // #2781's review of the sibling role tokenizer).
+  return text.toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
 }
 
 const STOPWORDS = new Set([
@@ -182,7 +192,16 @@ function formatAts(story, question) {
   ].filter(s => s !== null).join('\n');
 }
 
+// ── Exports (for negotiation-roi.mjs and other consumers) ────────────
+// ponytail: added while porting negotiation-roi.mjs (career-ops 1.27.0),
+// which needs parseStories() without triggering this file's CLI body. Not
+// part of the upstream a5af949..8f3bcf3 diff — the guard below already
+// existed upstream before a5af949; the fork's copy predates it.
+export { parseStories, tokenize, score, STOPWORDS };
+
 // ── Main ─────────────────────────────────────────────────────────────
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
 if (!existsSync(STORY_BANK_PATH)) {
   console.error(`Error: ${STORY_BANK_PATH} not found.`);
@@ -248,4 +267,6 @@ for (let i = 0; i < ranked.length; i++) {
 
 if (ranked.length > 0 && ranked[0].score === 0) {
   console.log('⚠️  No strong match found. Consider adding a story to story-bank.md that covers this competency.');
+}
+
 }

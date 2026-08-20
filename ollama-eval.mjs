@@ -29,6 +29,7 @@ import { execFileSync } from 'child_process';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { buildBudgetedPrompt } from './lib/context-budget.mjs';
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -51,6 +52,7 @@ const PATHS = {
   shared:  join(CAREER_OPS, 'modes', '_shared.md'),
   oferta:  join(CAREER_OPS, 'modes', 'oferta.md'),
   cv:      join(CAREER_OPS_DATA, 'cv.md'),
+  profile: join(CAREER_OPS_DATA, 'modes', '_profile.md'),
   profileYml: join(CAREER_OPS_DATA, 'config', 'profile.yml'),
   reports: join(CAREER_OPS_DATA, 'reports'),
 };

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { isRememberable } from "@/lib/apply/remember";
+import { resolveLateSession } from "@/lib/apply/exit.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
 type Meta = { needsConfirmation?: boolean; ai?: boolean };
@@ -21,6 +22,8 @@ type ApplyCtx = {
   title: string;
   company: string;
   n: string;
+  /** Path the session was opened from, so the page has somewhere to go back to. */
+  from: string;
   fields: ApplyField[];
   answers: Record<string, string>;
   meta: Record<string, Meta>;
@@ -30,7 +33,7 @@ type ApplyCtx = {
   issues: ApplyIssue[];
   driveSteps: DriveStep[];
   error: string;
-  open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string }) => Promise<void>;
+  open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => Promise<void>;
   prefill: () => Promise<void>;
   setAnswer: (idOrLabel: string, value: string, fromAI?: boolean) => void;
   fill: () => Promise<void>;
@@ -58,12 +61,19 @@ export function useApply(): ApplyCtx {
   return c;
 }
 
+/** Release the headless browser behind a session id. Fire-and-forget: the page
+ *  is usually navigating away as this goes out, hence keepalive. */
+function closeSession(id: string) {
+  void fetch("/api/apply/close", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id }), keepalive: true }).catch(() => {});
+}
+
 export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>("idle");
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [company, setCompany] = useState("");
   const [n, setN] = useState("");
+  const [from, setFrom] = useState("");
   const [fields, setFields] = useState<ApplyField[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [meta, setMeta] = useState<Record<string, Meta>>({});
@@ -104,6 +114,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; };
   }, []);
   const cliId = useCallback(() => cliIdRef.current, []);
+  // Bumped every time a session is abandoned or replaced. Leaving the page is
+  // reachable while a request or stream is still in flight, and none of them can
+  // be recalled, so each one carries the generation it started in and drops its
+  // results if that generation is no longer current.
+  const generation = useRef(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashMemory = useCallback((msg: string) => {
     setMemoryToast(msg);
@@ -123,9 +138,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   // Stream the agentic drive (the AI reaching the form live) and finalize the
   // session when it succeeds → fields ready → auto-prefill fires.
   const drive = useCallback(async (id: string) => {
+    const gen = generation.current;
     setDriveSteps([]);
     try {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), goal: "reach" }) });
+      if (generation.current !== gen) return; // left mid-drive
       if (!r.body) {
         setError("The agent couldn't start.");
         setStatus("error");
@@ -138,6 +155,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (generation.current !== gen) return; // left mid-drive
         buf += dec.decode(value, { stream: true });
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
@@ -164,17 +182,24 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           }
         }
       }
+      if (generation.current !== gen) return; // left mid-drive
       if (!finished) {
         setError("The agent stopped before reaching a form.");
         setStatus("error");
       }
     } catch (e) {
+      if (generation.current !== gen) return; // left mid-drive
       setError(`The agent couldn't reach the form: ${e instanceof Error ? e.message : "stream error"}.`);
       setStatus("error");
     }
   }, []);
 
-  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string; n?: string }) => {
+  const open = useCallback(async (u: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => {
+    const gen = ++generation.current;
+    // Opening a second form abandons the first one's browser exactly the way
+    // leaving the page does, so it is released here too.
+    if (sessionId.current) closeSession(sessionId.current);
+    sessionId.current = null;
     setStatus("opening");
     setError("");
     setFields([]);
@@ -189,11 +214,20 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setUrl(u);
     setCompany(opts?.company ?? "");
     setN(opts?.n ?? "");
+    setFrom(opts?.from ?? "");
     companyRef.current = opts?.company ?? "";
     pendingPrefill.current = false;
     try {
       const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: cliId() }) });
       const d = await r.json();
+      // The user can leave while this is in flight, and the request can't be
+      // recalled — a session that lands after they left is closed here or its
+      // headless browser runs forever, unreferenced.
+      const late = resolveLateSession({ stale: generation.current !== gen, sessionId: d.id });
+      if (late !== "apply") {
+        if (late === "close") closeSession(d.id);
+        return;
+      }
       if (d.error) {
         setError(d.error);
         setStatus("error");
@@ -213,6 +247,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setIssues(d.issues ?? []);
       setStatus("ready");
     } catch {
+      if (generation.current !== gen) return; // left while it was opening
       setError("Could not open the form.");
       setStatus("error");
     }
@@ -250,6 +285,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
 
   const prefill = useCallback(async () => {
     if (!sessionId.current) return;
+    const gen = generation.current;
     if (!cliId()) {
       setError("Configure a CLI in Config first, then pre-fill from your CV.");
       return;
@@ -269,6 +305,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     };
     try {
       const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId() }) });
+      if (generation.current !== gen) return; // left mid-prefill
       if (!r.body) {
         setError("Couldn't pre-fill — no response stream.");
         setStatus("ready");
@@ -282,6 +319,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (generation.current !== gen) return; // left mid-prefill
         buf += dec.decode(value, { stream: true });
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
@@ -317,9 +355,11 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           }
         }
       }
+      if (generation.current !== gen) return; // left mid-prefill
       if (!got && !sawError) setError("Pre-fill ended without answers — see the diagnostics log below.");
       setStatus("ready");
     } catch (e) {
+      if (generation.current !== gen) return; // left mid-prefill
       setError(`Couldn't pre-fill from your CV: ${e instanceof Error ? e.message : "stream error"}. See diagnostics.`);
       setStatus("ready");
     }
@@ -377,6 +417,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
 
   const fill = useCallback(async () => {
     if (!sessionId.current) return;
+    const gen = generation.current;
     setStatus("filling");
     setSteps([]);
     // Persist the OPEN answers the user chose to remember → canonical memory →
@@ -400,6 +441,9 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await fetch("/api/apply/fill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, answers, fields, handoff: true, company: companyRef.current }) });
       const d = await r.json();
+      // Also stops the escalation below from starting an agent drive on a
+      // session the user has already walked away from.
+      if (generation.current !== gen) return; // left mid-fill
       if (d.error) {
         setError(d.error);
         setStatus("error");
@@ -432,6 +476,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
         await agentFillRef.current();
       }
     } catch {
+      if (generation.current !== gen) return; // left mid-fill
       setError("Fill failed.");
       setStatus("error");
     }
@@ -442,6 +487,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   // escalation when deterministic fill fails, or on demand.
   const agentFill = useCallback(async () => {
     if (!sessionId.current) return;
+    const gen = generation.current;
     const fs = fieldsRef.current;
     const a = answersRef.current;
     const ans = fs.filter((f) => f.type !== "file" && (a[f.id] || "").trim()).map((f) => ({ label: f.label || f.id, value: a[f.id] }));
@@ -450,6 +496,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setStatus("filling");
     try {
       const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans }) });
+      if (generation.current !== gen) return; // left mid-fill
       if (!r.body) {
         setError("The agent couldn't start filling.");
         setStatus("error");
@@ -461,6 +508,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        if (generation.current !== gen) return; // left mid-fill
         buf += dec.decode(value, { stream: true });
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
@@ -484,6 +532,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } catch (e) {
+      if (generation.current !== gen) return; // left mid-fill
       setError(`The agent couldn't fill the form: ${e instanceof Error ? e.message : "stream error"}.`);
       setStatus("error");
     }
@@ -492,10 +541,10 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   agentFillRef.current = agentFill;
 
   const reset = useCallback(() => {
-    if (sessionId.current) {
-      const id = sessionId.current;
-      void fetch("/api/apply/close", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id }), keepalive: true }).catch(() => {});
-    }
+    // Invalidate anything still in flight before clearing state, so a response
+    // that lands after this can't repopulate the page the user just left.
+    generation.current += 1;
+    if (sessionId.current) closeSession(sessionId.current);
     sessionId.current = null;
     companyRef.current = "";
     pendingPrefill.current = false;
@@ -505,6 +554,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setTitle("");
     setCompany("");
     setN("");
+    setFrom("");
     setFields([]);
     setAnswers({});
     setMeta({});
@@ -523,12 +573,12 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo(
     () => ({
-      status, url, title, company, n, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error,
+      status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error,
       open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast,
       queue, queueIndex, startQueue, queueNext, stopQueue, submitDetected, dismissSubmitDetected,
     }),
     [
-      status, url, title, company, n, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error,
+      status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error,
       open, prefill, setAnswer, fill, agentFill, bringForward, reset, remember, setRemember, memoryToast,
       queue, queueIndex, startQueue, queueNext, stopQueue, submitDetected, dismissSubmitDetected,
     ],

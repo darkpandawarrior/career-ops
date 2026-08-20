@@ -34,7 +34,11 @@ export function ApplyButton({ n, url, company, pdfReady }: { n: string; url?: st
     <button
       type="button"
       onClick={() => {
-        apply.open(url!, { prefill: true, company, n });
+        // from rides along so the Apply page has somewhere to go back to. Read
+        // straight off the handler's own location: usePathname() drops the query
+        // and hash, which is where the list filter and the row anchor live.
+        const { pathname, search, hash } = window.location;
+        apply.open(url!, { prefill: true, company, n, from: `${pathname}${search}${hash}` });
         router.push("/apply");
       }}
       className="inline-flex items-center gap-1.5 rounded-full bg-brand px-3.5 py-1 text-xs font-medium text-brand-foreground shadow-sm transition-colors hover:bg-brand-200"

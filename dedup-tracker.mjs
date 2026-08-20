@@ -17,6 +17,7 @@ import { normalizeCompany, openTrackerTransaction, rebuildRow, resolveTrackerPat
 
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md
@@ -27,22 +28,14 @@ const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
 // ── CLI args ────────────────────────────────────────────────────────
 // Same shape as scan-ats-full.mjs (#1633/PR #1635) and reply-watch.mjs
 // (#2743): an unrecognized flag must fail fast, never silently fall through
-// to the live-run default and write to the real tracker (#2744).
+// to the live-run default and write to the real tracker (#2744). Shared via
+// lib/cli-flags.mjs's validateFlags() (#2775).
 const KNOWN_FLAGS = ['--dry-run', '--help', '-h'];
 const USAGE = `Usage: node dedup-tracker.mjs [--dry-run]`;
 
 const cliArgs = process.argv.slice(2);
 
-const unknownFlags = cliArgs.filter(a => a.startsWith('-') && !KNOWN_FLAGS.includes(a));
-if (unknownFlags.length) {
-  console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-  process.exit(1);
-}
-
-if (cliArgs.includes('--help') || cliArgs.includes('-h')) {
-  console.log(USAGE);
-  process.exit(0);
-}
+validateFlags(cliArgs, KNOWN_FLAGS, USAGE);
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
