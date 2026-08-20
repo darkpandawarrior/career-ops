@@ -743,6 +743,33 @@ export function buildVisaFilter(visaFilter) {
 export function buildSalaryFilter(salaryFilter) {
   if (!salaryFilter) return () => true;
 
+  // `min_by_currency` — a floor per currency, for anyone whose target differs by market.
+  // The flat `min`/`currency` pair below cannot express that: setting currency:INR rejects every
+  // USD-quoted job on the currency-mismatch rule, and leaving currency empty compares a USD figure
+  // against an INR floor numerically, which rejects it too. Either way an international pipeline
+  // silently disappears. Here a job in an unlisted currency PASSES (same conservative default as
+  // "no salary data"), and a job with no salary data always passes.
+  if (salaryFilter.min_by_currency && typeof salaryFilter.min_by_currency === 'object') {
+    const floors = new Map();
+    for (const [cur, val] of Object.entries(salaryFilter.min_by_currency)) {
+      const n = Number(val);
+      if (!Number.isFinite(n) || n < 0) {
+        console.error(`Warning: salary_filter.min_by_currency.${cur} must be a non-negative number — entry ignored`);
+        continue;
+      }
+      floors.set(String(cur).trim().toUpperCase(), n);
+    }
+    if (floors.size === 0) return () => true;
+    return (salary) => {
+      if (!salary) return true;
+      const jobMax = salary.max ?? salary.min ?? null;
+      if (jobMax == null) return true;
+      const cur = (salary.currency || '').trim().toUpperCase();
+      if (!cur || !floors.has(cur)) return true; // unknown/unlisted currency → pass
+      return jobMax >= floors.get(cur);
+    };
+  }
+
   // Coerce and validate bounds — malformed YAML must not silently mis-filter
   const min = Number(salaryFilter.min ?? 0);
   const max = Number(salaryFilter.max ?? 0);
