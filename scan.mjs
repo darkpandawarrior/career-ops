@@ -1747,6 +1747,8 @@ export function formatTrustSegment(offer) {
   return sanitizeMarkdownField(`trust: ${body}`);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export function formatPipelineOffer(offer) {
   const url = sanitizePipelineUrl(offer.url);
   const company = sanitizeMarkdownField(offer.company);
@@ -1767,7 +1769,14 @@ export function formatPipelineOffer(offer) {
   // Optional labeled posting-date segment (like note:) — keeps the positional
   // 1/3/4/5-column contract in modes/pipeline.md intact.
   const posted = postedAtIsoDate(offer.postedAt);
-  if (posted) line = `${line} | posted: ${posted}`;
+  if (posted) {
+    // Cosmetic only — does not affect dedup, filtering, or new_added.
+    // Only sources carrying postedAt (Greenhouse/Lever/Ashby/Workday-family)
+    // can ever earn this tag; CutShort, the highest-volume source, has no
+    // date field in its payload at all and never sorts above an undated row.
+    const isFresh = typeof offer.postedAt === 'number' && (Date.now() - offer.postedAt) < DAY_MS;
+    line = `${line} | posted: ${posted}${isFresh ? ' [<24h]' : ''}`;
+  }
   // Labeled trust/legitimacy segment (#1743) — rides like posted:/note:, emitted
   // only when the scanner flagged the posting (score < 100). Ordered after
   // posted:, before note:, for a stable serialization.
@@ -1871,8 +1880,23 @@ function writeFileAtomic(filePath, content) {
 // plugins.mjs — the four current callers — can never interleave their
 // read-modify-write and silently drop each other's offers. writeFileAtomic
 // already prevented a torn write; it cannot prevent a lost update.
+// Freshest first; undated offers (no postedAt) keep their original relative
+// order and sort after every dated offer — Array.prototype.sort is stable,
+// so a comparator that treats "no postedAt" as -Infinity achieves that
+// without a separate partition step. Cosmetic ordering only: dedup and
+// filtering already happened upstream, this only changes read order in
+// data/pipeline.md.
+export function sortOffersByPostedAtDesc(offers) {
+  return [...offers].sort((a, b) => {
+    const ap = typeof a.postedAt === 'number' ? a.postedAt : -Infinity;
+    const bp = typeof b.postedAt === 'number' ? b.postedAt : -Infinity;
+    return bp - ap;
+  });
+}
+
 export async function appendToPipeline(offers) {
   if (offers.length === 0) return;
+  offers = sortOffersByPostedAtDesc(offers);
 
   await withPipelineLock(PIPELINE_PATH, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).

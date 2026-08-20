@@ -86,6 +86,7 @@ import { acquireTrackerLock, canonicalizeTrackerPath, rebuildRow } from './track
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { seedFollowup, SeedError } from './followup-seed.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = process.env.CAREER_OPS_TRACKER
@@ -662,6 +663,24 @@ if (statusChanged && !flags.dryRun) {
 
 // ── report ───────────────────────────────────────────────────────
 
+// #1430: seed data/follow-ups.md automatically on an actual transition INTO
+// Applied — an idempotent re-run of an already-Applied row must not seed a
+// duplicate (seedFollowup is itself idempotent, but skip the call entirely
+// so a dry-run or a no-op re-run never even attempts it). Never fatal: the
+// status change itself already succeeded and must not be undone by a
+// follow-up-seeding failure.
+let followupSeeded = false;
+let followupSeedError = null;
+if (statusChanged && newStatus === 'Applied' && !flags.dryRun) {
+  try {
+    const seedResult = await seedFollowup(target.num);
+    followupSeeded = !!seedResult.seeded;
+  } catch (err) {
+    followupSeedError = err instanceof SeedError ? `${err.code}: ${err.message}` : err.message;
+    console.error(`⚠ follow-up seed failed (status change itself succeeded): ${followupSeedError}`);
+  }
+}
+
 const result = {
   changed,
   num: target.num,
@@ -675,6 +694,7 @@ const result = {
   // idempotent re-run of an already-Applied row must not invite a consumer
   // to seed a duplicate follow-up.
   ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
+  ...(statusChanged && newStatus === 'Applied' && !flags.dryRun ? { followupSeeded, ...(followupSeedError ? { followupSeedError } : {}) } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   tracker: APPS_FILE,
 };
@@ -685,7 +705,11 @@ if (flags.json) {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
   if (statusChanged && !flags.dryRun && newStatus === 'Applied') {
-    console.error('ℹ️  Status is Applied — seed follow-ups: node followup-seed.mjs ' + target.num);
+    if (followupSeedError) {
+      console.error(`ℹ️  Follow-up seed failed — run manually: node followup-seed.mjs ${target.num}`);
+    } else if (followupSeeded) {
+      console.error('ℹ️  Follow-up seeded in data/follow-ups.md.');
+    }
   }
 }
 process.exit(EXIT_OK);

@@ -5,7 +5,7 @@
  *
  * Where scan.mjs scans the companies you track in portals.yml, this script
  * inverts the direction: it walks public directories of companies per ATS
- * (Greenhouse, Lever, Ashby, Workday) and surfaces fresh postings that match
+ * (Greenhouse, Lever, Ashby, Workday, iCIMS) and surfaces fresh postings that match
  * your portals.yml `title_filter` / `location_filter` — no manual company
  * curation needed.
  *
@@ -48,6 +48,7 @@ import greenhouse from './providers/greenhouse.mjs';
 import lever from './providers/lever.mjs';
 import ashby from './providers/ashby.mjs';
 import workday from './providers/workday.mjs';
+import icims from './providers/icims.mjs';
 import {
   buildTitleFilter,
   buildLocationFilter,
@@ -207,6 +208,13 @@ const SOURCES = {
         h => h === `${tenant}.${instance}.myworkdayjobs.com` && h.endsWith('.myworkdayjobs.com'),
       );
     },
+  },
+  icims: {
+    provider: icims,
+    dataset: `${DATASET_BASE}/icims_companies.json`,
+    toEntry: (slug) => SLUG_RE.test(String(slug))
+      ? entryOnHost(String(slug), `https://careers-${slug}.icims.com/jobs/search?ss=1&in_iframe=1`, h => h === `careers-${String(slug).toLowerCase()}.icims.com`)
+      : null,
   },
 };
 
@@ -672,6 +680,11 @@ async function main() {
   // would just be the same message repeated thousands of times).
   let noDateSkipCompanies = cc.noDateSkipCompanies || 0;
   let noDateSkipJobs = cc.noDateSkipJobs || 0;
+  // Boards that hit a provider's hard page cap (icims). Unlike a Workday
+  // truncation this isn't a network hiccup, so a sequential retry would just
+  // re-hit the cap — it's reported, not retried, so capped coverage is visible
+  // instead of passing for a fully-walked board.
+  let cappedBoards = cc.cappedBoards || 0;
   const datasetStatus = {};
 
   // Dead-board memory. One timestamp for the whole sweep, so a multi-hour run
@@ -682,7 +695,7 @@ async function main() {
 
   const snapshotCounters = () => ({
     totalCompaniesScanned, totalErrors, droppedNoDate, droppedContent,
-    noDateSkipCompanies, noDateSkipJobs, skippedDead,
+    noDateSkipCompanies, noDateSkipJobs, skippedDead, cappedBoards,
   });
   const checkpointBase = () => ({
     version: 1,
@@ -698,13 +711,29 @@ async function main() {
   // Per-job filter chain, shared by the parallel sweep and the truncation
   // retry pass (workday). Closure over the filters and counters so both
   // passes update the same run totals.
-  const processJobs = async (jobs, sourceName) => {
+  const processJobs = async (jobs, sourceName, provider) => {
     for (const job of jobs) {
       if (!job.url || !job.title) continue;
       // Confirmed-stale postings are always dropped. Undated postings are
       // dropped by default (a reverse scan targets *fresh* roles) but
       // COUNTED so callers see the gap; --include-undated keeps them, marked.
-      const dateClass = classifyPostingDate(job, cutoff);
+      let dateClass = classifyPostingDate(job, cutoff);
+      if (dateClass === 'stale') continue;
+      // Providers whose list pages carry no date (icims) get one shot at dating
+      // the posting from its detail page — but only after the cheap title and
+      // location filters pass, so a full-directory sweep never pays a
+      // detail-page request for noise.
+      //
+      // Deliberately OUTSIDE the includeUndated branch. Gating enrichment on
+      // !opts.includeUndated would leave every icims posting undated under
+      // --include-undated, and since classifyPostingDate can never call an
+      // undated posting stale, --since would be silently ignored for the
+      // entire source. Enrich first, then let the undated policy decide.
+      if (dateClass === 'undated' && provider?.enrichDate
+          && titleFilter(job.title) && locationFilter(job.location, job.url, job.title)) {
+        try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
+        dateClass = classifyPostingDate(job, cutoff);
+      }
       if (dateClass === 'stale') continue;
       if (dateClass === 'undated' && !opts.includeUndated) { droppedNoDate++; continue; }
       if (!titleFilter(job.title)) continue;
@@ -787,8 +816,12 @@ async function main() {
           consecutiveResolverFailures = 0;
           recordHit(deadBoards, name, entry.name);
           if (jobs.workdayTruncated) truncated.push(entry);
+          if (jobs.icimsTruncated) {
+            cappedBoards++;
+            if (opts.verbose) console.error(`  ⚠ ${name}/${entry.name}: hit the page cap — later postings not scanned`);
+          }
           if (jobs.workdayNoDateSkip) { noDateSkipCompanies++; noDateSkipJobs += jobs.length; }
-          await processJobs(jobs, name);
+          await processJobs(jobs, name, source.provider);
         })(), COMPANY_TIMEOUT_MS, `${name}/${entry.name}`);
       } catch (err) {
         // Mostly defunct boards in the public dataset — expected noise, so the
@@ -846,7 +879,7 @@ async function main() {
         try {
           await withTimeout((async () => {
             const jobs = await source.provider.fetch(entry, ctx);
-            await processJobs(jobs, name);
+            await processJobs(jobs, name, source.provider);
             if (jobs.workdayTruncated) {
               errors++; // still truncated on a quiet line — genuine board problem, move on
               if (opts.verbose) console.error(`  ✗ ${name}/${entry.name}: still truncated after sequential retry`);
@@ -939,6 +972,7 @@ async function main() {
   log(`${'━'.repeat(45)}`);
   log(`Companies scanned:  ${totalCompaniesScanned}${capHit ? ` of ${totalCompaniesAvailable} (capped)` : ''}`);
   log(`Unreachable boards: ${totalErrors}`);
+  if (cappedBoards) log(`Page-capped boards: ${cappedBoards} (partial coverage — later postings not scanned)`);
   // Never silently drop coverage: a skip count the operator can't see reads as
   // "the directory shrank" rather than "we chose not to look".
   if (skippedDead > 0) {
@@ -1042,6 +1076,7 @@ async function main() {
       postingsAnnotatedBlacklisted: blacklistResult.annotatedBlacklisted,
       postingsDroppedContent: droppedContent,
       unreachableBoards: totalErrors,
+      cappedBoards,
       dnsPacing: { delayed: pacing.delayed, waitedMs: Math.round(pacing.waitedMs) },
       saved,
       offers: offers.map(o => ({

@@ -12,6 +12,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
 import { pass, fail, ROOT, NODE } from './helpers.mjs';
+import { localToday } from '../lib/local-today.mjs';
 
 console.log('\nfollowup-seed.mjs (#1430 seed-on-Applied chain)');
 
@@ -41,8 +42,12 @@ else process.env.CAREER_OPS_PROFILE = previousProfileEnv;
 
 const SCRIPT = join(ROOT, 'followup-seed.mjs');
 
+// Must use the SAME clock the code under test uses. followup-seed.mjs resolves "today" via
+// lib/local-today.mjs (local calendar day); deriving it from toISOString() here is UTC, so the two
+// disagree for the 5.5h window each day when IST has rolled over and UTC has not — the test then
+// fails between 00:00 and 05:30 IST and passes the rest of the day.
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return localToday();
 }
 
 // --- sandbox helpers --------------------------------------------------------

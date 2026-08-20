@@ -13,6 +13,7 @@ try {
     buildPostingAgeFilter,
     formatPipelineOffer,
     formatScanHistoryRow,
+    sortOffersByPostedAtDesc,
   } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   // ── posting-age filter (max_posting_age_days) ──
@@ -80,6 +81,25 @@ try {
     pass('pipeline writer appends a labeled posted: segment (omitted/byte-identical when date missing or invalid)');
   } else {
     fail(`pipeline postedAt segment wrong: dated="${datedPipeline}" / noDate="${noDatePipeline}" / bad="${badDatePipeline}" / nan="${nanDatePipeline}"`);
+  }
+  // ── pipeline sort order + [<24h] freshness tag ──
+  const freshOffer = { ...datedOffer, url: 'https://jobs.example.com/fresh', postedAt: Date.now() - 60_000 };
+  const freshPipeline = formatPipelineOffer(freshOffer);
+  if (freshPipeline.endsWith('[<24h]') && !datedPipeline.includes('[<24h]')) {
+    pass('pipeline writer tags a posting < 24h old with [<24h]; an old dated posting gets no tag');
+  } else {
+    fail(`freshness tag wrong: fresh="${freshPipeline}" / old="${datedPipeline}"`);
+  }
+
+  const oldA = { ...datedOffer, url: 'https://a', postedAt: Date.parse('2026-01-01T00:00:00Z') };
+  const newB = { ...datedOffer, url: 'https://b', postedAt: Date.parse('2026-06-18T00:00:00Z') };
+  const undatedC = { ...datedOffer, url: 'https://c', postedAt: undefined };
+  const undatedD = { ...datedOffer, url: 'https://d', postedAt: undefined };
+  const sorted = sortOffersByPostedAtDesc([oldA, undatedC, newB, undatedD]).map(o => o.url);
+  if (sorted[0] === 'https://b' && sorted[1] === 'https://a' && sorted[2] === 'https://c' && sorted[3] === 'https://d') {
+    pass('sortOffersByPostedAtDesc: freshest dated offer first, undated offers last in original relative order');
+  } else {
+    fail(`sortOffersByPostedAtDesc order wrong: ${JSON.stringify(sorted)}`);
   }
 } catch (err) {
   fail(`scan.mjs posting-age / postedAt tests crashed: ${err.message}`);
