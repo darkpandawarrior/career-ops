@@ -29,6 +29,7 @@ import {
   normalizeTextKey, normalizeVia,
 } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { checkTrackerSync } from './tracker-sync-check.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 // Support both layouts: data/applications.md (boilerplate) and applications.md (original).
