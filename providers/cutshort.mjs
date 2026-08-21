@@ -121,7 +121,27 @@ export function normalizeCutshortJob(j, fallbackCompany) {
     ? j.locations.filter(l => typeof l === 'string' && l.trim()).join(', ')
     : '';
 
-  return { title, url, company, location };
+  // Salary. The listing payload carries a structured salaryRange, and dropping it meant a
+  // salary_filter floor could never fire on this source — every posting passed as "no comp data"
+  // even though CutShort displays a band on every card. `min`/`max` are frequently 0 (unset) while
+  // the *Vanity fields hold the numbers CutShort actually renders, so prefer those and fall back.
+  const sr = j.salaryRange;
+  let salary;
+  if (sr && typeof sr === 'object') {
+    const pick = (...vals) => {
+      for (const v of vals) {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return null;
+    };
+    const min = pick(sr.userMinVanity, sr.minVanity, sr.userMin, sr.min);
+    const max = pick(sr.userMaxVanity, sr.maxVanity, sr.userMax, sr.max);
+    const currency = typeof sr.currency === 'string' && sr.currency.trim() ? sr.currency.trim().toUpperCase() : '';
+    if (min != null || max != null) salary = { min, max, currency };
+  }
+
+  return salary ? { title, url, company, location, salary } : { title, url, company, location };
 }
 
 /** @type {Provider} */
