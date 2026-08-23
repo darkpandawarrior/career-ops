@@ -226,13 +226,36 @@ export async function POST(req: Request) {
       killer = setTimeout(() => {
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
+      // Declared before send() so send() can clear it the moment it sees the
+      // client disconnect; assigned just below, once close() exists.
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
       const send = (obj: unknown) => {
         if (closed) return;
-        try { controller.enqueue(enc.encode(JSON.stringify(obj) + "\n")); } catch { closed = true; }
+        try {
+          controller.enqueue(enc.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          // The client is gone. Stop the heartbeat here rather than waiting for
+          // close(): the child can still run for minutes (maxDuration 800s), and
+          // a user retrying a failed run would otherwise accumulate one live
+          // timer per abandoned request.
+          closed = true;
+          if (heartbeat) clearInterval(heartbeat);
+        }
       };
+      // Time-based keepalive. The stream is silent whenever the agent is thinking
+      // or inside a long tool call, and in pdf mode it is silent for the whole
+      // 15-25 KB <<cv-html>> envelope (cvFilter swallows every byte). Measured
+      // idle gaps on a real pdf run reached 149s — long enough for the browser or
+      // a proxy to drop the connection, after which the client reports
+      // "Connection error" even though the agent finished and the PDF rendered.
+      // It must be a timer, not a hook on incoming text: piggy-backing on agent
+      // output cannot fire during exactly the silences it needs to cover.
+      // Unknown event types are ignored by the client's switch, so old tabs are safe.
+      heartbeat = setInterval(() => send({ type: "keepalive" }), 10_000);
       const close = () => {
         if (!closed) {
           closed = true;
+          if (heartbeat) clearInterval(heartbeat);
           if (killer) clearTimeout(killer);
           releaseWriteTokenOnce();
           try { controller.close(); } catch { /* */ }

@@ -60,13 +60,13 @@
  *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS        stale-lock recovery threshold
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { pathToFileURL } from 'url';
 import { randomUUID } from 'crypto';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { acquireTrackerLock, canonicalizeTrackerPath } from './tracker-utils.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath, renameSyncWithRetry } from './tracker-utils.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
 import {
   resolveCadenceConfig,
@@ -268,7 +268,7 @@ function writeFileAtomic(filePath, content) {
   const tmpPath = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmpPath, content);
-    renameSync(tmpPath, filePath);
+    renameSyncWithRetry(tmpPath, filePath);
   } catch (err) {
     rmSync(tmpPath, { force: true });
     throw err;

@@ -2,9 +2,6 @@
 // Covers the id/detect/fetch contract scan.mjs calls: api: precedence with the
 // host allowlist, careers_url auto-detection, normalization from the
 // boards-api JSON shape, and the guard chain running before any request.
-// Adapted from upstream: our provider requests `?content=true` (job
-// descriptions) and maps the returned HTML `content` into a stripped
-// `description` field — upstream's version does neither.
 // (Indirect coverage elsewhere: liveness tests exercise Greenhouse URL
 // resolution; this file tests the provider module itself.)
 import { pass, fail, ROOT } from '../helpers.mjs';
@@ -16,20 +13,23 @@ console.log('\nProvider — greenhouse');
 try {
   const greenhouseModule = await import(pathToFileURL(join(ROOT, 'providers/greenhouse.mjs')).href);
   const greenhouse = greenhouseModule.default;
+  const { contentToText } = greenhouseModule;
 
   if (greenhouse.id === 'greenhouse') pass('greenhouse.id is "greenhouse"');
   else fail(`greenhouse.id is ${JSON.stringify(greenhouse.id)}`);
 
-  // detect() — careers_url auto-detection (job-boards host → boards-api endpoint, content=true)
+  // detect() — careers_url auto-detection (job-boards host → boards-api endpoint).
+  // content=true is added at fetch() time, not detect() — detect() is used for
+  // health-probe identification, and must not force the description payload.
   const hit = greenhouse.detect({ name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' });
-  if (hit && hit.url === 'https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true') {
-    pass('greenhouse.detect() resolves job-boards.greenhouse.io/<slug> → boards-api jobs?content=true endpoint');
+  if (hit && hit.url === 'https://boards-api.greenhouse.io/v1/boards/acme/jobs') {
+    pass('greenhouse.detect() resolves job-boards.greenhouse.io/<slug> → boards-api jobs endpoint');
   } else {
     fail(`greenhouse.detect() returned ${JSON.stringify(hit)}`);
   }
 
   const hitEu = greenhouse.detect({ name: 'EuCo', careers_url: 'https://job-boards.eu.greenhouse.io/euco' });
-  if (hitEu && hitEu.url === 'https://boards-api.greenhouse.io/v1/boards/euco/jobs?content=true') {
+  if (hitEu && hitEu.url === 'https://boards-api.greenhouse.io/v1/boards/euco/jobs') {
     pass('greenhouse.detect() extracts the slug from a job-boards.eu.greenhouse.io careers_url');
   } else {
     fail(`greenhouse.detect(eu) returned ${JSON.stringify(hitEu)}`);
@@ -114,10 +114,20 @@ try {
   );
 
   if (capturedUrl === 'https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true' && capturedOpts?.redirect === 'error') {
-    pass('greenhouse.fetch() hits the derived boards-api ?content=true URL with redirect:"error" (SSRF guard)');
+    pass('greenhouse.fetch() hits the derived boards-api URL with content=true and redirect:"error" (SSRF guard)');
   } else {
     fail(`greenhouse.fetch() url=${JSON.stringify(capturedUrl)} opts=${JSON.stringify(capturedOpts)}`);
   }
+
+  // content=true must be set idempotently on an entry.api that already pins it.
+  let pinnedUrl = null;
+  await greenhouse.fetch(
+    { name: 'Pinned', api: 'https://boards-api.greenhouse.io/v1/boards/pinned/jobs?content=true' },
+    { fetchJson: async (url) => { pinnedUrl = url; return { jobs: [] }; } },
+  );
+  if (pinnedUrl === 'https://boards-api.greenhouse.io/v1/boards/pinned/jobs?content=true')
+    pass('greenhouse.fetch() does not duplicate an entry.api that already carries content=true');
+  else fail(`greenhouse.fetch() pinned url=${JSON.stringify(pinnedUrl)}`);
 
   if (fetched.length === 3)
     pass('greenhouse.fetch() drops rows without absolute_url (3 of 4 kept)');
@@ -127,18 +137,80 @@ try {
       && fetched[0]?.url === 'https://job-boards.greenhouse.io/acme/jobs/101'
       && fetched[0]?.company === 'Acme'
       && fetched[0]?.location === 'Berlin, Germany'
-      && fetched[0]?.description === ' Great  role . '
+      && fetched[0]?.description === 'Great role .'
       && fetched[0]?.postedAt === Date.parse('2026-07-01T09:30:00-04:00'))
     pass('greenhouse.fetch() maps title/absolute_url/entry.name/location.name/first_published, strips content HTML tags into description');
   else fail(`greenhouse.fetch() row 0 = ${JSON.stringify(fetched[0])}`);
 
-  if (fetched[1]?.title === '' && fetched[1]?.location === '' && fetched[1]?.description === '' && fetched[1]?.postedAt === undefined)
-    pass('greenhouse.fetch() defaults missing title/location/content to "" and omits postedAt when first_published is absent');
+  if (fetched[1]?.title === '' && fetched[1]?.location === '' && !('description' in fetched[1]) && fetched[1]?.postedAt === undefined)
+    pass('greenhouse.fetch() defaults missing title/location to "", omits description when content is absent, and omits postedAt when first_published is absent');
   else fail(`greenhouse.fetch() row 1 = ${JSON.stringify(fetched[1])}`);
 
   if (fetched[2]?.postedAt === undefined)
     pass('greenhouse.fetch() yields undefined postedAt for an unparseable first_published (NaN-safe)');
   else fail(`greenhouse.fetch() row 2 postedAt = ${JSON.stringify(fetched[2]?.postedAt)}`);
+
+  // ── content=true → description (#3175) ──────────────────────────────
+  // The boards API embeds posting bodies as DOUBLE-encoded HTML: one decode
+  // pass reveals the tags, the second (after stripping) resolves text-level
+  // entities. script/style bodies must never leak into the plain text, since
+  // visa_filter/content_filter match by substring.
+  const contentSample = {
+    jobs: [
+      {
+        id: 301,
+        title: 'Sponsor',
+        absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/301',
+        // &lt;script&gt;tracking()&lt;/script&gt; + &lt;style&gt; must vanish;
+        // "&amp;amp;" proves the second decode pass; "&#39;" proves numeric
+        // entities inside visible text survive to the end.
+        content: '&lt;div&gt;&lt;script&gt;tracking()&lt;/script&gt;&lt;style&gt;.x{}&lt;/style&gt;&lt;h2&gt;About &amp;amp; Us&lt;/h2&gt;&lt;p&gt;We offer &#39;visa sponsorship&#39; for &lt;b&gt;H-1B&lt;/b&gt; roles.&lt;/p&gt;&lt;/div&gt;',
+      },
+      {
+        id: 302,
+        title: 'No Body',
+        absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/302',
+        // no content field — description key must be absent entirely
+      },
+      {
+        id: 303,
+        title: 'Empty Body',
+        absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/303',
+        content: '',
+      },
+    ],
+  };
+  const withBodies = await greenhouse.fetch(
+    { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+    { fetchJson: async () => contentSample },
+  );
+
+  if (withBodies[0]?.description === "About & Us We offer 'visa sponsorship' for H-1B roles.")
+    pass('greenhouse.fetch() double-decodes the posting body into clean plain-text description');
+  else fail(`greenhouse.fetch() row 0 description = ${JSON.stringify(withBodies[0]?.description)}`);
+
+  if (!('description' in (withBodies[1] || {})) && !('description' in (withBodies[2] || {})))
+    pass('greenhouse.fetch() omits the description key when the board ships no body');
+  else fail(`greenhouse.fetch() description keys = ${JSON.stringify(withBodies.map(j => 'description' in j))}`);
+
+  if (withBodies[0] && !('content' in withBodies[0]))
+    pass('greenhouse.fetch() does not leak the raw content field into the normalized job');
+  else fail('greenhouse.fetch() leaked raw content');
+
+  // Cap: a full JD body is ~10 KB of HTML; the stripped text is sliced so scan
+  // payloads stay sane (same rationale as alibaba's 4000-char cap).
+  const longBody = await greenhouse.fetch(
+    { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+    { fetchJson: async () => ({ jobs: [{ id: 9, title: 'Long', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/9', content: '&lt;p&gt;' + 'x'.repeat(5000) + '&lt;/p&gt;' }] }) },
+  );
+  if (longBody[0]?.description?.length === 4000 && /^x+$/.test(longBody[0].description))
+    pass('greenhouse.fetch() caps the stripped description at 4000 chars');
+  else fail(`greenhouse.fetch() capped length = ${longBody[0]?.description?.length}`);
+
+  // Unit: contentToText contract on the shapes the API can produce.
+  if (contentToText(null) === '' && contentToText(undefined) === '' && contentToText(42) === '' && contentToText('') === '')
+    pass('contentToText() returns "" for missing / non-string / empty content');
+  else fail('contentToText() should return "" for non-string and empty input');
 
   // Epoch-0 first_published must survive (the `|| undefined` trap toEpochMs avoids).
   const epochZero = await greenhouse.fetch(

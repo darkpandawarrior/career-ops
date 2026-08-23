@@ -13,6 +13,14 @@
  * status (`skipped_expired`, `skipped_invalid_url`, `skipped_blocked_host`)
  * describe dead postings, not reposts, and are skipped.
  *
+ * AGGREGATOR SKIP (#2703): a multi-employer board (e.g. a jobs aggregator)
+ * carries many different employers' postings under its own name, so an
+ * identical title there is genuinely a different job, not a repost — the one
+ * case every rule above assumes cannot happen. Mark such an entry
+ * `aggregator: true` in portals.yml (under `tracked_companies` or
+ * `job_boards`) and detectReposts() skips it entirely — see
+ * loadAggregatorCompanies / companyKey.
+ *
  * Run: node detect-reposts.mjs             (JSON to stdout)
  *      node detect-reposts.mjs --summary   (human-readable table)
  *      node detect-reposts.mjs --window 60 (override 90-day window)
@@ -25,8 +33,11 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+// Namespace import, not default: js-yaml 5.x drops the default export (#2656).
+import * as yaml from 'js-yaml';
 
 import { roleFuzzyMatch, roleTokens, BASELINE_TOKENS } from './role-matcher.mjs';
+import { normalizeCompanyName } from './invite-match.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
@@ -35,7 +46,18 @@ import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 // multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const SCAN_HISTORY_PATH = join(CAREER_OPS_DATA, 'data/scan-history.tsv');
+// Same override scan.mjs honours, so a sandboxed run points both at one config.
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS_DATA, 'portals.yml');
 const DEFAULT_WINDOW_DAYS = 90;
+// Smallest first_seen span a cluster may have and still count as a repost.
+// ponytail: only the aggregator-skip half of upstream's phantom-repost fix is
+// ported here (title-identity clustering and a real --min-span floor are
+// not) — nothing currently calling this needs them. 0 (never enforced) keeps
+// every existing caller's output byte-identical; the `minSpan` parameter
+// threaded below exists only so detectReposts' 4th positional arg
+// (`aggregators`) lands where the aggregator-skip feature needs it. Add
+// --min-span / raise this default if same-sweep false positives show up here.
+const MIN_REPOST_SPAN_DAYS = 0;
 
 // --- CLI args ---
 
@@ -71,7 +93,11 @@ function daysBetween(d1, d2) {
 }
 
 // --- Parse scan-history.tsv ---
-// Format: url, first_seen, portal, title, company, status, location
+// Format: url, first_seen, portal, title, company, status, location, ...,
+//         normalized_company (trailing col 12 — not currently written by this
+//         fork's scan.mjs, so normCompany is '' on every real row today;
+//         companyKey() falls back to normalizing the raw company name in that
+//         case, which is the same result this always produced before).
 export function parseScanHistory(content) {
   const lines = content.split('\n').filter(line => line.trim());
   if (lines.length === 0) return [];
@@ -95,9 +121,58 @@ export function parseScanHistory(content) {
       company: company.trim(),
       status: (status || 'added').trim(),
       location: (location || '').trim(),
+      normCompany: (cols[11] || '').trim(),
     });
   }
   return rows;
+}
+
+// Canonical clustering/lookup key for a row's company. Prefers the stored
+// normalized-company column (see parseScanHistory) so old and new rows still
+// cluster on the same key; falls back to normalizing the raw company name for
+// rows without that column (every real row today) and for hand-built row
+// objects (e.g. tests). A final fallback to the raw lowercased name preserves
+// this for names that fold to empty under normalizeCompanyName.
+export function companyKey(row) {
+  const stored = typeof row.normCompany === 'string' ? row.normCompany.trim() : '';
+  const raw = typeof row.company === 'string' ? row.company.trim() : '';
+  return stored || normalizeCompanyName(raw) || raw.toLowerCase();
+}
+
+// Companies the user has marked `aggregator: true` in portals.yml, as a Map of
+// companyKey()-space key -> the raw name as written in portals.yml (a Map, not
+// a bare Set, so a reader — e.g. company-history.mjs's card title — sees the
+// original name rather than the normalized key). Checked under BOTH
+// `tracked_companies` and `job_boards`, since a multi-employer board is at
+// least as likely to live under the latter.
+//
+// portals.yml is a USER-LAYER file and may be absent (fresh install, sandboxed
+// test, CI). Absent, unreadable or malformed all degrade to an empty Map —
+// this must never crash the detector over an optional config. See #2703.
+export function loadAggregatorCompanies(portalsPath = PORTALS_PATH) {
+  const found = new Map();
+  try {
+    if (!existsSync(portalsPath)) return found;
+    const doc = yaml.load(readFileSync(portalsPath, 'utf-8'));
+    for (const entries of [doc?.tracked_companies, doc?.job_boards]) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (!entry || entry.aggregator !== true) continue;
+        const raw = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!raw) continue;
+        const key = normalizeCompanyName(raw) || raw.toLowerCase();
+        if (key && !found.has(key)) found.set(key, raw);
+      }
+    }
+  } catch {
+    return found;
+  }
+  return found;
+}
+
+// Set or Map — both answer .has(key), and every caller here only asks that.
+export function isKeyLookup(value) {
+  return value instanceof Set || value instanceof Map;
 }
 
 function loadScanHistory(path = SCAN_HISTORY_PATH) {
@@ -107,14 +182,20 @@ function loadScanHistory(path = SCAN_HISTORY_PATH) {
 
 // --- Core detection ---
 //
-// Group rows by company (case-insensitive), then within each company group
-// compare all pairs of titles via roleFuzzyMatch. Build clusters of matching
-// rows with union-find, then keep a cluster only if (a) it contains 2+ rows,
-// (b) at least two rows have different URLs, and (c) the cluster's first_seen
-// dates all fall within `windowDays` of each other.
+// Group rows by company key (companyKey — case-insensitive, normalized), then
+// within each company group compare all pairs of titles via roleFuzzyMatch.
+// Build clusters of matching rows with union-find, then keep a cluster only if
+// (a) it contains 2+ rows, (b) at least two rows have different URLs, (c) the
+// cluster's first_seen dates all fall within `windowDays` of each other, and
+// (d) that span is at least `minSpan` days (rejects same-sweep concurrent
+// openings from counting as a repost of themselves).
+//
+// `aggregators` (optional, see loadAggregatorCompanies) is a Set/Map of
+// companyKey()-space keys to skip entirely — a multi-employer board's
+// identical titles are different employers' jobs, not reposts (#2703).
 //
 // Exported so external tests can call detectReposts() directly on a row list.
-export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS) {
+export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS, minSpan = MIN_REPOST_SPAN_DAYS, aggregators = null) {
   if (!Array.isArray(rows)) return [];
   const valid = rows
     .filter(r =>
@@ -135,18 +216,22 @@ export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS) {
     }));
   if (valid.length < 2) return [];
 
-  // Group by company (case-insensitive).
+  // Group by normalized company key (companyKey), not the raw name — this is
+  // what lets "Acme Inc." and "Acme" cluster as one company.
   const byCompany = new Map();
   for (const row of valid) {
-    const key = row.company.toLowerCase();
+    const key = companyKey(row);
     if (!byCompany.has(key)) byCompany.set(key, []);
     byCompany.get(key).push(row);
   }
 
+  const skip = isKeyLookup(aggregators) ? aggregators : null;
+
   const clusters = [];
-  for (const [, groupRows] of byCompany) {
+  for (const [key, groupRows] of byCompany) {
     if (groupRows.length < 2) continue;
-    clusters.push(...detectRepostsInGroup(groupRows, windowDays));
+    if (skip && skip.has(key)) continue;
+    clusters.push(...detectRepostsInGroup(groupRows, windowDays, minSpan));
   }
   return clusters.sort((a, b) => (a.lastSeen < b.lastSeen ? 1 : -1));
 }
@@ -156,7 +241,7 @@ export function detectReposts(rows, windowDays = DEFAULT_WINDOW_DAYS) {
 // sliding window finds sub-clusters within the windowDays span. This two-phase
 // approach prevents non-matching roles (e.g. a Product Manager between two
 // Backend Engineer postings) from breaking a valid repost cluster.
-function detectRepostsInGroup(rows, windowDays) {
+function detectRepostsInGroup(rows, windowDays, minSpan = MIN_REPOST_SPAN_DAYS) {
   const titleGroups = groupRowsByTitle(rows);
 
   const results = [];
@@ -181,7 +266,7 @@ function detectRepostsInGroup(rows, windowDays) {
         // valid overlapping repost pairs that would otherwise be dropped
         // (e.g. Jan 1 + Mar 15 sealed, but Mar 15 + Jun 10 also valid).
         if (cluster.length >= 2) {
-          const result = buildRepostCluster(cluster, windowDays);
+          const result = buildRepostCluster(cluster, windowDays, minSpan);
           if (result) results.push(result);
         }
         cluster = cluster.filter(c => daysBetween(c.date, row.date) <= windowDays);
@@ -189,7 +274,7 @@ function detectRepostsInGroup(rows, windowDays) {
       }
     }
     if (cluster.length >= 2) {
-      const result = buildRepostCluster(cluster, windowDays);
+      const result = buildRepostCluster(cluster, windowDays, minSpan);
       if (result) results.push(result);
     }
   }
@@ -341,12 +426,14 @@ function groupRowsByTitle(rows) {
 }
 
 // A fuzzy-matched cluster becomes a repost cluster only when (a) at least two
-// distinct URLs are present (same URL means a dedup hit, not a repost), and
-// (b) every row's first_seen date falls within windowDays of every other row.
-// We enforce the window by requiring max-min span <= windowDays. Rows sharing
-// the same URL are collapsed (only the earliest sighting is kept) so a URL
-// seen on multiple scan dates doesn't inflate the repost count.
-function buildRepostCluster(clusterRows, windowDays) {
+// distinct URLs are present (same URL means a dedup hit, not a repost), (b)
+// every row's first_seen date falls within windowDays of every other row, and
+// (c) the span between the earliest and latest first_seen is at least
+// minSpan days — a same-sweep pair (span 0) is two concurrent openings the
+// scanner saw at once, not one opening re-listed later. Rows sharing the same
+// URL are collapsed (only the earliest sighting is kept) so a URL seen on
+// multiple scan dates doesn't inflate the repost count.
+function buildRepostCluster(clusterRows, windowDays, minSpan = MIN_REPOST_SPAN_DAYS) {
   const byUrl = new Map();
   for (const row of clusterRows) {
     if (!byUrl.has(row.url) || row.date < byUrl.get(row.url).date) {
@@ -362,6 +449,7 @@ function buildRepostCluster(clusterRows, windowDays) {
   const last = sorted[sorted.length - 1];
   const span = daysBetween(first.date, last.date);
   if (span > windowDays) return null;
+  if (span < minSpan) return null;
 
   const role = last.title;
   const appearances = sorted.map(r => ({ url: r.url, date: r.dateStr, title: r.title }));
@@ -482,14 +570,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // Inside the main-module guard, not at import time: company-history.mjs
   // imports detectReposts/parseScanHistory from here, so a top-level check
   // would judge the IMPORTER's argv.
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  //
+  // requireOperand: without it, `--window --summary` reads --summary as the
+  // window value; flagValue() has no adjacency check, parseInt('--summary')
+  // is NaN, and windowDays silently falls back to DEFAULT_WINDOW_DAYS at exit
+  // 0 instead of reporting the malformed flag (#3087).
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
   if (selfTestMode) {
     runSelfTest();
   }
 
   const rows = loadScanHistory();
-  const clusters = detectReposts(rows, windowDays);
+  const aggregators = loadAggregatorCompanies();
+  const clusters = detectReposts(rows, windowDays, MIN_REPOST_SPAN_DAYS, aggregators);
 
   if (summaryMode) {
     printSummary(clusters);
@@ -498,6 +592,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       metadata: {
         windowDays,
         totalRows: rows.length,
+        // Distinguishes "no aggregators configured" from "configured and
+        // skipped" — a mis-keyed flag that silently matches nothing would
+        // otherwise look identical to a working one.
+        aggregatorCompanies: aggregators.size,
         clusters: clusters.length,
       },
       clusters,

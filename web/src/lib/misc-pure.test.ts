@@ -3,68 +3,76 @@ import { canon } from "./explore-ai";
 import { companyDomain, companyInitials, monogramHue } from "./company";
 
 describe("canon (URL canonicalization)", () => {
-  it("returns empty string for an empty URL (new URL throws, catch branch)", () => {
+  // canon() now delegates to core/url-key.mjs's normalizeUrl (see that file's
+  // docstring): it deliberately UNDER-normalizes — keeping scheme, path case,
+  // userinfo, port, and every non-tracking query param — because the old
+  // host+pathname-only key collapsed two DIFFERENT Greenhouse postings that
+  // shared a host+path but differed only by `?gh_jid=` onto one dedup key,
+  // silently dropping every opening after the first at that employer. Only a
+  // fixed tracking-param denylist and the hash fragment are stripped.
+  it("returns empty string for an empty URL", () => {
     expect(canon("")).toBe("");
   });
 
-  it("lowercases host and path, keeping host+pathname only", () => {
-    expect(canon("https://Example.com/Jobs/123")).toBe("example.com/jobs/123");
+  it("returns empty string for a string with no scheme (new URL throws)", () => {
+    // No special "fallback branch" any more — anything that isn't a
+    // parseable absolute http(s) URL is simply unkeyable.
+    expect(canon("example.com/Path/?q=1")).toBe("");
+    expect(canon("HELLO")).toBe("");
   });
 
-  it("strips query string and hash fragment for a valid URL", () => {
-    expect(canon("https://boards.greenhouse.io/acme/jobs/42?utm=x#apply")).toBe(
-      "boards.greenhouse.io/acme/jobs/42",
+  it("returns empty string for a non-http(s) scheme", () => {
+    expect(canon("mailto:a@b.com")).toBe("");
+    expect(canon("ftp://example.com/a")).toBe("");
+  });
+
+  it("lowercases the host but KEEPS path case (no over-normalization)", () => {
+    expect(canon("https://Example.com/Jobs/123")).toBe("https://example.com/Jobs/123");
+  });
+
+  it("strips the hash fragment but keeps a non-tracking query string", () => {
+    expect(canon("https://boards.greenhouse.io/acme/jobs/42?gh_jid=111#apply")).toBe(
+      "https://boards.greenhouse.io/acme/jobs/42?gh_jid=111",
     );
   });
 
-  it("strips a trailing slash from a valid URL path", () => {
-    expect(canon("https://jobs.lever.co/acme/")).toBe("jobs.lever.co/acme");
+  it("strips a trailing slash from a non-root path", () => {
+    expect(canon("https://jobs.lever.co/acme/")).toBe("https://jobs.lever.co/acme");
   });
 
-  it("drops the scheme/protocol entirely (host+pathname only)", () => {
-    // http vs https on the same host+path canonicalize to the SAME key
-    expect(canon("http://example.com/a")).toBe("example.com/a");
-    expect(canon("https://example.com/a")).toBe("example.com/a");
+  it("normalizes http to https, so the two dedup to the same key", () => {
+    expect(canon("http://example.com/a")).toBe("https://example.com/a");
+    expect(canon("https://example.com/a")).toBe("https://example.com/a");
   });
 
-  it("drops userinfo but KEEPS the port (uses URL.host, not URL.hostname)", () => {
-    // URL.host includes the port; the source intentionally uses x.host, so two
-    // URLs that differ only by an explicit port do NOT dedup. Asserting current
-    // behavior.
-    expect(canon("https://user:pw@example.com:8080/path")).toBe("example.com:8080/path");
+  it("KEEPS userinfo and port (does not strip either)", () => {
+    expect(canon("https://user:pw@example.com:8080/path")).toBe(
+      "https://user:pw@example.com:8080/path",
+    );
   });
 
-  it("normalizes a bare host with no path to just the host (root '/' stripped)", () => {
-    // new URL adds pathname '/', then trailing-slash strip removes it
-    expect(canon("https://example.com")).toBe("example.com");
-    expect(canon("https://example.com/")).toBe("example.com");
+  it("normalizes a bare host to the host plus its single root slash", () => {
+    expect(canon("https://example.com")).toBe("https://example.com/");
+    expect(canon("https://example.com/")).toBe("https://example.com/");
   });
 
-  it("two URLs differing only in query/hash/case canonicalize identically (dedup intent)", () => {
-    const a = canon("https://Example.com/Jobs/?ref=1");
-    const b = canon("https://example.com/jobs/#section");
+  it("strips a real tracking param (utm_...) so the same posting still dedups", () => {
+    const a = canon("https://boards.greenhouse.io/acme/jobs?gh_jid=111&utm_source=li");
+    const b = canon("https://boards.greenhouse.io/acme/jobs?gh_jid=111");
     expect(a).toBe(b);
-    expect(a).toBe("example.com/jobs");
+    expect(a).toBe("https://boards.greenhouse.io/acme/jobs?gh_jid=111");
   });
 
-  describe("fallback branch (string that is not a parseable URL)", () => {
-    it("lowercases, strips from '?' onward, and strips a trailing slash", () => {
-      // "example.com/Path/" is not absolute -> new URL throws -> catch branch
-      expect(canon("example.com/Path/?q=1")).toBe("example.com/path");
-    });
+  it("does NOT dedup two postings that differ only by a non-tracking param (the #2429-class fix)", () => {
+    const a = canon("https://boards.greenhouse.io/acme/jobs?gh_jid=111");
+    const b = canon("https://boards.greenhouse.io/acme/jobs?gh_jid=222");
+    expect(a).not.toBe(b);
+  });
 
-    it("strips from '#' onward in the fallback branch", () => {
-      expect(canon("example.com/Path#frag")).toBe("example.com/path");
-    });
-
-    it("lowercases a plain non-URL token unchanged otherwise", () => {
-      expect(canon("HELLO")).toBe("hello");
-    });
-
-    it("strips only a single trailing slash (regex /\\/$/)", () => {
-      // Two trailing slashes -> only the last one removed
-      expect(canon("example.com//")).toBe("example.com/");
-    });
+  it("does NOT dedup two URLs differing only by path case (case is preserved, not folded)", () => {
+    const a = canon("https://Example.com/Jobs/?gh_jid=1");
+    const b = canon("https://example.com/jobs/?gh_jid=1");
+    expect(a).not.toBe(b);
   });
 });
 

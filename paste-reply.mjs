@@ -44,6 +44,7 @@
 
 import fs from 'node:fs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { renameSyncWithRetry } from './tracker-utils.mjs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -134,7 +135,7 @@ export function appendCandidate(candidate, candidatesPath = CANDIDATES_PATH) {
   // can never leave the real candidates file truncated/corrupted.
   const tmpPath = `${candidatesPath}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(candidates, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, candidatesPath);
+  renameSyncWithRetry(tmpPath, candidatesPath);
   return candidates.length;
 }
 

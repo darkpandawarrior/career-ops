@@ -51,7 +51,11 @@ describe("CvIngest — per-profile cliId routing", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/cli"));
   });
 
-  it("shows the needs-cli error and does NOT POST when no CLI is selected", async () => {
+  it("plain-text paste needs no CLI at all — it goes straight to review", async () => {
+    // cv-ingest.tsx's ingestText() takes the CLI-free path unconditionally
+    // (pasted text is already readable, same as a .md/.txt drop) — only a
+    // PDF/DOCX upload ever needs a CLI. Pin that here so the CLI-required test
+    // below isn't the only place this contract is exercised.
     const { fetchMock, calls } = stubFetch({ selected: null });
     render(<CvIngest />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/cli"));
@@ -60,9 +64,24 @@ describe("CvIngest — per-profile cliId routing", () => {
     fireEvent.change(textarea, { target: { value: "Senior Android Engineer, 5 years" } });
     fireEvent.click(screen.getByText("Read my CV"));
 
+    expect(await screen.findByText("Here's your CV — review and save")).toBeTruthy();
+    expect(calls.some((c) => c.url === "/api/cv/ingest")).toBe(false);
+  });
+
+  it("shows the needs-cli error and does NOT POST when a PDF is uploaded with no CLI selected", async () => {
+    const { fetchMock, calls } = stubFetch({ selected: null });
+    const { container } = render(<CvIngest />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/cli"));
+
+    // Only a PDF/DOCX upload routes through ingestFile()'s CLI-required path —
+    // a .md/.txt drop and a plain paste both take the CLI-free path instead.
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(["%PDF-1.4 fake"], "resume.pdf", { type: "application/pdf" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
     // needs-cli error copy renders; no ingest POST was made. Query the unique
     // sentence (the link's "Connect your AI CLI" text appears separately too).
-    expect(await screen.findByText(/To read a PDF, connect your AI CLI/i)).toBeTruthy();
+    expect(await screen.findByText(/To read a PDF or Word file, connect an AI CLI in Config/i)).toBeTruthy();
     expect(calls.some((c) => c.url === "/api/cv/ingest")).toBe(false);
   });
 

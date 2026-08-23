@@ -48,6 +48,7 @@ const EMPTY_LISTS = {
   allow: [] as string[],
   block: [] as string[],
   alwaysAllow: [] as string[],
+  blockHard: [] as string[],
 };
 
 describe("serializePortals", () => {
@@ -117,6 +118,7 @@ describe("serializePortals", () => {
       allow: ["Remote"],
       block: ["Onsite"],
       alwaysAllow: ["Bengaluru"],
+      blockHard: [] as string[],
     };
     const doc = yaml.load(serializePortals(f)) as Record<string, any>;
     expect(doc.title_filter).toEqual({ positive: f.positive, negative: f.negative });

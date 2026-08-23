@@ -361,6 +361,7 @@ On success, in Step 5 use `pdf_emoji` = `✅` and in Step 6 set `"pdf"` to the o
 **ATS rules:**
 - Single-column (no sidebars)
 - Standard headers: "Professional Summary", "Work Experience", "Education", "Skills", "Certifications", "Projects"
+- Optional sections (Core Competencies, Work Experience, Projects, Education, Certifications, Awards & Honors, Skills) are dropped entirely — header included — when their array is empty or absent
 - No text in images/SVGs
 - No critical info in headers/footers
 - UTF-8, selectable text

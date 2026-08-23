@@ -27,6 +27,9 @@ copyFileSync(join(ROOT, 'generate-pdf.mjs'), script);
 // resolver (upstream doesn't have this file) — copy it alongside so the
 // sandboxed script's relative import resolves.
 copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
+// generate-pdf.mjs also imports readCvSectionOrder from theme-style.mjs
+// (#2533) — copy it alongside for the same reason.
+copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
 mkdirSync(playwrightStub, { recursive: true });
 writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   name: 'playwright',

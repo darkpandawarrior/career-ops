@@ -30,12 +30,16 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { reportPrefix } from './jd-capture.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT). Data paths must use CAREER_OPS_DATA, never CAREER_OPS.
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const JDS_DIR = join(CAREER_OPS_DATA, 'jds');
 const PIPELINE_PATH = join(CAREER_OPS_DATA, 'data', 'pipeline.md');
+
+const KNOWN_FLAGS = ['--company', '--role', '--report', '--pipeline', '--dry-run', '--help', '-h'];
+const VALUE_FLAGS = ['--company', '--role', '--report'];
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
@@ -91,7 +95,17 @@ let reportNum = null;
 // its exports doesn't read process.argv or call process.exit — the repo's
 // standard direct-run guard at the bottom is what invokes it.
 function parseCliArgs(args) {
-  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+  // Reject a mistyped flag (--comany, --reprot) before any work, and handle
+  // --help/-h wherever they appear. Inside the function, not at module scope:
+  // this file is imported for its exports (test-all.mjs does), and a
+  // module-scope call would read the IMPORTER's argv and exit(1) on flags that
+  // are perfectly valid for it.
+  validateFlags(args, KNOWN_FLAGS, HELP_TEXT, {
+    valueFlags: VALUE_FLAGS,
+    requireOperand: true,
+  });
+
+  if (args.length === 0) {
     console.log(HELP_TEXT);
     process.exit(0);
   }
@@ -104,11 +118,24 @@ function parseCliArgs(args) {
       dryRun = true;
     } else if (arg.startsWith('--company=')) {
       overrideCompany = arg.slice('--company='.length).trim();
-    } else if (arg === '--company' && args[i + 1]) {
+    } else if (arg === '--company') {
+      // The old `args[i + 1]` truthiness check consumed the NEXT flag as the
+      // company name whenever --company was given with no value (e.g.
+      // `--company --pipeline` set overrideCompany to "--pipeline" and left
+      // pipeline mode off, silently, at exit 0 (#3087)). A value that starts
+      // with `--` is another flag, not a company name.
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
+        console.error('--company requires a value.');
+        process.exit(1);
+      }
       overrideCompany = args[++i].trim();
     } else if (arg.startsWith('--role=')) {
       overrideRole = arg.slice('--role='.length).trim();
-    } else if (arg === '--role' && args[i + 1]) {
+    } else if (arg === '--role') {
+      if (args[i + 1] === undefined || args[i + 1].startsWith('--')) {
+        console.error('--role requires a value.');
+        process.exit(1);
+      }
       overrideRole = args[++i].trim();
     } else if (arg.startsWith('--report=')) {
       reportNum = arg.slice('--report='.length).trim();

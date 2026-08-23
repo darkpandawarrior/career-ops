@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { checkRequest, parseAllowedHosts } from "@/lib/origin-guard.mjs";
 
 /**
  * Multi-profile context propagation.
@@ -27,6 +28,26 @@ export const PROFILE_HEADER = "x-co-profile";
 const PROFILE_COOKIE = "co-profile";
 
 export function proxy(req: NextRequest) {
+  // Same-origin + loopback guard over the whole /api surface — every /api
+  // route may spawn a child process or write the user's files, so an
+  // unauthenticated request is a remote-code-execution primitive, reachable
+  // two ways: F1 drive-by (any page the user visits can POST to
+  // localhost:3000/api/... in the background) and F2 LAN (if the dev server
+  // is bound to 0.0.0.0). See origin-guard.mjs for the two-layer rationale.
+  // Opt in to extra hosts with CAREER_OPS_WEB_ALLOWED_HOSTS; unset means
+  // loopback only.
+  if (req.nextUrl.pathname.startsWith("/api/")) {
+    const decision = checkRequest({
+      secFetchSite: req.headers.get("sec-fetch-site"),
+      origin: req.headers.get("origin"),
+      host: req.headers.get("host"),
+      allowedHosts: parseAllowedHosts(process.env.CAREER_OPS_WEB_ALLOWED_HOSTS),
+    });
+    if (!decision.ok) {
+      return NextResponse.json({ error: decision.reason }, { status: decision.status });
+    }
+  }
+
   const hasParam = req.nextUrl.searchParams.has("profile");
   const param = req.nextUrl.searchParams.get("profile");
   const cookie = req.cookies.get(PROFILE_COOKIE)?.value;

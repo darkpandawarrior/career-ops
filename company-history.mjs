@@ -46,7 +46,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 
-import { parseScanHistory, detectReposts } from './detect-reposts.mjs';
+import { parseScanHistory, detectReposts, loadAggregatorCompanies, isKeyLookup } from './detect-reposts.mjs';
+import { normalizeCompanyName } from './invite-match.mjs';
 import { normalizeCompany, resolveTrackerPath } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import {
@@ -77,6 +78,13 @@ const EXPLANATION_LINE =
   'high-volume inboxes, evergreen requisitions, re-opened searches, and your own unlogged responses ' +
   'all produce these patterns — facts, not verdicts';
 
+// Why the churn axis is empty for a flagged aggregator. Without this the card
+// would read like a company that was checked and came back clean — a
+// different claim than "not evaluated".
+const AGGREGATOR_LINE =
+  'marked `aggregator: true` in portals.yml — a multi-employer board, so the same title is a ' +
+  'different employer\'s job; posting churn was not evaluated for this company, not found absent';
+
 // Locale-independent company ordering. A bare String.localeCompare() sorts by
 // the host's default locale, so emitted ordering could differ between machines;
 // pin the collator to 'en' so the output is byte-for-byte deterministic
@@ -85,7 +93,11 @@ const companyCollator = new Intl.Collator('en');
 const compareCompany = (a, b) => companyCollator.compare(String(a), String(b));
 
 // --- CLI args ---
-const KNOWN_FLAGS = ['--summary', '--self-test', '--company', '--silence-window', '--include-stale', '--scan-history', '--followups', '--help', '-h'];
+// ponytail: --emit-signal is recognized and its (non-)value validated below
+// because a co-located test already asserts on that, but the RFC #1506
+// no-response-friction JSON-Lines emission it upstream gates is not ported —
+// nothing here currently consumes it. Wire that up if a caller needs it.
+const KNOWN_FLAGS = ['--summary', '--self-test', '--company', '--silence-window', '--include-stale', '--scan-history', '--followups', '--emit-signal', '--help', '-h'];
 const VALUE_FLAGS = ['--company', '--silence-window', '--scan-history', '--followups'];
 
 const USAGE = `Usage:
@@ -119,6 +131,17 @@ function parseArgs(argv) {
     a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
   if (unknownFlags.length) {
     console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
+  // --emit-signal is a bare boolean flag, not a value flag: the unrecognized-
+  // flag check above strips the `=` suffix before matching KNOWN_FLAGS, so
+  // `--emit-signal=true` passes that check silently rather than being caught
+  // as unrecognized. Reject it explicitly here instead.
+  const emitSignalValue = args.find(a => a.startsWith('--emit-signal='));
+  if (emitSignalValue !== undefined) {
+    console.error('Error: --emit-signal does not accept a value.');
     console.error(USAGE);
     process.exit(1);
   }
@@ -226,11 +249,20 @@ export function loadFollowupRows(rootDir = CAREER_OPS, overridePath) {
   return { rows: parseFollowups(readFileSync(path, 'utf-8')), loaded: true };
 }
 
-export function loadRepostClusters(rootDir = CAREER_OPS, overridePath) {
+// Returns the clusters plus the aggregator key Map, because the card needs
+// both: the clusters to report, and the Map to explain why a flagged company
+// has none — without it an aggregator would render as `none-detected`, which
+// claims a negative result from a check that never ran (#2703).
+export function loadRepostClusters(rootDir = CAREER_OPS, overridePath, portalsPath) {
   const path = overridePath || join(rootDir, 'data/scan-history.tsv');
-  if (!existsSync(path)) return { clusters: [], loaded: false };
+  // Same override scan.mjs and detect-reposts.mjs honour, so a sandboxed run
+  // points all three at one config instead of silently reading the real one.
+  const aggregators = loadAggregatorCompanies(
+    portalsPath || process.env.CAREER_OPS_PORTALS || join(rootDir, 'portals.yml'),
+  );
+  if (!existsSync(path)) return { clusters: [], aggregators, loaded: false };
   const rows = parseScanHistory(readFileSync(path, 'utf-8'));
-  return { clusters: detectReposts(rows), loaded: true };
+  return { clusters: detectReposts(rows, undefined, undefined, aggregators), aggregators, loaded: true };
 }
 
 // Dynamic-only dependency: funnel-velocity.mjs ships on main, but the
@@ -403,8 +435,15 @@ export function computeResponsiveness(rows, followupCountsByAppNum, opts = {}) {
 }
 
 // --- Posting-churn axis (pure) ---
-export function computePostingChurn(clusters, scanHistoryLoaded) {
+//
+// `isAggregator` gets its own label rather than folding into `none-detected`:
+// `no-scan-data` means the check could not run, `none-detected` means it ran
+// and found nothing, and an aggregator belongs on the first side — the
+// detector deliberately skipped it, so `none-detected` would assert a
+// negative result from a check that never happened (#2703).
+export function computePostingChurn(clusters, scanHistoryLoaded, isAggregator = false) {
   if (!scanHistoryLoaded) return { label: 'no-scan-data', clusters: [] };
+  if (isAggregator) return { label: 'aggregator-not-evaluated', clusters: [] };
   const mapped = (Array.isArray(clusters) ? clusters : []).map(c => ({
     role: c.role,
     repostCount: c.repostCount,
@@ -463,13 +502,31 @@ export function buildCompanyCards(sources, opts = {}) {
 
   const keys = new Set([...trackerByKey.keys(), ...clustersByKey.keys()]);
 
+  // A flagged aggregator normally has neither tracker rows nor clusters — the
+  // detector skipped it, and you rarely apply to a board — so it would fall
+  // out of the union above and vanish from the report entirely. That is the
+  // exact failure the aggregator-not-evaluated label exists to prevent: a
+  // company missing from the report reads as "nothing to say", indistinguishable
+  // from a clean result. So seed the key set from the flagged companies too,
+  // keyed the way cards are keyed (normalizeCompany), while membership is
+  // still tested with the function that built the lookup (isAggregatorCompany).
+  const aggregatorNameByCardKey = new Map();
+  if (sources.aggregators instanceof Map) {
+    for (const rawName of sources.aggregators.values()) {
+      const cardKey = normalizeCompany(String(rawName || ''));
+      if (!cardKey) continue;
+      aggregatorNameByCardKey.set(cardKey, rawName);
+      keys.add(cardKey);
+    }
+  }
+
   const cards = [];
   const hygieneAgedApplied = [];
 
   for (const key of keys) {
     const trackerGroup = trackerByKey.get(key);
     const clusterGroup = clustersByKey.get(key);
-    const companyName = trackerGroup?.company || clusterGroup?.company || key;
+    const companyName = trackerGroup?.company || clusterGroup?.company || aggregatorNameByCardKey.get(key) || key;
 
     const responsiveness = computeResponsiveness(trackerGroup?.rows || [], followupCountsByAppNum, {
       now: opts.now,
@@ -480,10 +537,12 @@ export function buildCompanyCards(sources, opts = {}) {
       medianResponseDays: sources.medianResponseDays,
     });
 
-    const postingChurn = computePostingChurn(clusterGroup?.clusters || [], sourcesLoaded.scanHistory);
+    const isAggregator = isAggregatorCompany(companyName, sources.aggregators);
+    const postingChurn = computePostingChurn(clusterGroup?.clusters || [], sourcesLoaded.scanHistory, isAggregator);
 
     const hasAnySilent = responsiveness.facts.some(f => 'silentDays' in f);
     const explanations = hasAnySilent ? [EXPLANATION_LINE] : [];
+    if (isAggregator && sourcesLoaded.scanHistory) explanations.push(AGGREGATOR_LINE);
 
     for (const f of responsiveness.facts) {
       if ('silentDays' in f) {
@@ -502,27 +561,56 @@ export function buildCompanyCards(sources, opts = {}) {
       silenceWindowDays,
       staleAfterDays,
       companies: cards.length,
+      // Distinguishes "no aggregators configured" from "configured and
+      // applied" — a flag matching nothing would otherwise look identical to
+      // a working one.
+      aggregatorCompanies: isKeyLookup(sources.aggregators) ? sources.aggregators.size : 0,
       sources: sourcesLoaded,
     },
     hygiene: { agedApplied: hygieneAgedApplied },
     companies: cards,
+    // Carried on the result so getCompanyCard can answer for a company with no
+    // card at all (an aggregator never applied to).
+    aggregators: isKeyLookup(sources.aggregators) ? sources.aggregators : new Map(),
     dataQuality: { unjoinable },
   };
 }
 
+// Is this company one the user marked `aggregator: true`?
+//
+// The Map is keyed with normalizeCompanyName (invite-match), while cards are
+// keyed with normalizeCompany (tracker-utils) — different functions that
+// disagree on most real names ("joinup.ch" -> "joinupch" under one, "joinup
+// ch" under the other). Testing a card key against the Map would therefore
+// match almost nothing, silently. Re-derive the key from the raw display name
+// with the SAME function that built the Map instead.
+export function isAggregatorCompany(companyName, aggregators) {
+  if (!isKeyLookup(aggregators) || aggregators.size === 0) return false;
+  const raw = String(companyName || '').trim();
+  if (!raw) return false;
+  return aggregators.has(normalizeCompanyName(raw) || raw.toLowerCase());
+}
+
 // --- Single-company lookup ---
-export function getCompanyCard(result, companyName) {
+export function getCompanyCard(result, companyName, aggregators) {
   const key = normalizeCompany(String(companyName || ''));
   const found = result.companies.find(c => c.key === key);
   if (found) return found;
 
+  // An aggregator the user never applied to has no tracker rows and no
+  // clusters, so it lands here. It must still not claim `none-detected` — the
+  // check was skipped for it, exactly as on the full card.
   const scanHistoryLoaded = !!result.metadata?.sources?.scanHistory;
+  const isAggregator = isAggregatorCompany(companyName, aggregators ?? result.aggregators);
+  const churnLabel = !scanHistoryLoaded
+    ? 'no-scan-data'
+    : (isAggregator ? 'aggregator-not-evaluated' : 'none-detected');
   return {
     company: companyName,
     key,
     responsiveness: { label: 'no-history', facts: [] },
-    postingChurn: { label: scanHistoryLoaded ? 'none-detected' : 'no-scan-data', clusters: [] },
-    explanations: [],
+    postingChurn: { label: churnLabel, clusters: [] },
+    explanations: isAggregator && scanHistoryLoaded ? [AGGREGATOR_LINE] : [],
   };
 }
 
@@ -864,6 +952,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           trackerRows: tracker.rows,
           followupRows: followups.rows,
           repostClusters: scanHistory.clusters,
+          aggregators: scanHistory.aggregators,
           sourcesLoaded: {
             tracker: tracker.loaded,
             followups: followups.loaded,

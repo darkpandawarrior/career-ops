@@ -68,19 +68,24 @@ describe("assembleDedupContext — scan-history.tsv parsing", () => {
     expect(urls.size).toBe(2);
   });
 
-  it("canonicalizes and dedups URLs that differ only by case/trailing-slash", () => {
+  it("canonicalizes host case and trailing slash, but keeps path case distinct", () => {
     const r = root(
       [
         "url",
-        "https://Acme.com/Jobs/1", // mixed case
-        "https://acme.com/jobs/1/", // trailing slash + lowercase
+        "https://Acme.com/Jobs/1", // mixed case IN THE PATH — a distinct key, not folded
+        "https://acme.com/jobs/1/", // trailing slash — collapses onto the exact form
         "https://acme.com/jobs/1", // exact
       ].join("\n"),
     );
     const { urls } = assembleDedupContext(r);
-    // canon lowercases host+path and strips trailing slash -> all three collapse.
-    expect(urls.size).toBe(1);
-    expect([...urls][0]).toBe("acme.com/jobs/1");
+    // canon() lowercases the HOST and strips a trailing slash, but deliberately
+    // keeps path case (see core/url-key.mjs's docstring) — over-normalizing the
+    // path is what previously collapsed two distinct postings onto one key. So
+    // the trailing-slash pair collapses to one key, but the path-case variant
+    // stays a second, distinct key.
+    expect(urls.size).toBe(2);
+    expect(urls.has(canon("https://acme.com/jobs/1"))).toBe(true);
+    expect(urls.has(canon("https://Acme.com/Jobs/1"))).toBe(true);
   });
 
   it("ignores rows whose col 0 is not an http(s) URL", () => {
@@ -133,7 +138,7 @@ describe("assembleDedupContext — inbox + applications integration", () => {
     ]);
     const { urls, lines } = assembleDedupContext(r);
     expect(urls.size).toBe(3);
-    expect(urls.has("acme.com/jobs/1")).toBe(true);
+    expect(urls.has(canon("https://acme.com/jobs/1"))).toBe(true);
     expect(urls.has(canon("https://newco.com/openings/9"))).toBe(true);
     expect(urls.has(canon("https://nocompany.com/job"))).toBe(true);
     // Companies from inbox are collected even when the URL is invalid.

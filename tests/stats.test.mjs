@@ -1,5 +1,5 @@
 // tests/stats.test.mjs — moved verbatim from test-all.mjs (#1604).
-import { pass, fail, run, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, run, NODE, ROOT, lastRunFailure } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -145,6 +145,16 @@ try {
     pass('stats.mjs --summary renders the human table');
   } else {
     fail('stats.mjs --summary missing header');
+  }
+
+  // Unknown flag smoke: must fail cleanly and report the invalid-flag message.
+  const bogusOut = run(NODE, [join(ROOT, 'stats.mjs'), '--bogus']);
+  const bogusFailure = lastRunFailure();
+  const bogusOutput = `${bogusFailure?.stdout ?? ''}\n${bogusFailure?.stderr ?? ''}`;
+  if (bogusOut === null && bogusFailure?.status !== 0 && /invalid|unrecognized|unknown/i.test(bogusOutput)) {
+    pass('stats.mjs --bogus rejects unknown flags with a non-zero exit status');
+  } else {
+    fail(`stats.mjs --bogus did not fail as expected: exit=${bogusFailure?.status ?? 'null'} output=${bogusOutput.trim()}`);
   }
 } catch (e) {
   fail(`stats.mjs tests crashed: ${e.message}`);

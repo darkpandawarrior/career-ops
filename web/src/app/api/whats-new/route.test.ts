@@ -229,13 +229,17 @@ describe("GET /api/whats-new — row filtering (toOffer guards)", () => {
 });
 
 describe("GET /api/whats-new — caps at 24", () => {
-  it("returns at most 24 offers even when more are in-window", async () => {
+  it("returns at most 24 offers, but count is the full match total (not the render cap)", async () => {
+    // whats-new.mjs's collectWhatsNew contract: `count` is always the FULL
+    // unique-match total, and only `offers` (the rendered slice) is capped —
+    // deliberately, so a UI card limit can never masquerade as the number of
+    // matches actually found.
     const rows = Array.from({ length: 30 }, (_, i) =>
       row({ url: `https://c.com/${i}`, company: `Co${i}`, firstSeen: dateNDaysAgo(1) }),
     );
     writeHistory(rows);
     const body = await callGet(7);
-    expect(body.count).toBe(24);
+    expect(body.count).toBe(30);
     expect(body.offers).toHaveLength(24);
   });
 });
@@ -258,7 +262,7 @@ describe("GET /api/whats-new — legacy no-dates fallback", () => {
     expect(body.offers.every((o) => o.postedAt === "")).toBe(true);
   });
 
-  it("the fallback still excludes evaluated companies and caps at 12", async () => {
+  it("the fallback still excludes evaluated companies, caps offers at 12, and reports the full count", async () => {
     readApplications.mockReturnValue([appOf("Skip Me")]);
     const rows = [
       row({ url: "https://skip.com/x", company: "Skip Me", firstSeen: "n/a" }),
@@ -268,7 +272,10 @@ describe("GET /api/whats-new — legacy no-dates fallback", () => {
     ];
     writeHistory(rows);
     const body = await callGet(7);
-    expect(body.count).toBe(12);
+    // Same count-vs-offers contract as the dated path: count is the full
+    // unique match total (20, "Skip Me" excluded), offers is capped at 12.
+    expect(body.count).toBe(20);
+    expect(body.offers).toHaveLength(12);
     expect(body.offers.some((o) => o.company === "Skip Me")).toBe(false);
   });
 
