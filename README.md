@@ -6,7 +6,7 @@
 
 ---
 
-![engine version](https://img.shields.io/badge/engine-career--ops_post--v1.26.0-6366f1?style=flat-square)
+![engine version](https://img.shields.io/badge/engine-career--ops_v1.28.0-6366f1?style=flat-square)
 ![dashboard version](https://img.shields.io/badge/dashboard-web_v0.6.1-22d3ee?style=flat-square)
 ![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
@@ -46,8 +46,8 @@
 
 </details>
 
-> **At a glance** — **77** zero-auth job-board providers · **2,741** engine tests · **6** machine-checked
-> fork adaptations · **28,746** ATS boards per full sweep, of which **~46%** are permanently dead and
+> **At a glance** — **84** zero-auth job-board providers · **4,100+** engine tests · **7** machine-checked
+> fork adaptations · **38,854** ATS boards per full sweep, of which **~46%** are permanently dead and
 > skipped from `data/dead-boards.tsv`. Local-first: no hosted service, no account, your data never
 > leaves the machine.
 
@@ -486,7 +486,7 @@ HireSignal is not a separate job-search engine bolted next to career-ops. It is 
 | career-ops capability | How HireSignal uses it |
 |----------------------|----------------------|
 | Data contract | Candidate data kept in user-layer files: `cv.md`, `config/profile.yml`, `config/job-search.yml`, `modes/_profile.md`, `portals.yml`, `data/`, `reports/`, `output/` |
-| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, 77 provider modules ([`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md)), scan history, and pipeline conventions — no hosted service needed |
+| Scanner architecture | Reuses `scan.mjs`, `scan-ats-full.mjs`, 84 provider modules ([`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md)), scan history, and pipeline conventions — no hosted service needed |
 | Tracker model | `data/applications.md`, `data/pipeline.md`, status normalization, deduplication, and report links remain career-ops compatible |
 | Modes and templates | Role evaluation prompts, profile narrative, resume templates, and PDF generation flow remain available for agent-assisted review |
 | Liveness and quality rules | Job links checked, low-fit roles discouraged, no automatic submission |
@@ -538,7 +538,7 @@ The original code is MIT licensed. The `career-ops` name and brand belong to the
 
 **Fork ← upstream.** Absorbed in explicit windows, never by merging `upstream/main`. A plain merge
 reintroduces files this fork removed on purpose and silently reverts fork adaptations. The
-post-v1.26.0 window was 104 commits / 194 files, classified before a single file was touched:
+v1.28.0 window was 126 commits / 251 files, classified before a single file was touched:
 
 | Class | Meaning | Treatment |
 |---|---|---|
@@ -645,7 +645,9 @@ kirklazar-android/hiresignal --state merged`.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **career-ops post-v1.26.0 · web v0.6.1** (current) | 2026-08-14 | Absorbed the post-v1.26.0 upstream window (104 commits / 194 files) — see [Relationship to Upstream Updates](#relationship-to-upstream-updates); `fork-adaptations.mjs` encodes the fork layer as machine-checked rules and runs in `test-all.mjs`; multi-profile adaptation normalized from ten shapes to one, making it autofixable; `scan.mjs` gains upstream country-eligibility filtering (reads the JD **body**, where "US-only" actually lives, rather than the structured location field), AND-groups in `title_filter.positive` ("android + kotlin"), and a scan-runs row on failed/interrupted sweeps; reverse-ATS sweep skips known-dead boards via `data/dead-boards.tsv` (~46% of the public directory is permanently 404) and drops single-host ATSs to 6 concurrent, which stopped self-throttling — unreachable boards 16,000 → 13,252 and DNS wait 14,133s → 83s; `tracker-lock` helpers converged onto upstream's `tracker-utils`; `voice-dna.md` split into a tracked template + gitignored working copy |
+| **career-ops v1.28.0 · web v0.7.1** (current) | 2026-08-24 | Absorbed the v1.28.0 upstream window (126 commits / 251 files): `providers/_ip-guard.mjs` (SSRF defence, wired into `_dns-cache` and `_http`), three providers (eightfold, jobbankca, mycareersfuture), `scan-hn.mjs`, `intake.mjs`, `story-provenance-check.mjs`, `title-keywords.mjs`, and the web `origin-guard` / `url-key` / `whats-new` modules. Fork-only work on top: **owed-actions tracking** (`owed-actions.mjs` — models the screening steps where *they* are waiting on *you*, the failure mode that killed four applications); repliable-contact urgency (`urgent` was reachable only on day 1, so live threads aged into `overdue` within 24h and sat with 46 no-reply rows); a self-identity filter so contact extraction stops reporting your own address; **telemetry truthfulness** — `scan-runs.tsv`'s header is written only at creation, so an appended column silently offset every name-based read and `stats.mjs` reported `avg 30.2 new per run` (the *dupes* column) when the truth was `0.17`; zero-yield escalation after the scanner reported `found=0` for **20 consecutive days** while exiting 0; and doc-drift guards (24 undocumented providers written up, README fork-delta section, both checked in `npm test`) |
+| career-ops v1.27.0 · web v0.7.0 | 2026-08-21 | Absorbed the v1.27.0 window (114 commits / 220 files): five named CV templates, senjob + yourator providers, `negotiation-roi.mjs`, `lib/ascii-fold`, `lib/gemini-node-floor`, `lib/local-today`, Indonesian + Russian interview modes, and the web CLI-spawn refactor. Fixed a live data-safety bug predating the window — the portals, profile and followups/cadence routes resolved `careerOpsRoot()` instead of `requestRoot()`, so every vitest run wrote fixture data into the real gitignored `portals.yml` and `config/profile.yml`. Fork-only: `salary_filter.min_by_currency` (per-market comp floors — a flat `min` cannot express ₹35L *and* $60k, and configuring one silently deletes the other market), `cutshort` salary extraction, the Careerjet v4 provider, and `tracker-sync-check.mjs` ported after `verify-pipeline.mjs` was found calling it with no import — printing a warning and exiting green |
+| career-ops post-v1.26.0 · web v0.6.1 | 2026-08-14 | Absorbed the post-v1.26.0 upstream window (104 commits / 194 files) — see [Relationship to Upstream Updates](#relationship-to-upstream-updates); `fork-adaptations.mjs` encodes the fork layer as machine-checked rules and runs in `test-all.mjs`; multi-profile adaptation normalized from ten shapes to one, making it autofixable; `scan.mjs` gains upstream country-eligibility filtering (reads the JD **body**, where "US-only" actually lives, rather than the structured location field), AND-groups in `title_filter.positive` ("android + kotlin"), and a scan-runs row on failed/interrupted sweeps; reverse-ATS sweep skips known-dead boards via `data/dead-boards.tsv` (~46% of the public directory is permanently 404) and drops single-host ATSs to 6 concurrent, which stopped self-throttling — unreachable boards 16,000 → 13,252 and DNS wait 14,133s → 83s; `tracker-lock` helpers converged onto upstream's `tracker-utils`; `voice-dna.md` split into a tracked template + gitignored working copy |
 | career-ops v1.24.0 · web v0.5.0 | 2026-08-02 | Follow-up Tracker page (`/followups`) with logging, history and cadence settings; backend-rendered PDFs (the agent writes HTML + a format sidecar, the platform renders — no sandbox-escalation prompt); cover-letter fact gate extended to employer/title/tool claims; `jd-similarity.mjs`, `application-artifacts.mjs`, `company-funded.mjs`, `weekly-digest.mjs`, `mark-pdf-ready.mjs`, `portal-health-lock.mjs`; DNS pacing + resolver negative-cache for full sweeps; word-boundary location filter with URL and remote-title hints; `set-status --row/--report` explicit selectors; Italian interview modes |
 | career-ops v1.23.0 + unreleased main · web v0.4.0 | 2026-07-30 | role-matcher.mjs fixes (MTS-prefix stripping, accent-folding, exact-title short-circuit, `product`/CI/CD-acronym handling); new standalone tools — `discover-ats.mjs`, `skill-extract.mjs`, `contacts.mjs`, `company-history.mjs`, `batch-tailor.mjs`, `fix-slugs.mjs`, `check-table-freshness.mjs`; iCIMS provider; jurisdiction-prohibited-content table + `apply.md` Step 5c form warning; Hired canonical status wired into dashboard fallback + pipeline tabs; dependency refresh (Next.js 16.2.12, React 19.2.8, Playwright 1.62, `@testing-library/jest-dom` 7, `js-yaml` 5.2.2) |
 | career-ops v1.22.0 · web v0.3.0 | 2026-07-24 | 5 new job-board providers (Alibaba, Jobvite, Gem, Welcome to the Jungle, Agentic Engineering Jobs); token-usage tracking (`utils/token-tracker.mjs`); tracker writer-lock race-condition fix; CV/PDF page-overflow guard + shared `cv-sections-core.mjs` + Chinese-minimal CV template; SSRF hardening in Playwright liveness checks; in-process DNS cache for scan reliability; Block G location-tag-mismatch fraud signal |
