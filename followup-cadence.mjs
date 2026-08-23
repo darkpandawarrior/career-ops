@@ -689,7 +689,7 @@ export function resolveReportPath(reportField, appsFile = APPS_FILE, repoRoot = 
 // clock restarts from the last touch (re-overdue every responded_subsequent
 // days) — matching the cadence table in modes/followup.md ("Responded: every
 // 3 days · Interview: thank-you, then every 3 days, no limit").
-export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount) {
+export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, followupCount, hasRepliableContact = false) {
   if (status === 'applied') {
     if (followupCount >= CADENCE.applied_max_followups) return 'cold';
     if (followupCount === 0 && daysSinceApp >= CADENCE.applied_first) return 'overdue';
@@ -697,18 +697,27 @@ export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, foll
     return 'waiting';
   }
   if (status === 'responded') {
+    // `urgent` used to be reachable only while daysSinceApp < responded_initial — which is 1, so
+    // in practice only on the day the reply landed. Every genuinely live thread therefore aged
+    // straight into `overdue` and sat alongside dead no-reply rows: ModalX, 32 days silent with a
+    // named human who promised a call, was reported identically to a LinkedIn Easy Apply that
+    // never had a recipient. The distinction that matters operationally is not age, it is whether
+    // there is somebody to write to — that is the entire conversion surface.
     if (daysSinceLastFollowup !== null) {
-      return daysSinceLastFollowup >= CADENCE.responded_subsequent ? 'overdue' : 'waiting';
+      if (daysSinceLastFollowup >= CADENCE.responded_subsequent) return hasRepliableContact ? 'urgent' : 'overdue';
+      return 'waiting';
     }
     if (daysSinceApp < CADENCE.responded_initial) return 'urgent';
-    if (daysSinceApp >= CADENCE.responded_subsequent) return 'overdue';
+    if (daysSinceApp >= CADENCE.responded_subsequent) return hasRepliableContact ? 'urgent' : 'overdue';
     return 'waiting';
   }
   if (status === 'interview') {
     if (daysSinceLastFollowup !== null) {
-      return daysSinceLastFollowup >= CADENCE.responded_subsequent ? 'overdue' : 'waiting';
+      if (daysSinceLastFollowup >= CADENCE.responded_subsequent) return hasRepliableContact ? 'urgent' : 'overdue';
+      return 'waiting';
     }
-    return daysSinceApp >= CADENCE.interview_thankyou ? 'overdue' : 'waiting';
+    if (daysSinceApp >= CADENCE.interview_thankyou) return hasRepliableContact ? 'urgent' : 'overdue';
+    return 'waiting';
   }
   return 'waiting';
 }
@@ -789,7 +798,10 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
       if (lastDate) daysSinceLastFollowup = daysBetween(lastDate, now);
     }
 
-    let urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount);
+    // Extracted before urgency: whether a human can be written to is now an input to it.
+    const contacts = extractContacts(app.notes);
+    const hasRepliableContact = contacts.some((c) => (c.email && !/no-?reply|donotreply/i.test(c.email)) || c.name);
+    let urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount, hasRepliableContact);
     let nextFollowupDate = computeNextFollowupDate(normalized, appliedDate, lastFollowupDate, followupCount);
 
     // A pinned next-date takes precedence over the computed cadence (explicit
@@ -812,7 +824,6 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
     const nextDate = nextFollowupDate ? parseDate(nextFollowupDate) : null;
     const daysUntilNext = nextDate ? daysBetween(now, nextDate) : null;
 
-    const contacts = extractContacts(app.notes);
     const reportPath = resolveReportPath(app.report);
 
     entries.push({
