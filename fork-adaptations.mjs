@@ -245,6 +245,25 @@ export const ADAPTATIONS = [
     },
   },
   {
+    id: 'owed-actions-wired',
+    why: 'Fork-only: career-ops models follow-ups (you chasing them) and has no concept of the '
+       + 'inverse — a step where THEY are waiting on YOU. That inverse is this user\'s measured '
+       + 'dominant failure mode (four applications died at an incomplete screening step, and a '
+       + 'fifth was mid-death on 2026-08-24 on the highest-scoring role in the pipeline). '
+       + 'followup-cadence.mjs is upstream-owned and diverged, so a wholesale re-copy during a sync '
+       + 'would silently drop the owed-actions import and every blocked application would quietly '
+       + 'demote from urgent back into the 40-plus overdue pile. Nothing would fail; the signal '
+       + 'would just disappear. Guard it.',
+    autofix: false,
+    violations(src, file) {
+      if (!/(^|\/)followup-cadence\.mjs$/.test(file)) return [];
+      const imported = /from '\.\/owed-actions\.mjs'/.test(src);
+      const used = /owedAppNumbers\s*\(/.test(src);
+      if (imported && used) return [];
+      return [`${file}: lost the owed-actions wiring (import=${imported}, used=${used}) — blocked applications would silently demote to plain "overdue"`];
+    },
+  },
+  {
     id: 'voice-dna-not-tracked',
     why: 'Upstream ships voice-dna.md TRACKED, as a starting template. DATA_CONTRACT '
        + 'lists it as User Layer, so the moment it is personalized those edits are '

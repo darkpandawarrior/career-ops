@@ -13,6 +13,7 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { owedAppNumbers } from './owed-actions.mjs';
 import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
@@ -578,7 +579,36 @@ function splitStatements(notes) {
   return String(notes).split(/[;\n]+|\.\s+(?=[A-Z])/).filter(s => s.trim());
 }
 
-export function extractContacts(notes) {
+/**
+ * The candidate's OWN identities, so they are never reported as somebody to follow up with.
+ *
+ * Tracker notes routinely mention the user's own addresses as part of an audit trail — #74's note
+ * records "searched BOTH Google accounts (personal + siddharth@neev-technologies.com)" while
+ * establishing that a thread was NOT in Gmail. The extractor had no concept of self, so it read
+ * that as a repliable human and the row reported a contact it cannot actually write to.
+ *
+ * Sourced from config/profile.yml rather than hardcoded, so it stays correct per profile under the
+ * multi-profile layout. Returns lowercased addresses; unreadable/absent profile yields an empty set
+ * (fail open — a missing profile must not start deleting real contacts).
+ */
+export function loadSelfIdentities(profilePath = PROFILE_FILE) {
+  if (!profilePath || !existsSync(profilePath)) return new Set();
+  let raw;
+  try {
+    raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return new Set();
+  }
+  const out = new Set();
+  const push = (v) => { if (typeof v === 'string' && v.includes('@')) out.add(v.trim().toLowerCase()); };
+  push(raw.candidate?.email);
+  for (const alt of raw.candidate?.alternate_emails || []) push(alt);
+  return out;
+}
+
+const SELF_IDENTITIES = loadSelfIdentities();
+
+export function extractContacts(notes, selfIdentities = SELF_IDENTITIES) {
   if (!notes) return [];
   const byEmail = new Map();  // normalized email -> contact
   const byName = new Map();   // normalized name  -> contact
@@ -649,7 +679,10 @@ export function extractContacts(notes) {
     for (const name of names) add({ name, email: null, channel });
   }
 
-  return contacts;
+  // Drop the candidate's own addresses. A note that mentions your own mailbox while recording
+  // where you searched is not a person to follow up with, and reporting it as one makes an
+  // un-chaseable row look actionable — which is worse than reporting no contact at all.
+  return contacts.filter((c) => !(c.email && selfIdentities.has(c.email.toLowerCase())));
 }
 
 // The channel a single statement names, when it names one. Null rather than a
@@ -771,6 +804,8 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
 
   const now = today();
   const entries = [];
+  // Read once per run, not per row.
+  const owedApps = owedAppNumbers();
 
   for (const app of apps) {
     const normalized = normalizeStatus(app.status);
@@ -802,6 +837,13 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
     const contacts = extractContacts(app.notes);
     const hasRepliableContact = contacts.some((c) => (c.email && !/no-?reply|donotreply/i.test(c.email)) || c.name);
     let urgency = computeUrgency(normalized, daysSinceApp, daysSinceLastFollowup, followupCount, hasRepliableContact);
+
+    // An OWED action outranks every cadence calculation. Cadence answers "may I nudge them yet?";
+    // an owed action means the process is blocked on the user and will time out silently. There is
+    // no waiting period on a question already asked — a screening questionnaire is owed the day it
+    // arrives, and four applications have died in exactly this gap.
+    const owedAction = owedApps.has(app.num);
+    if (owedAction) urgency = 'urgent';
     let nextFollowupDate = computeNextFollowupDate(normalized, appliedDate, lastFollowupDate, followupCount);
 
     // A pinned next-date takes precedence over the computed cadence (explicit
