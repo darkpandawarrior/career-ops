@@ -410,8 +410,17 @@ export function computeRunStats(content) {
   if (idx.timestamp == null || idx.found == null) return null; // unknown schema
   const filterCols = header.filter((h) => h.startsWith('filtered_'));
   const rows = [];
+  // Rows WIDER than the header are the dangerous case, and the header comment above (correctly)
+  // only guarded the narrow one. When a column is appended or inserted, the on-disk header stops
+  // describing the rows: every name-based lookup silently reads the wrong column, and the result
+  // is a confident, precise, wrong number. Measured 2026-08-24: 218 of 226 rows were wider than
+  // their header and `avg new per run` was reporting the dupes column (24.0) instead of new_added
+  // (0.17) — off by ~140x, and pointing the opposite direction ("funnel is full" vs "funnel is
+  // empty"). Count the drift and surface it rather than averaging over whatever happens to align.
+  let driftedRows = 0;
   for (const line of lines.slice(1)) {
     const cols = line.split('\t');
+    if (cols.length > header.length) { driftedRows++; continue; } // header no longer describes this row
     if (cols.length < header.length) continue; // torn row
     if (!/^\d{4}-\d{2}-\d{2}/.test(cols[idx.timestamp] || '')) continue;
     const num = (name) => { const v = Number(cols[idx[name]]); return Number.isNaN(v) ? 0 : v; };
@@ -439,6 +448,7 @@ export function computeRunStats(content) {
   const sum = (arr, k) => arr.reduce((a, r) => a + r[k], 0);
   return {
     totalRuns: rows.length,
+    driftedRows,
     failedRuns: rows.length - completed.length,
     lastRunDate: rows.map((r) => r.date).sort().at(-1),
     avgFoundPerRun: completed.length ? round1(sum(completed, 'found') / completed.length) : 0,
@@ -537,6 +547,12 @@ function printSummary(stats) {
   if (r) {
     const failed = r.failedRuns > 0 ? ` | ${r.failedRuns} failed` : '';
     console.log(`Runs:       ${r.totalRuns} recorded (last ${r.lastRunDate})${failed} | avg ${r.avgFoundPerRun} found / ${r.avgNewPerRun} new per run | filters remove ${r.filterRemovalPct}%`);
+    if (r.driftedRows > 0) {
+      // Say it plainly rather than quietly averaging the minority that still aligns: these figures
+      // describe only the rows the header can still describe, which may be a small and unrepresentative
+      // tail of the history.
+      console.log(`            ⚠️  ${r.driftedRows} row(s) EXCLUDED — wider than scan-runs.tsv's header, so their columns cannot be read by name. The averages above cover only the remaining ${r.totalRuns}.`);
+    }
   } else {
     console.log('Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)');
   }

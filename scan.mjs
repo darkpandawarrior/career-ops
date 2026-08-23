@@ -2019,7 +2019,26 @@ export function writeRunFailureRow(status = 'failed', filePath = SCAN_RUNS_PATH)
 }
 
 export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
-  if (!existsSync(filePath)) writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+  // The header is written only on first creation, so when a sync appends a column the on-disk
+  // header silently stops describing the rows beneath it. That happened on 2026-07-11 (a column
+  // was inserted at position 9) and went unnoticed for 44 days: 218 of 226 rows were wider than
+  // their own header, every header-name consumer read one column to the left of the truth, and
+  // stats.mjs consequently reported "avg 30.2 new per run" — the dupes column — when the real
+  // figure was 0.17. A silently-wrong dashboard is worse than a missing one, so record the drift
+  // rather than papering over it: historical rows are NOT rewritten (the intermediate schemas are
+  // not recoverable with confidence), but the mismatch is made visible to every reader.
+  if (!existsSync(filePath)) {
+    writeFileSync(filePath, SCAN_RUNS_HEADER, 'utf-8');
+  } else {
+    const firstLine = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
+    if (firstLine !== SCAN_RUNS_HEADER) {
+      console.error(
+        `⚠️  scan-runs.tsv header is ${firstLine.trim().split('\t').length} columns but this build writes ` +
+        `${SCAN_RUNS_HEADER.trim().split('\t').length} — rows below the header are positionally offset. ` +
+        `Header-name consumers (stats.mjs) will misread them. Run: node stats.mjs --summary to see the drift report.`,
+      );
+    }
+  }
   const row = [
     c.timestamp, c.status ?? 'completed', c.companies, c.boards, c.found,
     c.filteredTitle, c.filteredTier, c.filteredLocation, c.filteredPostingAge,
