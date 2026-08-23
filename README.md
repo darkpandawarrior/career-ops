@@ -308,7 +308,7 @@ flowchart TD
     I --> J[job-search-runner.mjs]
 
     J --> K1["scan.mjs + scan-ats-full.mjs<br/>(zero-token ATS feeds)"]
-    J --> K2["77 provider modules"]
+    J --> K2["84 provider modules"]
     J --> K3["pipeline entries + scan history"]
     J --> K4["search leads"]
 
@@ -490,6 +490,27 @@ HireSignal is not a separate job-search engine bolted next to career-ops. It is 
 | Tracker model | `data/applications.md`, `data/pipeline.md`, status normalization, deduplication, and report links remain career-ops compatible |
 | Modes and templates | Role evaluation prompts, profile narrative, resume templates, and PDF generation flow remain available for agent-assisted review |
 | Liveness and quality rules | Job links checked, low-fit roles discouraged, no automatic submission |
+
+### What this fork adds that upstream does not
+
+Everything below is fork-only. It exists because a sync absorbs upstream's capability but not this
+fork's own, and after a 250-file window it is genuinely hard to remember which is which.
+
+| Addition | What it does | Why it exists |
+|---|---|---|
+| `providers/careerjet.mjs` | Careerjet **v4** Job Search API provider (Basic auth, `CAREERJET_API_KEY`) | Ships **disabled**. The legacy unauthenticated endpoint verified working 2026-08-20 and returned HTTP 401 on 08-21 — dead, not unregistered. |
+| `salary_filter.min_by_currency` | A comp floor **per currency** (`scan.mjs`) | A flat `min` cannot express two markets: `currency: INR` rejects every USD job on the mismatch rule, and omitting currency compares `$120k` against an INR floor numerically. Either way the international pipeline silently vanishes. |
+| `providers/cutshort.mjs` salary extraction | Reads the structured `salaryRange` the listing payload already carries | Without it every posting reached the filter as "no comp data" and passed, so a floor could never fire on the highest-volume India source. Measured: only 8 of 50 Android postings clear ₹35L. |
+| `owed-actions.mjs` | Models **owed screening steps** — where they are waiting on *you* | career-ops models follow-ups (you chasing them) and has no inverse. Four applications died at an incomplete screening step. An unchecked row in `data/owed-actions.md` overrides cadence and reports `urgent`. |
+| Repliable-contact urgency | `computeUrgency` keys on whether a human can be written to | `urgent` was reachable only while `daysSinceApp < responded_initial` — which is 1 — so live threads aged into `overdue` within a day and sat with dozens of no-reply rows. |
+| Self-identity filter | Contact extraction ignores the candidate's own addresses | A note recording *"searched BOTH Google accounts (personal + …)"* was read as a repliable human, making an un-chaseable row look actionable. Sourced from `config/profile.yml`. |
+| Zero-yield escalation | `automation/scan-cron.sh` escalates a silent total scan failure | The scanner reported `found=0` for **20 consecutive days** while printing its alarm into a log nobody opens and exiting 0. |
+| Telemetry drift guard | `stats.mjs` excludes rows its header can no longer describe | `scan-runs.tsv`'s header is written only at creation, so an appended column silently offsets every name-based read. It reported `avg 30.2 new per run` — the *dupes* column — when the truth was `0.17`. |
+| `fork-adaptations.mjs` | Machine-checks the fork layer itself (`npm test`) | The authoritative answer to "what does this fork change". Each rule carries the incident that motivated it. Run it after any sync. |
+
+Two of these are load-bearing enough to be guarded: the owed-actions wiring and the four systemic
+transforms have `fork-adaptations.mjs` rules, so a wholesale re-copy during a sync fails the suite
+instead of silently deleting them.
 
 HireSignal removed upstream files that do not affect this local dashboard: upstream release automation, GitHub community workflows, Docker/Nix packaging, old demo assets, example packs, the npm scaffolder, the old Go dashboard, and non-Codex CLI adapter bundles.
 
