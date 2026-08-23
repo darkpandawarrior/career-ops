@@ -55,3 +55,18 @@ if (!currentLine) {
     fail(`VERSION is ${version} but the "(current)" label reads "${label.trim()}" — the release table is behind`);
   }
 }
+
+// --- version badges: both must match the files they describe ---------------------
+// The engine badge was updated to v1.28.0 while the dashboard badge sat at v0.6.1 through two
+// upstream windows that both shipped web changes. The badge is the first thing a reader sees, so a
+// stale one misrepresents the project before they reach a single sentence.
+{
+  const webVersion = JSON.parse(readFileSync(join(ROOT, 'web/package.json'), 'utf-8')).version;
+  const badge = /badge\/dashboard-web_v([\d.]+)-/.exec(readme)?.[1];
+  if (badge === webVersion) pass(`dashboard badge reads v${webVersion}, matching web/package.json`);
+  else fail(`dashboard badge reads v${badge}; web/package.json is ${webVersion}`);
+
+  const engineBadge = /badge\/engine-career--ops_v([\d.]+)-/.exec(readme)?.[1];
+  if (engineBadge === version) pass(`engine badge reads v${version}, matching VERSION`);
+  else fail(`engine badge reads v${engineBadge}; VERSION is ${version}`);
+}
