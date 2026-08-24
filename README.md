@@ -46,7 +46,7 @@
 
 </details>
 
-> **At a glance** — **84** zero-auth job-board providers · **4,100+** engine tests · **7** machine-checked
+> **At a glance** — **84** zero-auth job-board providers · **4,100+** engine tests · **8** machine-checked
 > fork adaptations · **38,854** ATS boards per full sweep, of which **~46%** are permanently dead and
 > skipped from `data/dead-boards.tsv`. Local-first: no hosted service, no account, your data never
 > leaves the machine.

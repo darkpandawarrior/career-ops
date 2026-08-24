@@ -589,3 +589,33 @@ If — and only if — the user **explicitly stated a role-specific desired numb
 ```
 
 Never infer a desired number from the JD, the score, or past conversations. The profile default (`config/profile.yml` → `compensation.target_range`) needs no line — `salary-gap.mjs` reads it as the fallback. The advertised figure also needs no line: the report's `advertised_comp` **is** the advertised observation. An `actual` line (the real offer/contract number) is appended later, once an offer exists — see `modes/tracker.md` and `modes/patterns.md` for where it's surfaced.
+
+---
+
+## 4. Do not stop at the report
+
+**An evaluation that ends in a written report is not an outcome.** Measured on this tracker
+(2026-08-25): of 17 roles that went through a full evaluation, **2** were ever applied to. The other
+15 ended `Evaluated`, `SKIP` or `Discarded`. Meanwhile 42 of the 67 roles applied to bypassed
+evaluation entirely. The pipeline is being used as a filter and almost never as a launcher, and that
+gap — not job supply — is where this search actually loses.
+
+So the evaluation does not end here. Close it on one of two explicit rails, and say which:
+
+**If the score clears `auto_pdf_score_threshold`** (`config/profile.yml`, currently 4.0) **and the
+role clears the compensation floor**, continue **in the same turn** into the apply flow
+(`modes/apply.md`) — generate the tailored CV and cover letter, run the reviewer pass, compile the
+PDF, and run the pre-submit gates (`verify-cv-facts.mjs`, `verify-application-match.mjs`). Stop
+before submission, as always: the candidate clicks Submit. But hand them a finished artifact, not a
+recommendation to make one.
+
+Do **not** ask "shall I proceed?" and wait. A question at this point is a self-initiated return, and
+this candidate's own measured behaviour is that self-initiated returns do not happen — every
+application that died did so at a step that needed him to come back to it. Draft first, ask after.
+
+**If the score does not clear the threshold, or the role fails the floor**, say so in one line, set
+the status to `SKIP` with the reason, and stop. That is a completed outcome and it is a good one —
+a 3.2/5 that is honestly closed beats a 3.2/5 left open as `Evaluated` forever.
+
+Either way the row must not be left in `Evaluated` with nothing owed and nothing decided. `Evaluated`
+is a transient state, not a resting place.

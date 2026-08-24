@@ -66,6 +66,12 @@ export function sourceFiles(root = ROOT) {
   })(root);
   // .gitignore is not source, but one rule asserts a line in it.
   out.push('.gitignore');
+  // Mode prose is not source either, but two upstream-owned mode files carry fork-only workflow
+  // steps that a sync would copy over silently. Prose has no test that fails when it disappears,
+  // so it has to be asserted here or not at all.
+  for (const f of ['modes/oferta.md', 'modes/apply.md']) {
+    try { if (statSync(join(root, f)).isFile()) out.push(f); } catch { /* absent is its own signal */ }
+  }
   return out.sort();
 }
 
@@ -242,6 +248,26 @@ export const ADAPTATIONS = [
         }
       }
       return out;
+    },
+  },
+  {
+    id: 'apply-flow-converts',
+    why: 'Fork-only, and load-bearing on the measured bottleneck. Two additions to upstream-owned '
+       + 'mode prose: oferta.md must not end at a written report (measured 2026-08-25 — of 17 fully '
+       + 'evaluated roles only 2 were ever applied to, while 42 of 67 actual applications bypassed '
+       + 'evaluation entirely, so the pipeline was filtering rather than launching), and apply.md '
+       + 'must run an adversarial reviewer pass before anything is called submittable. Both files '
+       + 'are copied wholesale from upstream on a sync, which would delete both silently — prose '
+       + 'has no test that fails when it disappears.',
+    autofix: false,
+    violations(src, file) {
+      if (/(^|\/)modes\/oferta\.md$/.test(file) && !/Do not stop at the report/.test(src)) {
+        return [`${file}: lost the apply handoff — evaluations would go back to ending at a report`];
+      }
+      if (/(^|\/)modes\/apply\.md$/.test(file) && !/Step 7b — Reviewer pass/.test(src)) {
+        return [`${file}: lost the adversarial reviewer pass before submit`];
+      }
+      return [];
     },
   },
   {
