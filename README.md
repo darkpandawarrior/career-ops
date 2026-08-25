@@ -139,6 +139,7 @@ It treats your resume and preferences as the source of truth, then searches and 
 
 | Feature | What it does |
 |---------|-------------|
+| **Human-in-the-Loop** | AI evaluates, drafts and pre-fills; you decide and act. The system never submits an application -- you always have the final call ([`AGENTS.md`](AGENTS.md) § Boundaries). Two pre-submit gates run before anything reaches your queue: `verify-cv-facts.mjs` (no invented metrics) and `verify-application-match.mjs` (right company/role, no leaked template tokens). <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. --> |
 | Local resume onboarding | Upload a PDF resume, extract text locally, and review inferred profile facts before activation |
 | Evidence-backed profile review | Converts resume sections into editable candidate facts: target roles, skills, seniority, location policy, and compensation preferences |
 | Profile-driven search | Builds discovery queries from candidate facts, combining ATS providers, remote feeds, configured portals, scan history, and pipeline entries |
