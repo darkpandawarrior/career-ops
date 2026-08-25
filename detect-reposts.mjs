@@ -39,7 +39,7 @@ import * as yaml from 'js-yaml';
 import { roleFuzzyMatch, roleTokens, BASELINE_TOKENS } from './role-matcher.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
@@ -75,9 +75,10 @@ const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
 const windowValue = flagValue(args, '--window');
-const windowDays = windowValue !== undefined
-  ? (Number.isNaN(parseInt(windowValue, 10)) ? DEFAULT_WINDOW_DAYS : parseInt(windowValue, 10))
-  : DEFAULT_WINDOW_DAYS;
+// safeIntFlag, not parseInt: parseInt reads "7abc" as 7 and "-5" as -5, so a typo silently became
+// a plausible window instead of falling back. The shared helper requires the whole string to be a
+// non-negative integer.
+const windowDays = safeIntFlag(windowValue, DEFAULT_WINDOW_DAYS);
 
 // --- Date helpers ---
 function parseDate(dateStr) {

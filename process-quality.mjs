@@ -35,7 +35,7 @@ import { readFileSync, existsSync } from 'fs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 // Multi-profile support: mirrors analyze-patterns.mjs's CAREER_OPS_DATA resolution
@@ -59,10 +59,12 @@ const fileFlagValue = flagValue(args, '--file');
 const ACTIVE_INTERVIEWS_PATH = fileFlagValue !== undefined
   ? fileFlagValue
   : DEFAULT_ACTIVE_INTERVIEWS_PATH;
-const minThresholdValue = flagValue(args, '--min-threshold');
-const rawMinThreshold = minThresholdValue !== undefined
-  ? parseInt(minThresholdValue, 10)
-  : 1;
+// safeIntFlag, not parseInt: this file had NO shape check, so unlike detect-reposts it did not even
+// fall back — `--min-threshold 999999999999999999999` was ACCEPTED and reported as
+// `"minThreshold": 1e+21`, the exact "metadata reports a value that is not the one in effect"
+// failure isSafeInteger exists to prevent (#2982). "abc" and "-5" already fell back via the clamp
+// below; "3.5" silently became 3. All of them now take the documented fallback.
+const rawMinThreshold = safeIntFlag(flagValue(args, '--min-threshold'), 1);
 // Clamped here (not just inside aggregateProcessQuality) so printSummary's
 // displayed threshold always matches the threshold actually applied.
 const MIN_THRESHOLD = Number.isFinite(rawMinThreshold) && rawMinThreshold >= 0 ? rawMinThreshold : 1;

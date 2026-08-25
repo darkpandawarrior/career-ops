@@ -26,18 +26,24 @@ import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeReportLink } from './tracker-links.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
 // multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const DRY_RUN = process.argv.includes('--dry-run');
+const KNOWN_FLAGS = ['--dry-run', '--pipeline', '--state', '--help', '-h'];
+const VALUE_FLAGS = ['--pipeline', '--state'];
+const USAGE = `Usage: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>]
+  Moves batch-processed offers out of pipeline.md "Pendientes" into "Procesadas".`;
 
-if (process.argv.includes('-h') || process.argv.includes('--help')) {
-  console.log('Usage: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>]');
-  console.log('  Moves batch-processed offers out of pipeline.md "Pendientes" into "Procesadas".');
-  process.exit(0);
-}
+// An unrecognized flag — a typo'd --dry-run, say — used to be silently ignored and fall through to
+// a LIVE run that writes pipeline.md. The caller believed they were in dry-run mode and were not.
+// Fail fast instead.
+const args = process.argv.slice(2);
+validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
+const DRY_RUN = args.includes('--dry-run');
 
 function argValue(flag) {
   const i = process.argv.indexOf(flag);
