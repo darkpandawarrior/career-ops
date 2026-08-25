@@ -67,6 +67,7 @@ import {
   loadBlacklist,
   parseSinceDays,
 } from './scan.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
@@ -689,7 +690,7 @@ async function main() {
   // still carried, so `scan.mjs --since` was suppressing the actionable
   // suggestion it should have shown.
   const ctx = { ...makeHttpCtx(), sinceMs: cutoff, includeUndated: opts.includeUndated, syntheticEntries: true };
-  const date = new Date().toISOString().slice(0, 10);
+  const date = localToday();
 
   const newOffers = checkpoint ? checkpoint.offers : [];
   // Checkpointed matches were already deduped once — without re-seeding, a
@@ -1051,7 +1052,7 @@ async function main() {
       writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
     }
     await appendToPipeline(offers);
-    appendToScanHistory(offers, date);
+    await appendToScanHistory(offers, date);
     saved = true;
     log(`\nResults saved to ${PIPELINE_PATH} and data/scan-history.tsv`);
 

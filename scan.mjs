@@ -1919,20 +1919,28 @@ export async function appendToPipeline(offers) {
   });
 }
 
-export function appendToScanHistory(offers, date, status = 'added') {
-  // Ensure file + header exist. Location appended as 7th column for non-breaking
-  // backward compat — older scan-history.tsv files with 6 columns still parse fine
-  // since loadSeenUrls only reads column 0. `status` is parameterized so callers
-  // can record verify outcomes (`skipped_expired`, etc.) without the legacy
-  // `(expired)` suffix in `source`.
-  if (!existsSync(SCAN_HISTORY_PATH)) {
-    mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-    writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n', 'utf-8');
-  }
+export async function appendToScanHistory(offers, date, status = 'added') {
+  // Takes the same shared lock appendToPipeline does. Backport of upstream
+  // #2639 (career-ops#2600), which this fork never absorbed: the create branch
+  // below is a TOCTOU race — two scans starting together both see the file
+  // missing, and the second writeFileSync truncates the first one's rows. The
+  // automation runs scans on a schedule AND on demand, so overlap is rare
+  // rather than impossible, and a lost append is silent.
+  await withPipelineLock(SCAN_HISTORY_PATH, () => {
+    // Ensure file + header exist. Location appended as 7th column for non-breaking
+    // backward compat — older scan-history.tsv files with 6 columns still parse fine
+    // since loadSeenUrls only reads column 0. `status` is parameterized so callers
+    // can record verify outcomes (`skipped_expired`, etc.) without the legacy
+    // `(expired)` suffix in `source`.
+    if (!existsSync(SCAN_HISTORY_PATH)) {
+      mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
+      writeFileSync(SCAN_HISTORY_PATH, 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n', 'utf-8');
+    }
 
-  const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
+    const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-  appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+    appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+  });
 }
 
 // ── Company blacklist (#1742) ───────────────────────────────────────
@@ -2754,7 +2762,7 @@ async function main() {
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
     await appendToPipeline(verifiedOffers);
-    appendToScanHistory(verifiedOffers, date);
+    await appendToScanHistory(verifiedOffers, date);
   }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};
@@ -2765,7 +2773,7 @@ async function main() {
       cooldownGroups[item.status].push(item.job);
     }
     for (const [status, group] of Object.entries(cooldownGroups)) {
-      appendToScanHistory(group, date, status);
+      await appendToScanHistory(group, date, status);
     }
   }
   // Expired postings — plus the old URLs of migrated offers — are recorded as
@@ -2775,12 +2783,12 @@ async function main() {
     ...migratedOffers.map(o => ({ ...o, url: o.previousUrl })),
   ];
   if (!dryRun && expiredForHistory.length > 0) {
-    appendToScanHistory(expiredForHistory, date, 'skipped_expired');
+    await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
   }
   // Pages that loaded but had no Apply control: record so we don't re-verify
   // them next scan, but never let them reach pipeline.md.
   if (!dryRun && droppedOffers.length > 0) {
-    appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
+    await appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
   }
   // Guard-rejected URLs (invalid / unsupported protocol / blocked host) are
   // recorded with a precise status so subsequent scans dedup-skip them via
@@ -2794,7 +2802,7 @@ async function main() {
       byStatus.get(status).push(o);
     }
     for (const [status, group] of byStatus) {
-      appendToScanHistory(group, date, status);
+      await appendToScanHistory(group, date, status);
     }
   }
 

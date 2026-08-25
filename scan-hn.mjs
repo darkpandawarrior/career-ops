@@ -18,6 +18,7 @@ import { pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // Import the deterministic provider
@@ -117,7 +118,7 @@ async function main() {
 
   if (newOffers.length > 0) {
     await appendToPipeline(newOffers);
-    await appendToScanHistory(newOffers, new Date().toISOString().slice(0, 10), 'added');
+    await appendToScanHistory(newOffers, localToday(), 'added');
     console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
   }
 }
