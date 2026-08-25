@@ -36,8 +36,8 @@ test('infers evidence-backed candidate facts, skills, roles, and experience', ()
 
 test('uses projects, simulations, education, and skills for entry-level targeting', () => {
   const structured = structureResume([
-    'Anuja Ingale',
-    '9340480514 | anujaingale41@gmail.com | github.com/anujaingale41-lab | linkedin.com/in/anuja-ingale-',
+    'Priya Sharma',
+    '9000000000 | priya.sharma@example.com | github.com/priya-sharma-demo | linkedin.com/in/priya-sharma-',
     '3aa17b1b3/',
     '',
     'PROFILE SUMMARY',
@@ -68,7 +68,7 @@ test('uses projects, simulations, education, and skills for entry-level targetin
   assert.equal(inference.experience.total_years.value, null);
   assert.equal(inference.seniority.value, 'entry-level');
   assert.equal(inference.candidate.portfolio_url.value, '');
-  assert.equal(inference.candidate.linkedin.value, 'linkedin.com/in/anuja-ingale-3aa17b1b3/');
+  assert.equal(inference.candidate.linkedin.value, 'linkedin.com/in/priya-sharma-3aa17b1b3/');
   assert.ok(inference.target_roles.some((role) => role.name === 'Data Analyst' && role.suggested_fit === 'primary'));
   assert.ok(inference.target_roles.some((role) => role.name === 'Junior Data Analyst'));
   assert.ok(inference.target_roles.some((role) => role.name === 'Data Analyst Intern'));
