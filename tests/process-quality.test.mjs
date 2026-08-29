@@ -287,7 +287,10 @@ eq('default minThreshold = 1', defaultJson.metadata.minThreshold, 1);
 // deliberately does not exist inside a fresh temp dir. This must NOT depend
 // on whether the caller's real data/active-interviews.md happens to exist —
 // a contributor running this suite with real interview data in their own
-// workspace must get the same result as CI.
+// workspace must get the same result as CI. (This fork has no
+// data/active-interviews.md at all, so the default run already exercises
+// this "file absent" path — this block additionally pins the --file-override
+// behavior explicitly.)
 const missingFileTmpDir = mkdtempSync(join(tmpdir(), 'process-quality-missing-'));
 const missingFilePath = join(missingFileTmpDir, 'does-not-exist.md');
 try {

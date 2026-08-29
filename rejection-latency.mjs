@@ -47,7 +47,6 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { pathToFileURL } from 'url';
 // js-yaml v5 is ESM-only and ships no default export; this fork is on v5
 // repo-wide, so the namespace import is the required form here.
 import * as yaml from 'js-yaml';
@@ -57,6 +56,8 @@ import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
@@ -227,9 +228,16 @@ export function buildBlacklistSuggestion(company, todayStr, reason) {
  * @returns {{ flags: object[], warnings: string[], companiesChecked: number }}
  */
 export function computeRejectionLatency(interviewRows, trackerByCompany, opts = {}) {
+  // The default is the LOCAL calendar day at UTC midnight, not `new Date()`.
+  // daysBetween() reduces both operands to their UTC date, so a bare clock read
+  // west of Greenwich counts one extra day all evening: a company crosses the
+  // courtesy threshold a day early and gets a ready-to-copy blacklist row —
+  // stamped, via isoDay(), with tomorrow's date. The UTC-midnight anchor is
+  // what daysBetween expects and is deliberately preserved; only WHICH day it
+  // anchors on moves (#2765 drew the same line).
   const today = opts.today instanceof Date && !Number.isNaN(opts.today.getTime())
     ? opts.today
-    : new Date();
+    : parseDate(localToday());
   const courtesyDays = Number.isFinite(opts.courtesyDays) && opts.courtesyDays > 0
     ? opts.courtesyDays
     : DEFAULT_COURTESY_DAYS;
@@ -559,7 +567,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   }
@@ -571,7 +579,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     ? cliCourtesy
     : (Number.isFinite(profileCourtesy) && profileCourtesy > 0 ? profileCourtesy : DEFAULT_COURTESY_DAYS);
 
-  let today = new Date();
+  // Same local-day anchor as computeRejectionLatency's default — the CLI passes
+  // `today` explicitly, so a bare `new Date()` here would step around that fix
+  // and keep stamping metadata.today (and any blacklist row) with the UTC day.
+  let today = parseDate(localToday());
   if (cliToday) {
     const parsed = parseDate(cliToday);
     if (!parsed) {

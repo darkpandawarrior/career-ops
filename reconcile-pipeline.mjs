@@ -86,7 +86,10 @@ function resolveInsideRepo(inputPath, fallbackPath, flag) {
 
 const defaultPipeline = existsSync(join(CAREER_OPS_DATA, 'data/pipeline.md'))
   ? join(CAREER_OPS_DATA, 'data/pipeline.md')
-  : join(CAREER_OPS, 'pipeline.md');
+  // The flat-layout fallback is a DATA path too. It read CAREER_OPS (the engine
+  // checkout), so under `./profile <name>` the fallback pointed outside the data
+  // root and resolveInsideRepo() — anchored on CAREER_OPS_DATA — rejected it.
+  : join(CAREER_OPS_DATA, 'pipeline.md');
 const PIPELINE_FILE = resolveInsideRepo(argValue('--pipeline'), defaultPipeline, '--pipeline');
 const STATE_FILE = resolveInsideRepo(argValue('--state'), join(CAREER_OPS_DATA, 'batch/batch-state.tsv'), '--state');
 const REPORTS_DIR = join(CAREER_OPS_DATA, 'reports');

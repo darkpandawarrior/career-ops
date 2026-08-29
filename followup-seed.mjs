@@ -62,10 +62,10 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'fs';
 import { join, dirname, basename } from 'path';
-import { pathToFileURL } from 'url';
 import { randomUUID } from 'crypto';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath as sharedResolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { acquireTrackerLock, canonicalizeTrackerPath, renameSyncWithRetry } from './tracker-utils.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
 import {
@@ -208,10 +208,7 @@ export function formatPinLine(appNum, nextDate, setDate) {
 // --- Path resolution (env override → default, same style as followup-cadence.mjs) --
 
 function resolveTrackerPath() {
-  if (process.env.CAREER_OPS_TRACKER) return process.env.CAREER_OPS_TRACKER;
-  return existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
-    ? join(CAREER_OPS_DATA, 'data/applications.md')
-    : join(CAREER_OPS_DATA, 'applications.md');
+  return sharedResolveTrackerPath(CAREER_OPS_DATA);
 }
 
 function resolveFollowupsPath() {
@@ -591,6 +588,6 @@ async function main() {
 }
 
 // Run (CLI only; guarded so the module is safely importable for tests).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

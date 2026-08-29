@@ -14,12 +14,12 @@
 
 import { readFileSync, existsSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
 import { join } from 'path';
-import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
 import { execFileSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 const execFileAsync = promisify(execFile);
 try {
   const { config } = await import('dotenv');
@@ -368,7 +368,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error(err);
     process.exit(1);

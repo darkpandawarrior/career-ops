@@ -570,8 +570,7 @@ function resolveEvalModeFile(root: string, modesDir: string): string {
  * profile.yml yields the English/global default, because a broken config
  * should degrade the market vocabulary, not block every evaluation.
  */
-export function readLanguageConfig(): LanguageConfig {
-  const root = careerOpsRoot();
+export function readLanguageConfig(root: string = careerOpsRoot()): LanguageConfig {
   let modesDir = "modes";
   let output = "en";
   try {

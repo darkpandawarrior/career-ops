@@ -53,6 +53,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/_custom.template.md` | Template seed for the user's `modes/_custom.md` |
 | `modes/oferta.md` | Evaluation mode instructions |
 | `modes/pdf.md` | PDF generation instructions |
+| `modes/text.md` | Tailored markdown CV instructions |
 | `modes/scan.md` | Portal scanner instructions |
 | `modes/batch.md` | Batch processing instructions |
 | `modes/apply.md` | Application assistant instructions |
@@ -108,3 +109,19 @@ These files contain system logic, scripts, templates, and instructions that impr
 **If a file is in the User Layer, no update process may read, modify, or delete it.**
 
 **If a file is in the System Layer, it can be safely replaced with the latest version from the upstream repo.**
+
+## Custom Data Directory
+
+By default, all User Layer files reside inside the engine checkout root. You can configure a separate, external directory for your personal data — this is also what the fork's multi-profile launcher (`./profile <name>`) uses under the hood.
+
+### Resolution Precedence:
+1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory (a relative path is resolved against the engine root).
+2. **Marker File (`.career-ops-data`):** A file named `.career-ops-data` in the engine root containing the path (absolute or relative) to the user data directory.
+3. **Repository Default:** Defaults to the engine/checkout root directory.
+
+When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `data/`, `reports/`, `output/`, `portals.yml`) are resolved relative to that path. System Layer files continue to resolve relative to the engine root, keeping code and personal data completely separate. Scripts reach both roots through `resolveCareerOpsRoot(import.meta.url)` (`{engineRoot, dataRoot}`) or `getCareerOpsRoot()` in `path-resolver.mjs` — never their own directory.
+
+### Tracker Path & Writes:
+- **`CAREER_OPS_TRACKER`** can be set to override the applications tracker file path directly.
+- **Read Resolution:** If no tracker override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
+- **Write Resolution:** All writes (including merge operations and first-run creation) target the canonical location `{DATA_ROOT}/data/applications.md`.

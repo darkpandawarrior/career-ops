@@ -23,12 +23,14 @@
  * provider, create that one file; do not add a section to this file.
  */
 
-import { execSync, execFileSync, spawn, spawnSync } from 'child_process';
+import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
 import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, symlinkSync } from 'fs';
 import { join, dirname, delimiter } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { pass, fail, warn, run, fileExists, finish, ROOT, NODE, toBashPath } from './tests/helpers.mjs';
+import { promisify } from 'util';
+import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, NODE, toBashPath } from './tests/helpers.mjs';
+import { collectMjsFiles } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -108,19 +110,90 @@ console.log('\n🧪 career-ops test suite\n');
 
 console.log('1. Syntax checks');
 
-const mjsFiles = readdirSync(ROOT).filter(f => f.endsWith('.mjs'));
-for (const f of mjsFiles) {
-  const result = run(NODE, ['--check', f]);
-  if (result !== null) {
+// RECURSIVE, and sharing its walk with `npm run lint` (#3419). This read the
+// repository root non-recursively, which covered 138 of the ~617 .mjs files
+// here and printed a `syntax OK` line for each one — so the 259 files under
+// tests/ were absent from a log that looked complete. It also narrowed by one
+// every time a file moved out of the root, silently. Both scopes now come from
+// the same collector, so neither can drift from the other again.
+const mjsFiles = collectMjsFiles(ROOT).map(f => f.slice(ROOT.length + 1).replace(/\\/g, '/'));
+
+// State the scope in one line. The per-file `syntax OK` output is what hid the
+// old shortfall: a number the reader can compare against `npm run lint`'s own
+// total makes a narrowing visible at a glance instead of requiring someone to
+// diff two runs' pass labels.
+console.log(`  (${mjsFiles.length} .mjs files, recursive from the repository root)`);
+
+// `node --check` parses a file and exits; it runs no user code, touches no
+// shared state, and its result depends on nothing but that one file. Spawning
+// the files one at a time was pure process-startup latency, so they go through
+// a bounded pool instead (#2387) — which is also what keeps the recursive scope
+// above a wall-clock non-event (21s sequential here, ~4s pooled). Results are
+// collected by index and reported afterwards in collector order, so the log
+// stays byte-identical to the sequential version regardless of completion order.
+const SYNTAX_POOL_SIZE = 8;
+const execFileAsync = promisify(execFile);
+const syntaxOk = new Array(mjsFiles.length);
+const syntaxDetail = new Array(mjsFiles.length);
+let nextSyntaxIdx = 0;
+
+// A bare catch reports a child killed on timeout, or one that never spawned, as
+// "has syntax errors" — sending the reader hunting for a parse error that does
+// not exist. Keep enough of the child's own diagnosis to tell those apart.
+const describeCheckFailure = (err) => {
+  if (err?.killed || err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT') {
+    return `node --check timed out after 30000ms${err.signal ? ` (signal ${err.signal})` : ''}`;
+  }
+  const stderr = String(err?.stderr ?? '').trim();
+  if (!stderr) return `no stderr (exit ${err?.code ?? 'unknown'})`;
+  const clipped = stderr.length > 2000
+    ? `${stderr.slice(0, 2000)}\n    ... (${stderr.length - 2000} more chars)`
+    : stderr;
+  return clipped.replace(/\n/g, '\n    ');
+};
+
+const syntaxWorker = async () => {
+  for (let i = nextSyntaxIdx++; i < mjsFiles.length; i = nextSyntaxIdx++) {
+    try {
+      await execFileAsync(NODE, ['--check', mjsFiles[i]], { cwd: ROOT, timeout: 30000 });
+      syntaxOk[i] = true;
+    } catch (err) {
+      syntaxOk[i] = false;
+      syntaxDetail[i] = describeCheckFailure(err);
+    }
+  }
+};
+await Promise.all(
+  Array.from({ length: Math.min(SYNTAX_POOL_SIZE, mjsFiles.length) }, syntaxWorker)
+);
+mjsFiles.forEach((f, i) => {
+  if (syntaxOk[i]) {
     pass(`${f} syntax OK`);
   } else {
-    fail(`${f} has syntax errors`);
+    fail(`${f} has syntax errors\n    ${syntaxDetail[i] ?? 'no diagnostic captured'}`);
   }
-}
+});
 
 // ── 2. SCRIPT EXECUTION ─────────────────────────────────────────
 
 console.log('\n2. Script execution (graceful on empty data)');
+
+/**
+ * Whether a failed run died with an UNCAUGHT exception rather than exiting.
+ *
+ * The two are not the same outcome and only one of them is ever "expected".
+ * Node prints an uncaught error as `SomeError: message` at the start of a line
+ * followed by a stack; a script reporting its own problem and exiting non-zero
+ * prints neither. Both parts are required, so a script whose own diagnostic
+ * happens to start with "Error: " is not mistaken for a crash.
+ *
+ * @param {{stderr?: string}|null} failure
+ * @returns {boolean}
+ */
+function crashedBeforeRunning(failure) {
+  const stderr = String(failure?.stderr ?? '');
+  return /^[A-Za-z]*Error(?: \[[^\]]+\])?: /m.test(stderr) && /\n\s+at /.test(stderr);
+}
 
 const scripts = [
   { name: 'cv-sync-check.mjs', expectExit: 1, allowFail: true }, // fails without cv.md (normal in repo)
@@ -135,6 +208,8 @@ const scripts = [
   { name: 'merge-tracker.mjs --dry-run', expectExit: 0 },
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
+  // career-ops 1.30.0 sync: /calibrate (#3315) ships an inline self-test.
+  { name: 'calibrate.mjs --self-test', expectExit: 0 },
   // career-ops 1.19.0 scripts with inline self-tests (ported).
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
@@ -154,7 +229,6 @@ const scripts = [
   // career-ops v1.24.0 sync: new standalone tools with inline self-tests.
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
-  { name: 'invite-match.test.mjs', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
   // security sync (#2368): untrusted-external-content directive coverage guard.
   { name: 'validate-untrusted-content-coverage.mjs --self-test', expectExit: 0 },
@@ -162,18 +236,15 @@ const scripts = [
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'eval-golden.mjs --self-test', expectExit: 0 },
-  // Root-level standalone suites: they call process.exit / use node:test, so
-  // they must run as subprocesses, not be imported by tests/ discovery.
-  { name: 'invite-match.test.mjs', expectExit: 0 },
-  { name: 'detect-reposts.test.mjs', expectExit: 0 },
-  { name: 'process-quality.test.mjs', expectExit: 0 },
-  { name: 'reply-matcher.test.mjs', expectExit: 0 },
-  { name: 'verify-application-match.test.mjs', expectExit: 0 },
-  { name: 'cv-templates.test.mjs', expectExit: 0 },
-  { name: 'discover-ats.test.mjs', expectExit: 0 },
-  { name: 'contacts.test.mjs', expectExit: 0 },
-  { name: 'company-history.test.mjs', expectExit: 0 },
-  { name: 'jd-similarity.test.mjs', expectExit: 0 },
+  // NOTE: the eleven root-level suites that used to be hand-registered here
+  // are gone. Each existed twice — once at the repo root, once under tests/ —
+  // in two divergent versions, and BOTH ran, so the weaker copy decided
+  // whether the suite was green (the root detect-reposts copy was 891 lines
+  // against tests/'s 1352, and it failed outright once its subject was
+  // replaced). Upstream retired the same duplication in #3247/#3306/#3388.
+  // dead-boards.test.mjs was worse than duplicated: it was at the root and
+  // never registered here, so nothing ran it at all. All of them now live in
+  // tests/ and are auto-discovered — one discovery mechanism, one copy.
   { name: 'lib/context-budget.test.mjs', expectExit: 0 },
   // tracker-columns coverage lives at tests/tracker-columns.test.mjs
   // (auto-discovered) since the header-aware parsing port.
@@ -189,6 +260,11 @@ const scripts = [
   { name: 'fix-slugs.mjs', expectExit: 0 },
   // career-ops 1.27.0 sync: new standalone tool with an inline self-test.
   { name: 'negotiation-roi.mjs --self-test', expectExit: 0 },
+  // career-ops 1.30.0 sync: ATS-friendliness scorer (#2064) ships an inline
+  // self-test. Upstream also carries an inline fixture block for it in this
+  // file; the fork registers the script's own self-test instead, which covers
+  // the same scoring surface without a second copy of the fixtures.
+  { name: 'verify-ats.mjs --self-test', expectExit: 0 },
   // The fork's layer over upstream, as a gate. Exits 1 naming any adaptation a
   // sync overwrote — the failure mode that otherwise ships silently with a
   // green suite (upstream #75 restored a wrong-profile read across 25 scripts
@@ -205,10 +281,18 @@ for (const { name, allowFail, skipIfMissing } of scripts) {
   const result = run(NODE, name.split(' '), { stdio: ['pipe', 'pipe', 'pipe'] });
   if (result !== null) {
     pass(`${name} runs OK`);
-  } else if (allowFail) {
+  } else if (allowFail && !crashedBeforeRunning(lastRunFailure())) {
     warn(`${name} exited with error (expected without user data)`);
+  } else if (allowFail) {
+    // allowFail says "a non-zero exit is expected here", never "any outcome
+    // is fine". A script that dies with an uncaught exception did not run at
+    // all, and reporting that as the expected failure is how #3440 sat in
+    // upstream main: cv-sync-check.mjs threw a ReferenceError at module scope,
+    // exited 1 like a missing cv.md, and the suite printed the reassuring
+    // warning for a script that never reached a single check.
+    fail(`${name} crashed before running — allowFail covers an expected exit, not an uncaught error${formatRunFailure()}`);
   } else {
-    fail(`${name} crashed`);
+    fail(`${name} crashed${formatRunFailure()}`);
   }
 }
 

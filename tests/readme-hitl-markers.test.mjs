@@ -50,17 +50,36 @@ for (const file of readmes) {
   // because its row is translated into 17 languages; this fork is English-only,
   // so the substantive claim is checkable directly — and that is the half that
   // matters. A marker guarding a hedged sentence guards nothing.
-  if (/never submits an application/i.test(line)) {
+  // Check the PROSE, not the whole line: the marker comment QUOTES the hedges it
+  // forbids, so a scan of the raw line matches the anchor's own warning text and
+  // fails a correctly-worded row.
+  //
+  // Sliced at the marker's own bounds rather than stripped with
+  // /<!--[\s\S]*?-->/g. CodeQL flags that pattern as incomplete multi-character
+  // sanitization, and the objection holds: an unclosed comment leaves a bare
+  // `<!--` in `prose`, so a row whose comment lost its `-->` would be scanned
+  // with the anchor text still in it and the hedge check would fail for a reason
+  // that has nothing to do with hedging. The marker's position is already known,
+  // so exact bounds are available — and an unclosed comment becomes its own
+  // named failure instead.
+  const mStart = line.indexOf(MARKER);
+  const mEnd = line.indexOf('-->', mStart);
+  const prose = mEnd === -1 ? null : line.slice(0, mStart) + line.slice(mEnd + '-->'.length);
+  if (prose === null) {
+    fail(`${file}: the HITL marker comment is never closed with -->`);
+  } else if (/never submits an application/i.test(prose)) {
     pass(`${file}: the row states the prohibition in absolute terms`);
   } else {
     fail(`${file}: the HITL row no longer says "never submits an application"`);
   }
-  // Check the PROSE, not the whole line: the marker comment quotes the hedges
-  // it forbids ("without your permission"), so a naive scan of the raw line
-  // matches the anchor's own warning text and fails a correctly-worded row.
-  const prose = line.replace(/<!--[\s\S]*?-->/g, '');
-  if (/\b(usually|generally|normally|by default|unless|without your permission)\b/i.test(prose)) {
-    fail(`${file}: the HITL row carries a hedge — the guarantee is absolute, not a default`);
+
+  const HEDGES = /\b(usually|generally|normally|typically|by default|unless|without your permission|automatically|by itself)\b/i;
+  const hedge = prose === null ? null : prose.match(HEDGES);
+  if (prose === null) {
+    // Already reported above; do not also tick "hedge-free" on a line that was
+    // never successfully read.
+  } else if (hedge) {
+    fail(`${file}: the HITL row hedges with "${hedge[0]}" — the guarantee is absolute, not a default`);
   } else {
     pass(`${file}: no hedge in the guarantee row`);
   }

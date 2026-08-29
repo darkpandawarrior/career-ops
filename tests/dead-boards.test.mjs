@@ -13,22 +13,21 @@ import {
   isDeadBoardError, boardKey, parseDeadBoards, serializeDeadBoards, shouldSkip,
   recordMiss, recordHit, loadDeadBoards, saveDeadBoards,
   DEAD_AFTER_MISSES, RECHECK_AFTER_DAYS,
-} from './dead-boards.mjs';
+} from '../dead-boards.mjs';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-let passed = 0, failed = 0;
-const failures = [];
+import { pass, fail } from './helpers.mjs';
+
 function ok(label, cond) {
-  if (cond) passed++;
-  else { failed++; failures.push(label); console.log(`  FAIL: ${label}`); }
+  if (cond) pass(label);
+  else fail(label);
 }
 function eq(label, actual, expected) {
-  ok(label, JSON.stringify(actual) === JSON.stringify(expected));
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    console.log(`    expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
-  }
+  const a = JSON.stringify(actual), e = JSON.stringify(expected);
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 const DAY = 86_400_000;
@@ -153,5 +152,3 @@ ok('exactly at recheck boundary is re-probed', !shouldSkip({ misses: 99, lastChe
   rmSync(dir, { recursive: true, force: true });
 }
 
-console.log(`\ndead-boards: ${passed} passed, ${failed} failed`);
-if (failed) { console.log(failures.map(f => `  - ${f}`).join('\n')); process.exit(1); }

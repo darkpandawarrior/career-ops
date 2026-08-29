@@ -44,17 +44,17 @@
  */
 
 import {
-  existsSync, mkdirSync, readFileSync, readdirSync, realpathSync,
+  existsSync, mkdirSync, readFileSync, readdirSync,
   statSync, unlinkSync, writeFileSync,
 } from 'fs';
 import { randomUUID } from 'crypto';
 import { dirname, join, resolve } from 'path';
-import { fileURLToPath } from 'url';
 import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
 import { resolveTrackerPath } from './tracker-utils.mjs';
 import { acquireTrackerLock, canonicalizeTrackerPath } from './tracker-utils.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
@@ -76,13 +76,13 @@ export function formatReportNumber(num) {
 function reportsDirFor(options = {}) {
   return resolve(options.reportsDir
     || process.env.CAREER_OPS_REPORTS_DIR
-    || join(options.rootDir || CAREER_OPS, 'reports'));
+    || join(options.rootDir || CAREER_OPS_DATA, 'reports'));
 }
 
 function trackerPathFor(options = {}) {
   return options.trackerPath
     ? canonicalizeTrackerPath(options.trackerPath)
-    : resolveTrackerPath(options.rootDir || CAREER_OPS);
+    : resolveTrackerPath(options.rootDir || CAREER_OPS_DATA);
 }
 
 function trackerLockOptions(trackerPath, options = {}) {
@@ -479,15 +479,6 @@ async function runCli() {
   }
 }
 
-function isDirectInvocation() {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
-  }
-}
-
-if (isDirectInvocation()) {
+if (isMainModule(import.meta.url)) {
   process.exitCode = await runCli();
 }

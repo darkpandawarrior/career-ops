@@ -5,22 +5,15 @@
  * Run: node verify-application-match.test.mjs
  */
 
-import { verifyDraft, findLeakedTokens, findPlaceholderPhrases } from './verify-application-match.mjs';
+import { verifyDraft, findLeakedTokens, findPlaceholderPhrases } from '../verify-application-match.mjs';
 
-let passed = 0;
-let failed = 0;
+import { pass, fail } from './helpers.mjs';
 
 function eq(label, actual, expected) {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
-  if (a === e) {
-    passed++;
-  } else {
-    failed++;
-    console.log(`  FAIL: ${label}`);
-    console.log(`    expected: ${e}`);
-    console.log(`    actual:   ${a}`);
-  }
+  if (a === e) pass(label);
+  else fail(`${label} — expected ${e}, got ${a}`);
 }
 
 eq(
@@ -77,5 +70,3 @@ eq(
   true
 );
 
-console.log(`\nverify-application-match: ${passed} passed, ${failed} failed`);
-process.exit(failed > 0 ? 1 : 0);

@@ -43,7 +43,6 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 
 import { parseScanHistory, detectReposts, loadAggregatorCompanies, isKeyLookup } from './detect-reposts.mjs';
@@ -58,6 +57,8 @@ import {
   normalizeStatus,
 } from './followup-cadence.mjs';
 
+import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
@@ -218,7 +219,12 @@ export function resolveDefaultSilenceWindow(rootDir = CAREER_OPS) {
 
 // --- today() — injectable for deterministic tests ---
 export function today() {
-  return new Date(new Date().toISOString().split('T')[0]);
+  // LOCAL calendar day, UTC midnight anchor. toISOString() gives the UTC DAY,
+  // so west of Greenwich an evening run answered "today" with tomorrow and
+  // every age in the report came out one day high (#3070). Only WHICH day this
+  // is moves; the UTC-midnight anchor the arithmetic downstream expects is
+  // deliberately preserved.
+  return new Date(localToday());
 }
 
 function resolveNow(now) {
@@ -926,7 +932,7 @@ async function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const { summaryMode, selfTestMode, company, silenceWindowArg, includeStale, scanHistoryOverride, followupsOverride } =
     parseArgs(process.argv);
 

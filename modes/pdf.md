@@ -60,6 +60,16 @@ Run `npm run jd:similarity -- {bundle-root}/jd/current.md {bundle-root}/jd/previ
 - Distributed JD keywords: Summary (top 5), first bullet of each role, Skills section
 - No hidden text, keyword stuffing, or white-font tricks. Optimize for parseability plus human review.
 
+**Optional parseability check:** after writing the HTML you can score it for ATS-friendliness with `node verify-ats.mjs {html-path}` (see `modes/ats.md`). Deterministic, read-only and advisory — it reports a 0-100 score plus concrete issues, but never blocks generation the way the `verify-cv-facts.mjs` fact gate in Step 18 does.
+
+### Markdown bold
+
+Wrap a span in `**…**` to emphasise it — typically the quantified result a recruiter should catch in the six-second scan (`Cut p99 latency from 840 ms to **120 ms**`). `generate-pdf.mjs` converts it to `<strong>` during ATS normalization (#1728), and the template styles it in both the summary and job bullets.
+
+- **A bold span cannot contain a `*`.** `**tripled *3x* throughput**` matches nothing and ships the asterisks literally — no error, no warning. Rewrite it as `**tripled 3x throughput**` rather than nesting emphasis. Single asterisks and unmatched markers stay literal.
+- **The LaTeX twin is narrower — check `modes/latex.md` before reusing content across both.** `build-cv-latex.mjs` renders `**…**` as `\textbf{…}` only in what it emits inside a `\resumeItem`: `experience[].bullets`, `projects[].bullets`, and the `education[].coursework` line. It has no `summary` field, and `projects[].name`, `awards[].title` and the `skills[]` fields print `**` literally. Bullets emphasise the same way in both formats; nothing else is guaranteed to.
+- Emphasis is not a substitute for evidence — bold reorders attention, it does not add claims. The no-fabrication rule applies to bolded text exactly as to the rest of the bullet, and bolding every other phrase emphasises nothing.
+
 ## Recruiter Review Gates
 
 - The summary should answer: "What role is this person targeting, and why this one?"

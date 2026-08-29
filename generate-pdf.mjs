@@ -24,10 +24,11 @@ import { chromium } from 'playwright';
 import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from 'fs';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { readCvSectionOrder } from './theme-style.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const PDF_PAGE_MARGIN = '0.6in';
 
@@ -82,6 +83,19 @@ function assertInsideProject(absPath, label) {
     throw new Error(`${label} escapes the project directory: ${absPath}`);
   }
   return absPath;
+}
+
+/**
+ * Boolean form of assertInsideProject, for the one caller that needs to CHOOSE
+ * a fallback rather than fail. Deliberately a wrapper and not a second
+ * containment implementation: two copies of this check would drift, and the
+ * escape it exists to stop only has to slip past one of them.
+ *
+ * @param {string} absPath - Already-resolved absolute candidate path.
+ * @returns {boolean} True when the canonical path stays inside the project.
+ */
+function insideProject(absPath) {
+  try { assertInsideProject(absPath, 'path'); return true; } catch { return false; }
 }
 
 // Ensure output directory exists (fresh setup)
@@ -182,6 +196,7 @@ const SECTION_ALIASES = new Map([
   ['awards & honours', 'awards'],
   ['skills', 'skills'],
   ['technical skills', 'skills'],
+  ['interests', 'interests'],
 ]);
 
 function normalizeSectionTitle(text) {
@@ -1350,9 +1365,23 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
  */
 async function renderInPage(browser, html, outputPath, opts = {}) {
   const format = opts.format || 'a4';
-  const baseDir = opts.baseDir || process.cwd();
+  const requestedBaseDir = resolve(opts.baseDir || __projectRoot);
+  // Temporary HTML is an output too: never let an external input path or a
+  // caller-supplied baseDir choose an arbitrary directory (process.cwd() used
+  // to). If the requested directory is outside the project — or escapes
+  // through a symlink — keep the render project-owned while still allowing the
+  // input itself to be read from wherever it lives.
+  const baseDir = insideProject(resolve(requestedBaseDir, '.career-ops-render-anchor'))
+    ? requestedBaseDir
+    : __projectRoot;
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
+
+  // Reject an escaping destination before creating directories, launching
+  // Chromium, or writing any renderer temporary files (#2844). The CLI paths
+  // already assert this, but renderHtmlToPdf/renderBatch are exported, so the
+  // guard belongs on the shared choke point every caller routes through.
+  assertInsideProject(resolve(outputPath), 'output');
 
   mkdirSync(dirname(outputPath), { recursive: true });
 
@@ -1413,7 +1442,8 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
       preferCSSPageSize: true,
     });
 
-    // Write PDF
+    // Write PDF only after rendering has completed. Renderer cleanup still runs
+    // if an injected browser fails before producing a buffer.
     await writeFile(outputPath, pdfBuffer);
 
     // Read the root page-tree count so page-like text in streams is ignored.
@@ -1519,7 +1549,7 @@ export async function renderBatch(entries, opts = {}) {
   }
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   generatePDF().catch((err) => {
     console.error('❌ PDF generation failed:', err.message);

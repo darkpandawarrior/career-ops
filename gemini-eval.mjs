@@ -32,7 +32,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import * as yaml from 'js-yaml';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
 
@@ -72,7 +72,7 @@ const PATHS = {
   profile:     join(CAREER_OPS_DATA, 'modes', '_profile.md'),
   profileYml:  join(CAREER_OPS_DATA, 'config', 'profile.yml'),
   reports:     join(CAREER_OPS_DATA, 'reports'),
-  tracker:     join(CAREER_OPS_DATA, 'data', 'applications.md'),
+  tracker:     resolveTrackerPath(CAREER_OPS_DATA),
   trackerAdditions: join(CAREER_OPS_DATA, 'batch', 'tracker-additions'),
 };
 

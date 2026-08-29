@@ -15,7 +15,7 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, renameSync, existsSync, rmSync, copyFileSync } from 'fs';
-import { join, basename, dirname } from 'path';
+import { join, basename, dirname, resolve, sep } from 'path';
 import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
@@ -23,7 +23,8 @@ import { roleFuzzyMatch } from './role-matcher.mjs';
 import { LEGACY_COLMAP, detectColumns, isHeaderRow, normalizeVia, resolveScoreStatus, SEPARATOR_ROW_RE } from './tracker-parse.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
-import { acquireTrackerLock, canonicalizeTrackerPath, normalizeCompany, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath, normalizeCompany, resolvePdfIndexPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { parsePdfIndex } from './find.mjs';
 import { normalizeUrl } from './url-key.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
@@ -35,6 +36,9 @@ const APPS_FILE_RAW = process.env.CAREER_OPS_TRACKER
     ? join(CAREER_OPS_DATA, 'data/applications.md')
     : join(CAREER_OPS_DATA, 'applications.md');
 const APPS_FILE = canonicalizeTrackerPath(APPS_FILE_RAW);
+// Moves with the tracker (CAREER_OPS_TRACKER), and CAREER_OPS_PDF_INDEX overrides
+// it outright — resolvePdfIndexPath is the one place that decision lives.
+const PDF_INDEX_FILE = resolvePdfIndexPath(APPS_FILE);
 const TRACKER_DIR = dirname(APPS_FILE);
 // CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
 const ADDITIONS_DIR = process.env.CAREER_OPS_ADDITIONS
@@ -388,6 +392,47 @@ function parseScore(s) {
  */
 function isUnscoreable(s) {
   return ['—', '-', 'N/A'].includes(String(s).replace(/\*\*/g, '').trim());
+}
+
+/**
+ * Flip stale PDF cells to ✅ when the generated-PDF manifest has the row's
+ * report number.
+ *
+ * The tracker's PDF column is derived state — data/pdf-index.tsv is the truth —
+ * and it only ever went stale in one direction here: a row written before its
+ * PDF existed kept ❌ forever, because nothing re-read the index. Reconciling
+ * on every merge is what makes a ✅ in the tracker mean a PDF actually exists.
+ * Only ❌ → ✅ is done in-process; the full reconciliation (including ✅ → ❌
+ * for a PDF that has since been deleted) stays in sync-pdf-flags.mjs, which
+ * takes the tracker lock itself and so cannot be called from inside this one.
+ *
+ * @param {Array<object>} existingApps - Parsed tracker rows.
+ * @param {string[]} appLines - Mutable tracker file lines.
+ * @param {Map<string,string>} pdfIndex - Normalized report# → PDF path.
+ * @returns {number} Number of tracker rows updated.
+ */
+function syncPdfFlags(existingApps, appLines, pdfIndex) {
+  let changed = 0;
+  if (pdfIndex.size === 0) return changed;
+
+  for (const app of existingApps) {
+    const reportNum = extractReportNum(app.report, app.notes);
+    if (!reportNum || !pdfIndex.has(String(reportNum)) || app.pdf !== '❌') continue;
+
+    const lineIdx = appLines.indexOf(app.raw);
+    if (lineIdx < 0) continue;
+
+    console.log(`${DRY_RUN ? '🔄 PDF sync (dry-run)' : '🔄 PDF sync'}: #${app.num} ${app.company} — report ${reportNum} now has a generated PDF`);
+    if (!DRY_RUN) {
+      const updatedLine = buildRow({ ...app, pdf: '✅' });
+      appLines[lineIdx] = updatedLine;
+      app.pdf = '✅';
+      app.raw = updatedLine;
+    }
+    changed++;
+  }
+
+  return changed;
 }
 
 // Column layout for the applications.md table. The tracker may use the original
@@ -789,6 +834,67 @@ for (const line of appLines) {
   }
 }
 
+// One-time backfill populating the URL column on existing rows from each row's
+// linked report (`**URL:**` header). This is the EXPAND phase — the key must
+// exist before the merge relies on it. Idempotent: only fills rows whose URL
+// cell is empty, so re-running is safe.
+// Run with: node merge-tracker.mjs --backfill-urls [--dry-run]
+if (BACKFILL_URLS) {
+  if (COLMAP.url == null) {
+    console.error('❌ --backfill-urls: this tracker has no URL column. Add a `URL` header column first (additive), then re-run.');
+    trackerLock.release();
+    process.exit(1);
+  }
+  let filled = 0, noReport = 0, noUrl = 0, already = 0;
+  const backfilled = appLines.map(line => {
+    // parseAppLine's NaN check rejects the header and separator rows (neither
+    // has a numeric `#` cell), so no `---` substring test here — that heuristic
+    // skipped data rows whose URL contains `---` (Workday slugs like
+    // `Product-Strategy---Operations`).
+    if (!line.startsWith('|')) return line;
+    const app = parseAppLine(line);
+    if (!app) return line;
+    // Rebuilt, not returned verbatim — a row can carry a URL and STILL be short
+    // of the header on a layout with user-owned columns after `URL`. Returning
+    // `line` there leaves the same unreadable row this fix exists to prevent.
+    if ((app.url || '').trim()) { already++; return buildRow({ ...app }); }
+    // Shared derivation with the merge loop — one place that knows how to turn a
+    // report link into the posting URL. Tracker links may be root-relative
+    // (`reports/...`) or data-relative (`../reports/...`); both resolve.
+    const resolved = resolveReportUrl(app.report);
+    // A row we cannot fill is still rebuilt, with an empty URL cell.
+    //
+    // Returning the original line leaves a pre-URL-column row one cell short of
+    // the header, and #3016 established that a short row is exactly what
+    // parseTrackerRow must reject: "a row must span the full header width,
+    // otherwise a missing interior cell would silently shift every later column
+    // one position left". That guard is correct; this writer was producing rows
+    // it correctly refuses. Every reader built on tracker-parse.mjs then skips
+    // the row for good — set-status.mjs reports "No tracker row with #N".
+    //
+    // parseAppLine's guard is `parts.length <= maxIdx`, one cell looser than
+    // parseTrackerRow's `parts.length < width`, which is why the backfill can
+    // still see and repair precisely the rows the readers cannot.
+    //
+    // The DELIMITER is added, never a value: buildRow writes `put('url', '')`,
+    // and an empty URL falls back to the report-number and fuzzy company+role
+    // dedup tiers exactly as it does today. Nothing is fabricated.
+    if (resolved.reason === 'no-report') { noReport++; return buildRow({ ...app, url: '' }); }
+    if (resolved.reason === 'no-url') { noUrl++; return buildRow({ ...app, url: '' }); }
+    filled++;
+    return buildRow({ ...app, url: resolved.url });
+  });
+  const summary = `${filled} filled, ${already} already set, ${noReport} no/missing report, ${noUrl} report has no **URL:**`;
+  if (DRY_RUN) {
+    console.log(`🔎 Backfill URLs (dry-run): would fill ${filled} row(s). (${summary})`);
+  } else {
+    writeFileAtomic(APPS_FILE, backfilled.join('\n'));
+    console.log(`✅ Backfill URLs: ${summary}.`);
+  }
+  trackerLock.release();
+  process.exit(0);
+}
+
 // Full set of numbers already on the tracker (#1704). A narrower pass than the
 // existingApps loop above: it reads only the numeric # cell and skips a row via
 // the same NaN check verify-pipeline.mjs uses, instead of the
@@ -811,15 +917,34 @@ for (const line of appLines) {
 
 console.log(`📊 Existing: ${existingApps.length} entries, max #${maxNum}`);
 
+let added = 0;
+let updated = 0;
+
+// Reconcile the PDF column before anything else touches the rows, so a merge
+// that also adds rows writes the corrected flags in the same pass. Runs even
+// when there is nothing to merge — a PDF generated since the last run is
+// exactly the case where the tracker is stale and there are no additions.
+const pdfIndex = existsSync(PDF_INDEX_FILE)
+  ? parsePdfIndex(readFileSync(PDF_INDEX_FILE, 'utf-8'))
+  : new Map();
+const pdfSynced = syncPdfFlags(existingApps, appLines, pdfIndex);
+updated += pdfSynced;
+
 // Read tracker additions
 if (!existsSync(ADDITIONS_DIR)) {
   console.log('No tracker-additions directory found.');
+  if (pdfSynced > 0 && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  if (DRY_RUN) console.log('(dry-run — no changes written)');
+  trackerLock.release();
   process.exit(0);
 }
 
 const tsvFiles = readdirSync(ADDITIONS_DIR).filter(f => f.endsWith('.tsv'));
 if (tsvFiles.length === 0) {
   console.log('✅ No pending additions to merge.');
+  if (pdfSynced > 0 && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  if (DRY_RUN) console.log('(dry-run — no changes written)');
+  trackerLock.release();
   process.exit(0);
 }
 
@@ -835,8 +960,6 @@ tsvFiles.sort((a, b) => {
 
 console.log(`📥 Found ${tsvFiles.length} pending additions`);
 
-let added = 0;
-let updated = 0;
 let skipped = 0;
 const newLines = [];
 // TSVs whose evaluation could not be applied to the tracker. They are kept out

@@ -224,11 +224,13 @@ function walk(dir, out = []) {
 const EXEMPT = new Map([
   // The helper is the one place allowed to read the entry path.
   ['lib/is-main-module.mjs', 'is the comparison'],
-  // #1706 requires update-system.mjs to be self-loading (a pre-#1245 client
-  // checks out this single file and re-execs it), so it inlines the guard
-  // instead of importing it. The exemption covers the source scan ONLY; the
-  // behaviour test at the bottom of this file pins its semantics.
-  ['update-system.mjs', 'self-loading per #1706; behaviour-pinned below'],
+  // FORK: upstream exempts update-system.mjs here (it is self-loading per
+  // #1706, so it inlines the guard instead of importing it). This fork ships
+  // no update-system.mjs — it syncs from upstream explicitly and never
+  // self-updates — so both the exemption and its behaviour test below are
+  // dropped rather than kept pointing at a file that does not exist. The
+  // "exemption list carries no dead entries" test above is precisely why an
+  // entry cannot simply be left in place.
   // This file quotes the pattern in its detector self-test and error messages.
   ['tests/main-guard-convention.test.mjs', 'quotes the pattern to test the detector'],
   // Assigns argv[1] inside a spawned child's preamble so the copied script's
@@ -321,34 +323,8 @@ test('the #1706 static-import detector sees every spelling', () => {
   }
 });
 
-test("update-system.mjs's inlined guard realpaths both sides", (t) => {
-  // The #1706 self-loading rule buys it an exemption from the import, not from
-  // being correct. Asserted on BEHAVIOUR, not on source text: a source-shape
-  // check passes on a rewrite that keeps the words and loses the realpath.
-  const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
-  assert.ok(
-    !STATIC_RELATIVE_IMPORT.test(src),
-    'update-system.mjs grew a static relative import — that breaks the old→new re-exec (#1706)',
-  );
-
-  const linked = linkedRoot('main-guard-updater-');
-  if (!linked) return t.skip('directory symlinks unavailable on this machine');
-  const { link, cleanup } = linked;
-  try {
-    // An unrecognized subcommand is the only branch that proves the tail ran
-    // and writes NOTHING: `check` hits the network, and every other command
-    // (`dismiss` included) touches the real repo through the symlink.
-    const viaLink = spawnSync(process.execPath, [join(link, 'update-system.mjs'), '--probe-not-a-command'], {
-      cwd: ROOT, encoding: 'utf-8', timeout: 60_000,
-    });
-    assert.match(
-      viaLink.stdout,
-      /Usage: node update-system\.mjs/,
-      `the updater printed no usage through a symlink (exit ${viaLink.status}) — its inlined ` +
-        'guard stopped realpathing both sides, and every update silently no-ops (#3170)',
-    );
-    assert.equal(viaLink.status, 1, 'the usage branch must still exit non-zero');
-  } finally {
-    cleanup();
-  }
-});
+// FORK: upstream's behaviour test for update-system.mjs's inlined guard lives
+// here. This fork ships no update-system.mjs (see the EXEMPT note above), so
+// the test is removed rather than skipped — a suite that reads a file which
+// cannot exist here fails on ENOENT, which reads as a broken harness rather
+// than as an intentional divergence.

@@ -20,18 +20,22 @@ import { validateFlags } from './lib/cli-flags.mjs';
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { join } from 'path';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const ROOT = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
-const APPS_FILE = join(ROOT, 'data', 'applications.md');
+// Fork: data lives under the resolved DATA root, never the script's own dir —
+// under multi-profile those differ and reading the script dir silently serves
+// another profile's numbers.
+const { dataRoot: ROOT } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = resolveTrackerPath(ROOT);
 const SCAN_HISTORY_FILE = join(ROOT, 'data', 'scan-history.tsv');
 const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
 const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
+const STATUS_LOG_FILE = join(ROOT, 'data', 'status-log.tsv');
 const PORTALS_FILE = join(ROOT, 'portals.yml');
 const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
 
@@ -152,6 +156,79 @@ export function computeFunnel(byStatus) {
     interviewRate: pct(everInterview, everApplied),
     offerRate: pct(everOffer, everApplied),
     smallSample: everApplied < 10,
+  };
+}
+
+// Canonical pipeline depth per stage, for "ever reached" math. Terminal and
+// pre-pipeline states (Rejected/Discarded/Evaluated/SKIP/Unknown) are absent →
+// depth 0; the ledger's from/to history is what proves the stages a row passed
+// through before it landed on a terminal snapshot.
+const STAGE_RANK = { Applied: 1, Responded: 2, Interview: 3, Offer: 4, Hired: 5 };
+
+/**
+ * Parse data/status-log.tsv into per-row transition observations. Columns are
+ * {num}\t{date}\t{from}\t{to}\t{source}\t{note}; only num/from/to are read here.
+ * Torn or non-numeric-num rows are skipped — this is a display aid, never throws.
+ * @returns {Array<{num:number, from:string, to:string}>}
+ */
+export function parseStatusLogStages(content) {
+  const out = [];
+  for (const line of String(content ?? '').replace(/\r/g, '').split('\n')) {
+    if (!line.trim()) continue;
+    const c = line.split('\t');
+    const rawNum = String(c[0] || '').trim();
+    const date = String(c[1] || '').trim();
+    const from = String(c[2] || '').trim();
+    const to = String(c[3] || '').trim();
+    if (!/^\d+$/.test(rawNum) || !date || !from || !to) continue;
+    out.push({ num: Number(rawNum), from, to });
+  }
+  return out;
+}
+
+/**
+ * Ledger-aware funnel: everX counts DISTINCT tracker rows that ever reached
+ * stage X, folding the transition ledger so a row now sitting in a terminal
+ * snapshot still counts for the stages it passed through — an Offer that was
+ * declined (now Discarded) counts into everOffer; a Rejected that reached
+ * Interview counts into everInterview. This resolves the snapshot limitation
+ * computeFunnel() documents (#1428) for every row the ledger covers; a row with
+ * no ledger history falls back to its current status alone, so pre-ledger middle
+ * stages stay lower bounds. A current Rejected still proves everApplied (rank 1)
+ * with no ledger, matching the snapshot math. Same shape as computeFunnel() plus
+ * `basis:'ledger'`.
+ *
+ * @param {Map<number,string>} statusByNum - num → current canonical status.
+ * @param {Array<{num:number,from:string,to:string}>} ledger - parseStatusLogStages output.
+ */
+export function computeFunnelWithHistory(statusByNum, ledger) {
+  const reached = new Map(); // num → highest stage rank ever held (distinct rows)
+  const bump = (num, rank) => { if (rank > (reached.get(num) || 0)) reached.set(num, rank); };
+  for (const [num, status] of statusByNum) {
+    bump(num, STAGE_RANK[status] || (status === 'Rejected' ? 1 : 0));
+  }
+  for (const { num, from, to } of ledger) {
+    if (!statusByNum.has(num)) continue; // ledger row whose tracker row is gone
+    bump(num, STAGE_RANK[from] || 0);
+    bump(num, STAGE_RANK[to] || 0);
+  }
+  let everApplied = 0, everResponded = 0, everInterview = 0, everOffer = 0;
+  for (const rank of reached.values()) {
+    if (rank >= 1) everApplied++;
+    if (rank >= 2) everResponded++;
+    if (rank >= 3) everInterview++;
+    if (rank >= 4) everOffer++;
+  }
+  return {
+    everApplied,
+    everResponded,
+    everInterview,
+    everOffer,
+    responseRate: pct(everResponded, everApplied),
+    interviewRate: pct(everInterview, everApplied),
+    offerRate: pct(everOffer, everApplied),
+    smallSample: everApplied < 10,
+    basis: 'ledger',
   };
 }
 
@@ -432,7 +509,14 @@ export function computeRunStats(content) {
       newAdded: num('new_added'),
     });
   }
-  if (rows.length === 0) return null;
+  // Distinguish "no runs recorded" from "every run was excluded as drifted". Returning null for
+  // the second case hides the reason: the caller would report an absent scan section on a file
+  // that is full of rows the header can no longer describe.
+  if (rows.length === 0) {
+    return driftedRows > 0
+      ? { totalRuns: 0, driftedRows, failedRuns: 0, lastRunDate: null, avgFoundPerRun: 0, avgNewPerRun: 0, filterRemovalPct: 0 }
+      : null;
+  }
   // Inclusion by 'completed', not exclusion by known failure names: any
   // status a future scan.mjs writes is excluded from trend averages until
   // this aggregator learns what it means. Rows from pre-status files default
@@ -470,6 +554,7 @@ export function computeAllStats({
   scanRunsFile = SCAN_RUNS_FILE,
   portalsFile = PORTALS_FILE,
   portalHealthFile = PORTAL_HEALTH_FILE,
+  statusLogFile = STATUS_LOG_FILE,
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
   const apps = read(appsFile);
@@ -478,6 +563,7 @@ export function computeAllStats({
   const portals = read(portalsFile);
   const runs = read(scanRunsFile);
   const portalHealth = read(portalHealthFile);
+  const statusLog = read(statusLogFile);
   const tracker = apps ? computeTrackerStats(apps) : null;
   const scan = scanHist ? computeScanStats(scanHist) : null;
   return {
@@ -490,10 +576,17 @@ export function computeAllStats({
         portals: !!portals,
         scanRuns: !!runs,
         portalHealth: !!portalHealth,
+        statusLog: !!statusLog,
       },
     },
     tracker,
-    funnel: tracker ? computeFunnel(tracker.byStatus) : null,
+    // Prefer the ledger-aware funnel once a transition log exists (#1428); fall
+    // back to the pure status snapshot when it does not, so nothing regresses.
+    funnel: !tracker
+      ? null
+      : statusLog
+        ? computeFunnelWithHistory(trackerStatusByNum(apps), parseStatusLogStages(statusLog))
+        : computeFunnel(tracker.byStatus),
     scan,
     portals: portals ? computePortalStats(portals, scan, scanHist ? scanCompanyNames(scanHist) : [], portalHealth) : null,
     followups: fups && apps ? computeFollowupStats(fups, trackerStatusByNum(apps)) : null,
@@ -521,7 +614,8 @@ function printSummary(stats) {
   const f = stats.funnel;
   if (f) {
     const small = f.smallSample ? ' (small sample — rates indicative only)' : '';
-    console.log(`Funnel:     ever applied ${f.everApplied} → responded ${f.everResponded} (${f.responseRate}%) → interview ${f.everInterview} (${f.interviewRate}%) → offer ${f.everOffer} (${f.offerRate}%)${small}`);
+    const basis = f.basis === 'ledger' ? ' · ledger-adjusted (folds status-log history)' : '';
+    console.log(`Funnel:     ever applied ${f.everApplied} → responded ${f.everResponded} (${f.responseRate}%) → interview ${f.everInterview} (${f.interviewRate}%) → offer ${f.everOffer} (${f.offerRate}%)${small}${basis}`);
   }
   const s = stats.scan;
   if (s) {
@@ -544,7 +638,13 @@ function printSummary(stats) {
     console.log('Follow-ups: — no data (data/follow-ups.md missing)');
   }
   const r = stats.runs;
-  if (r) {
+  if (r && r.totalRuns === 0 && r.driftedRows > 0) {
+    // Every row was excluded, so there is no last run to name and no average worth printing.
+    // Rendering the normal line here would read `0 recorded (last null) | avg 0 found`, which
+    // looks like an empty file rather than an unreadable one.
+    console.log(`Runs:       none readable — all ${r.driftedRows} row(s) in scan-runs.tsv are wider than its header, so their columns cannot be read by name.`);
+    console.log('            Recover by moving scan-runs.tsv aside; the next scan writes a fresh file with a current header.');
+  } else if (r) {
     const failed = r.failedRuns > 0 ? ` | ${r.failedRuns} failed` : '';
     console.log(`Runs:       ${r.totalRuns} recorded (last ${r.lastRunDate})${failed} | avg ${r.avgFoundPerRun} found / ${r.avgNewPerRun} new per run | filters remove ${r.filterRemovalPct}%`);
     if (r.driftedRows > 0) {
@@ -568,7 +668,7 @@ const USAGE = `Usage:
   node stats.mjs --summary   # human-readable table
   node stats.mjs --help|-h   # print this usage block and exit`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
 
   validateFlags(args, KNOWN_FLAGS, USAGE);

@@ -23,14 +23,25 @@ const CUSTOM_CADENCE_PROFILE = join(ROOT, 'tests', 'fixtures', 'profile-custom-c
 // in the same run (e.g. providers/_profile-keywords.mjs) read
 // CAREER_OPS_PROFILE too, and a leaked override would point them at this tiny
 // fixture instead of the real config/profile.yml.
+//
+// The restore lives in a `finally` rather than after the import: a throw from
+// the imported module would skip a trailing restore, and discovery CONTAINS
+// the throw and runs the next suite regardless — so the leak would come back
+// on precisely the run that was already going wrong (#3306). Nothing below
+// needs the variable; every later call passes profilePath explicitly.
 const previousProfileEnv = process.env.CAREER_OPS_PROFILE;
 process.env.CAREER_OPS_PROFILE = DEFAULT_CADENCE_PROFILE;
 
-const { computeNextFollowupDate, addDays, parseDate, DEFAULT_CADENCE, normalizeStatus, resolveCadenceConfig, loadProfileCadence } =
-  await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+let cadence;
+try {
+  cadence = await import(pathToFileURL(join(ROOT, 'followup-cadence.mjs')).href);
+} finally {
+  if (previousProfileEnv === undefined) delete process.env.CAREER_OPS_PROFILE;
+  else process.env.CAREER_OPS_PROFILE = previousProfileEnv;
+}
 
-if (previousProfileEnv === undefined) delete process.env.CAREER_OPS_PROFILE;
-else process.env.CAREER_OPS_PROFILE = previousProfileEnv;
+const { computeNextFollowupDate, addDays, parseDate, DEFAULT_CADENCE, normalizeStatus, resolveCadenceConfig, loadProfileCadence } =
+  cadence;
 
 const APP = '2026-06-30';
 

@@ -15,12 +15,12 @@ import { readFileSync, existsSync } from 'fs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { owedAppNumbers } from './owed-actions.mjs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { loadCanonicalStates, foldStatusInput } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
@@ -608,7 +608,13 @@ export function loadSelfIdentities(profilePath = PROFILE_FILE) {
   const out = new Set();
   const push = (v) => { if (typeof v === 'string' && v.includes('@')) out.add(v.trim().toLowerCase()); };
   push(raw.candidate?.email);
-  for (const alt of raw.candidate?.alternate_emails || []) push(alt);
+  // Only iterate an actual ARRAY. A hand-edited profile can reasonably hold a mapping here
+  // (`alternate_emails: { work: me@example.com }`), and `for...of` on an object throws — at module
+  // load, because SELF_IDENTITIES is initialised at import time. That would take followup-cadence
+  // (and everything importing it) down entirely over a cosmetic config mistake, which is the
+  // opposite of the fail-open behaviour this function promises everywhere else.
+  const alternates = raw.candidate?.alternate_emails;
+  if (Array.isArray(alternates)) for (const alt of alternates) push(alt);
   return out;
 }
 
@@ -1007,7 +1013,7 @@ const USAGE = `Usage:
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // Must run inside this guard, not at module top level: CADENCE (above) is a
   // module-level singleton built at import time, and test-all.mjs section 12
   // dynamic-imports this module in-process to read it — validating the host

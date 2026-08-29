@@ -198,6 +198,9 @@ let filesWithMojibake = 0;
  * @param {string} dir - Directory to walk.
  * @param {string} relativePath - Relative path for error reporting.
  */
+// Directories excluded from the walk: not repository source.
+const SKIP_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build']);
+
 function walkAndCheck(dir, relativePath = '') {
   const entries = readdirSync(dir, { withFileTypes: true });
   
@@ -206,6 +209,13 @@ function walkAndCheck(dir, relativePath = '') {
     const entryRelativePath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
     
     if (entry.isDirectory()) {
+      // Vendored dependencies are not ours to encode-check, and scanning them
+      // is not a near-miss: templates/portfolio-site/ carries an installed
+      // node_modules here, whose @types/node docs deliberately PRINT mojibake
+      // ("this is a tÃ©st") as an example, and whose bundled tsc binary is not
+      // text at all. Both tripped this canary on every run — a canary that
+      // always fires is a canary nobody reads.
+      if (SKIP_DIRS.has(entry.name)) continue;
       walkAndCheck(fullPath, entryRelativePath);
     } else if (entry.isFile()) {
       filesScanned++;

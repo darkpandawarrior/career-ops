@@ -54,6 +54,9 @@ vi.mock("@/lib/clis", () => ({
 
 vi.mock("@/lib/career-ops", () => ({
   readMemory: vi.fn(() => h.memory),
+  // The English/global default: `evaluate`'s prerequisite gate now checks the
+  // mode file the prompt will actually read, which is this value.
+  readLanguageConfig: vi.fn(() => ({ output: "en", modesDir: "modes", evalModeFile: "modes/oferta.md" })),
 }));
 
 vi.mock("@/lib/profile-registry", () => ({

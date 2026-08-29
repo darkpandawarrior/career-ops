@@ -41,6 +41,7 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { join, relative } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname } from 'path';
@@ -364,7 +365,7 @@ export function apply(root = ROOT, files = sourceFiles(root)) {
   return changed;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args.includes('--help') || args.includes('-h')) {
     console.log('Usage: node fork-adaptations.mjs [--apply] [--json]\n\n'

@@ -4,13 +4,17 @@ description: AI job search command center -- evaluate offers, generate CVs, scan
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | deep | pdf | latex | cover | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview/redflag | interview-redflag | patterns | followup | update | email-sweep | email | reply-watch | add | expand]"
+argument-hint: "[scan | deep | pdf | text | latex | cover | eu-swe | oferta | ofertas | apply | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | interview/plan | interview/practice | interview/debrief | interview/redflag | interview-redflag | patterns | followup | update | email-sweep | email | reply-watch | add | expand]"
 license: MIT
 ---
 
 # career-ops -- Router
 
 career-ops is a multi-CLI job-search command center. The routing below is shared across supported agent CLIs even when the invocation surface differs.
+
+## Project Root Resolution
+
+Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `SKILL.md`: start at the skill file's directory and walk upward until the nearest directory containing both `AGENTS.md` and `modes/`. Resolve every path in this router (`modes/`, `config/`, `data/`, scripts, templates, and output paths) against `PROJECT_ROOT`, never against the process's current working directory. This is required even when the checkout itself is nested or the command starts from a subdirectory. If those two sentinels cannot be found, stop and locate the checkout before reading or writing files. (Scripts have their own contract: they resolve the DATA root through `resolveCareerOpsRoot(import.meta.url)` / `getCareerOpsRoot()` in `path-resolver.mjs`, which under `./profile <name>` is a different directory from `PROJECT_ROOT`.)
 
 ## Invocation Notes
 
@@ -50,6 +54,7 @@ Determine the mode from `$mode`:
 | `interview/redflag` | `interview/redflag` |
 | `interview-redflag` | `interview-redflag` |
 | `pdf` | `pdf` |
+| `text` | `text` |
 | `latex` | `latex` |
 | `training` | `training` |
 | `project` | `project` |
@@ -112,6 +117,7 @@ Available commands:
   /career-ops interview/redflag → Structural red-flag check on a company from interview transcript signal
   /career-ops interview-redflag → Interviewer-side company red-flag detector (None/Caution/Warning) from session transcripts
   /career-ops pdf       → PDF only, ATS-optimized CV
+  /career-ops text      → Tailored markdown CV (mirrors cv.md, no PDF)
   /career-ops latex     → Export CV as LaTeX/Overleaf .tex
   /career-ops cover     → Cover letter: standalone JD paste or /career-ops cover {slug}
   /career-ops training  → Evaluate course/cert against North Star
@@ -143,7 +149,7 @@ After determining the mode, load the necessary files before executing:
 ### Modes that require `_shared.md` + their mode file:
 Read `modes/_shared.md` + `modes/{mode}.md`
 
-Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `contacto`, `apply`, `pipeline`, `scan`, `batch`
+Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `apply`, `pipeline`, `scan`, `batch`
 
 ### Standalone modes (only their mode file):
 Read `modes/{mode}.md`

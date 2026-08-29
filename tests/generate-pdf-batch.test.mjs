@@ -39,6 +39,10 @@ writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
 copyFileSync(join(ROOT, 'generate-pdf.mjs'), script);
 copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
 copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
+// generate-pdf.mjs's main-guard lives in lib/is-main-module.mjs. Without it the
+// sandboxed copy dies with ERR_MODULE_NOT_FOUND before parsing an argument.
+mkdirSync(join(sandbox, 'lib'), { recursive: true });
+copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
 
 const playwrightStub = join(sandbox, 'node_modules', 'playwright');
 mkdirSync(playwrightStub, { recursive: true });

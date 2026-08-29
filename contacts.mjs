@@ -42,10 +42,10 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstatSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
 import { createHash } from 'crypto';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
@@ -65,7 +65,13 @@ const USAGE = `Usage:
   node contacts.mjs --self-test         # run the in-memory test suite
   node contacts.mjs --help              # print this usage block and exit`;
 
-const args = process.argv.slice(2);
+// Only the CLI has flags. When this module is imported, process.argv belongs to
+// whoever imported it — so parsing it here validated the *host's* flags against
+// this script's, and `import { parseContacts } from './contacts.mjs'` inside a
+// process started with any unrecognized flag died at import with
+// "unrecognized flag(s)". Invisible while the suite ran in its own process;
+// surfaced the moment it moved to tests/ and was imported by the harness.
+const args = isMainModule(import.meta.url) ? process.argv.slice(2) : [];
 validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--vcf'] });
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
@@ -483,6 +489,6 @@ function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   main();
 }
