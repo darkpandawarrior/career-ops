@@ -1,27 +1,113 @@
-#!/usr/bin/env node
+import { resolve, dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import { existsSync, readFileSync, realpathSync } from 'fs';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 /**
- * path-resolver.mjs — shared CAREER_OPS_ROOT resolution for root-level scripts.
+ * Returns the resolved career-ops data directory root.
+ * Priority: process.env.CAREER_OPS_ROOT or process.env.CAREER_OPS_DATA_DIR >
+ * .career-ops-data marker file > codebase root (__dirname).
+ * 
+ * @returns {string} Absolute path to the data root
+ */
+export function getCareerOpsRoot() {
+  const env = process.env.CAREER_OPS_ROOT?.trim() || process.env.CAREER_OPS_DATA_DIR?.trim();
+  if (env) {
+    return resolve(__dirname, env);
+  }
+  const markerFile = join(__dirname, '.career-ops-data');
+  if (existsSync(markerFile)) {
+    try {
+      const content = readFileSync(markerFile, 'utf-8').trim();
+      if (content) {
+        return resolve(__dirname, content);
+      }
+    } catch {
+      // ignore read errors
+    }
+  }
+  return __dirname;
+}
+
+/**
+ * Canonicalize a tracker path: absolute + realpath (macOS's symlinked tmpdir
+ * among others). This must be applied by EVERY resolver of the same tracker:
+ * two implementations briefly coexisted, the un-canonicalized one derived
+ * different lock paths (/var vs /private/var) for the same file, and shared
+ * writer exclusion silently broke. This module is the single source of truth;
+ * tracker-utils.mjs re-exports from here so both import paths agree.
+ * Deliberately dependency-light (fs/path only): test fixtures copy this file
+ * standalone next to the scripts they exercise.
+ */
+export function canonicalizeTrackerPath(path) {
+  const absolutePath = resolve(path);
+  try {
+    return realpathSync(absolutePath);
+  } catch {
+    return absolutePath;
+  }
+}
+
+/**
+ * Returns the canonical path to the tracker applications.md file for reading.
+ * Priority: process.env.CAREER_OPS_TRACKER > root/data/applications.md > root/applications.md.
  *
- * Every root script needs two roots that are usually the same directory but can
- * diverge in a multi-profile setup:
- *   - the ENGINE root: where the script itself (and its sibling .mjs modules)
- *     live — always the script's own directory.
- *   - the DATA root: where that script's data/, cv.md, config/, etc. live —
- *     the engine root by default, or CAREER_OPS_ROOT when a caller (e.g. the
- *     web app's per-profile subprocess spawn) points it at a different profile.
+ * @param {string} rootDir The career-ops data root directory
+ * @returns {string} Canonical absolute path to the tracker file
+ */
+export function resolveTrackerPath(rootDir) {
+  const env = process.env.CAREER_OPS_TRACKER?.trim();
+  const raw = env
+    ? env
+    : existsSync(join(rootDir, 'data/applications.md'))
+      ? join(rootDir, 'data/applications.md')
+      : join(rootDir, 'applications.md');
+  return canonicalizeTrackerPath(raw);
+}
+
+/**
+ * Returns the resolved path to the tracker applications.md file for writing.
+ * Priority: process.env.CAREER_OPS_TRACKER > root/data/applications.md.
+ * Does not check for file existence, providing a deterministic write target.
+ * 
+ * @param {string} root The career-ops data root directory
+ * @returns {string} Absolute path to the tracker file for writing
+ */
+export function resolveTrackerPathForWrite(root) {
+  const env = process.env.CAREER_OPS_TRACKER?.trim();
+  if (env) {
+    // Same canonicalization as the read path (see the re-export above): an
+    // un-canonicalized env override derives divergent lock paths on symlinked
+    // tmpdirs and breaks shared writer exclusion.
+    return canonicalizeTrackerPath(env);
+  }
+  return join(root, 'data/applications.md');
+}
+
+
+/**
+ * resolveCareerOpsRoot — the fork's two-root contract, kept over upstream's
+ * single `getCareerOpsRoot()`.
  *
- * scan.mjs, verify-pipeline.mjs, and followup-cadence.mjs each carried their own
- * copy of this ternary. Centralizing it here keeps all callers resolving
- * CAREER_OPS_ROOT the exact same way.
+ * Every root script needs two roots that are usually the same directory but
+ * diverge under multi-profile:
+ *   - ENGINE root: where the script and its sibling .mjs modules live — always
+ *     the CALLER's own directory, which is why this takes `import.meta.url`.
+ *   - DATA root: where that script's data/, cv.md, config/ live.
+ *
+ * The override itself is NOT re-implemented here — it delegates to
+ * `getCareerOpsRoot()` above so there is exactly one definition of "which data
+ * root", and the fork picks up upstream's `.career-ops-data` marker and
+ * `CAREER_OPS_DATA_DIR` for free. `getCareerOpsRoot()` falls back to THIS
+ * module's directory; when nothing overrides the root we keep returning the
+ * caller's own directory, which is what the 31 existing call sites expect.
  *
  * @param {string} scriptUrl - the caller's `import.meta.url`.
  * @returns {{engineRoot: string, dataRoot: string}}
  */
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
-
 export function resolveCareerOpsRoot(scriptUrl) {
   const engineRoot = dirname(fileURLToPath(scriptUrl));
-  const dataRoot = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : engineRoot;
-  return { engineRoot, dataRoot };
+  const resolved = getCareerOpsRoot();
+  return { engineRoot, dataRoot: resolved === __dirname ? engineRoot : resolved };
 }
