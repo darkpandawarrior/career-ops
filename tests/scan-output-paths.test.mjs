@@ -64,6 +64,11 @@ const SCANNER_PATH_VARS = [
   'CAREER_OPS_PROFILE',
   'CAREER_OPS_PIPELINE',
   'CAREER_OPS_SCAN_HISTORY',
+  // The data-root pair joined this list with CAREER_OPS_ROOT itself: they are
+  // now the FIRST variables scan resolves paths from, so an ambient value
+  // would redirect every "default" assertion below at once.
+  'CAREER_OPS_ROOT',
+  'CAREER_OPS_DATA_DIR',
 ];
 
 // CAREER_OPS_ROOT pins scan.mjs's data root at the sandbox (fork: multi-profile),
@@ -71,6 +76,9 @@ const SCANNER_PATH_VARS = [
 const runScan = (dir, env) => {
   const childEnv = { ...process.env };
   for (const name of SCANNER_PATH_VARS) delete childEnv[name];
+  // The sandbox IS the lane's data root. scan's defaults are anchored to
+  // CAREER_OPS_ROOT (no longer to the child's cwd), so "default behavior"
+  // here means: root pinned to the fixture, no per-file overrides.
   return execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
     cwd: dir,
     env: { ...childEnv, CAREER_OPS_ROOT: dir, ...env },
