@@ -67,6 +67,10 @@ config/cv-facts.json
 portals.yml
 modes/_profile.md
 modes/_custom.md
+# Working copy of modes/_brief.template.md (doctor.mjs copies template -> working
+# copy on first run, same convention as _profile.md). Untracked but NOT ignored
+# meant any test-all run that invoked doctor left a User Layer file staged-able.
+modes/_brief.md
 .update-dismissed
 .update-lock
 

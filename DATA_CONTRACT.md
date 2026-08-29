@@ -13,6 +13,7 @@ These files contain your personal data, customizations, and work product. Update
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases (optional; seeded from `config/cv-facts.example.json`) |
 | `modes/_profile.md` | Your archetypes, narrative, negotiation scripts |
 | `modes/_custom.md` | Your house rules, custom workflows & output preferences (procedural — survives updates) |
+| `modes/_brief.md` | Your triage brief. `modes/_brief.template.md` is TRACKED; `doctor.mjs` copies it to this working copy on first run, and the working copy is gitignored (same convention as `modes/_profile.md`). |
 | `voice-dna.md` | Your writing-voice profile. Fork-only split: `voice-dna.template.md` is TRACKED, this working copy is gitignored, and `doctor.mjs` copies template -> working copy on first run (same convention as `modes/_profile.md`). Upstream tracks `voice-dna.md` directly; personalizing a tracked file would publish your voice via the public sibling fork. |
 | `article-digest.md` | Your proof points from portfolio |
 | `interview-prep/story-bank.md` | Your accumulated STAR+R stories |
