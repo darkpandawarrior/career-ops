@@ -113,6 +113,15 @@ function normalizeRel(dir, spec) {
   return out.join('/');
 }
 
+// A script satisfies the multi-profile rule by resolving the data root through
+// ANY of the three accepted spellings. `getCareerOpsRoot` is upstream's own
+// (career-ops v1.30.0 grew native CAREER_OPS_ROOT support and new upstream
+// scripts such as rank-pipeline.mjs call it directly); it delegates to the same
+// env override this fork has always used, so a file that calls it is adapted,
+// not unadapted. Matching only the fork's two spellings made the guard cry wolf
+// on a correctly-resolving upstream file the moment it landed.
+const RESOLVES_DATA_ROOT = /resolveCareerOpsRoot|getCareerOpsRoot|CAREER_OPS_ROOT/;
+
 export const ADAPTATIONS = [
   {
     id: 'yaml-namespace-import',
@@ -159,7 +168,7 @@ export const ADAPTATIONS = [
     fix(src) {
       if (!/^#!.*\bnode\b/.test(src)) return src;
       if (!touchesProfileData(src)) return src;
-      if (/resolveCareerOpsRoot|CAREER_OPS_ROOT/.test(src)) return src;
+      if (RESOLVES_DATA_ROOT.test(src)) return src;
       // Upstream's shape -> the fork's canonical shape, plus the import.
       const anchored = src.replace(
         /^const CAREER_OPS = dirname\(fileURLToPath\(import\.meta\.url\)\);$/m,
@@ -181,7 +190,7 @@ export const ADAPTATIONS = [
       // positive that makes a check get ignored.
       if (!/^#!.*\bnode\b/.test(src)) return [];
       if (!touchesProfileData(src)) return [];
-      const resolves = /resolveCareerOpsRoot|CAREER_OPS_ROOT/.test(src);
+      const resolves = RESOLVES_DATA_ROOT.test(src);
       return resolves ? [] : [`${file}: touches profile data but never resolves CAREER_OPS_ROOT`];
     },
   },
