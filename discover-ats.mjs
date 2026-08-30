@@ -33,7 +33,6 @@
 
 import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
@@ -51,6 +50,7 @@ import pinpoint from './providers/pinpoint.mjs';
 import rippling from './providers/rippling.mjs';
 import joinProvider from './providers/join.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
@@ -1070,7 +1070,7 @@ async function main() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`discover-ats: ${err?.stack || err?.message || err}`);
     process.exit(1);

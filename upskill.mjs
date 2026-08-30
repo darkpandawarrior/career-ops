@@ -23,17 +23,15 @@
  */
 
 import { readFileSync, existsSync, statSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { join, dirname, relative, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { load as yamlLoad } from 'js-yaml';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
-  ? join(CAREER_OPS_DATA, 'data/applications.md')
-  : join(CAREER_OPS_DATA, 'applications.md');
+const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
 const CV_FILE = join(CAREER_OPS_DATA, 'cv.md');
 const PROFILE_FILE = join(CAREER_OPS_DATA, 'config/profile.yml');
 
@@ -96,6 +94,7 @@ const LOW_FIT_SCORE = 4.0;
 // upskill, jd-skill-gap, and analyze-patterns share ONE source of truth. Re-
 // exported here so existing importers of extractSkills keep working unchanged.
 import { extractSkills } from './skill-extract.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 export { extractSkills };
 
 // --- Known-skills text assembly ---
@@ -841,13 +840,13 @@ async function validateUrlSecurity(urlString) {
 //     rejects a discovered suite for.
 //
 // Same shape as the other CLIs in this repo (add-entry.mjs, detect-reposts.mjs,
-// contacts.mjs, check-table-freshness.mjs, ...): compare import.meta.url against
-// argv[1]. Node resolves the ESM entry through realpath while pathToFileURL does
-// not, so invoking this file through a SYMLINK reads as "not main" and prints
-// nothing — the same edge contacts.test.mjs documents on macOS. Every caller
-// (test-all.mjs, the modes, package scripts) uses the real path, and matching the
-// repo convention is worth more here than covering a path nothing takes.
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// contacts.mjs, check-table-freshness.mjs, ...), and now literally the same code:
+// lib/is-main-module.mjs. The hand-rolled comparison this comment used to describe
+// accepted a real defect — reached through a SYMLINK the two sides never matched,
+// so the CLI printed nothing and exited 0 — on the premise that every caller uses
+// the real path. That premise did not hold (#3170): a symlinked checkout, a ~/bin
+// shim and macOS's own tmpdir all take it. The helper realpaths both sides.
+const isMain = isMainModule(import.meta.url);
 
 // An unrecognized or mistyped flag (e.g. `--min-report` for `--min-reports`)
 // used to fall through silently: the aggregate branch just ran with its

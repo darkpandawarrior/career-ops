@@ -13,10 +13,10 @@
 import { readFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { normalizeCompany, openTrackerTransaction, rebuildRow, resolveTrackerPath } from './tracker-utils.mjs';
+import { normalizeCompany, openTrackerTransaction, rebuildRow } from './tracker-utils.mjs';
 
 import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);

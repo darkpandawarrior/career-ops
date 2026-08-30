@@ -71,13 +71,13 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { join } from 'path';
 import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // Fork adaptation (rule 5): every path below is DATA, so it resolves through dataRoot rather than
 // the script directory. Upstream reads them relative to itself, which under this fork's
@@ -939,6 +939,6 @@ function main() {
 // Entry guard (repo convention, cf. contacts.mjs / stats.mjs / invite-match.mjs):
 // without it, importing this module to unit-test its exports runs the whole CLI
 // and exits the test process.
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   process.exit(main());
 }

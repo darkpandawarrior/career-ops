@@ -30,6 +30,10 @@ copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs')
 // generate-pdf.mjs also imports readCvSectionOrder from theme-style.mjs
 // (#2533) — copy it alongside for the same reason.
 copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
+// generate-pdf.mjs's main-guard lives in lib/is-main-module.mjs. Without it the
+// sandboxed copy dies with ERR_MODULE_NOT_FOUND before parsing an argument.
+mkdirSync(join(sandbox, 'lib'), { recursive: true });
+copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
 mkdirSync(playwrightStub, { recursive: true });
 writeFileSync(join(playwrightStub, 'package.json'), JSON.stringify({
   name: 'playwright',

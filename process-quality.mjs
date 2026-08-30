@@ -33,14 +33,14 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { join, dirname, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { join } from 'path';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Multi-profile support: mirrors analyze-patterns.mjs's CAREER_OPS_DATA resolution
-// so this script honors CAREER_OPS_ROOT the same way every sibling tool does.
-const CAREER_OPS_DATA = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
+// Multi-profile support: the data root comes from the shared resolver, not this
+// script's own directory, so CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the
+// .career-ops-data marker are honored the same way every sibling tool honors them.
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS_DATA, 'data/active-interviews.md'))
   ? join(CAREER_OPS_DATA, 'data/active-interviews.md')
   : join(CAREER_OPS_DATA, 'active-interviews.md');
@@ -357,7 +357,7 @@ const USAGE = `Usage:
   node process-quality.mjs --self-test            # run the built-in fixtures
   node process-quality.mjs --help                 # show this message`;
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // Inside the main-module guard, not at import time: rejection-latency.mjs
   // imports parseActiveInterviews from here, so a top-level check would judge
   // the IMPORTER's argv and reject its flags as unrecognized (#2919).

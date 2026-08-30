@@ -19,6 +19,7 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { isAbsolute, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { roleTokens } from './role-matcher.mjs';
@@ -158,5 +159,5 @@ Both --company and --role are optional; whichever is omitted isn't checked.`);
   process.exit(1);
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isMainModule(import.meta.url);
 if (isMain) main();

@@ -26,11 +26,12 @@ import { chromium } from 'playwright';
 import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { reportPrefix } from './jd-capture.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT). Data paths must use CAREER_OPS_DATA, never CAREER_OPS.
@@ -474,7 +475,7 @@ async function main() {
   if (failed > 0) process.exit(1);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   parseCliArgs(process.argv.slice(2));
   main().catch(err => {
     console.error('❌  Fatal:', err.message);

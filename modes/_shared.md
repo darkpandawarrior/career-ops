@@ -16,14 +16,14 @@ See "Untrusted External Content" in `AGENTS.md` / `CLAUDE.md` / `CODEX.md` for t
 
 | File | Path | When |
 |------|------|------|
-| cv.md | `cv.md` (project root) | ALWAYS |
-| article-digest.md | `article-digest.md` (if exists) | ALWAYS (detailed proof points) |
-| profile.yml | `config/profile.yml` | ALWAYS (candidate identity and targets) |
-| _profile.md | `modes/_profile.md` | ALWAYS (user archetypes, narrative, negotiation) |
-| writing-samples/ | `writing-samples/` | When generating candidate-facing text — check `_profile.md` for cached `## Writing Style` first; only scan files if absent |
-| voice-dna.md | `voice-dna.md` (project root, if exists) | When generating candidate-facing text. Anti-AI-slop guardrail + voice. See Voice DNA precedence below. |
-| interview-prep | `interview-prep/story-bank.md`, `interview-prep/{company}-{role}.md` | When generating ATS form answers / interview content — the user's own STAR stories + prep notes. Narrative/phrasing trust; quantified claims are NOT automatically cv.md-equivalent — see AGENTS.md Source-of-Truth Boundary tiering (#2947) and `story-provenance-check.mjs`. Consumed by `apply`/`match-star` + interview modes |
-| _custom.md | `modes/_custom.md` (if it exists) | ALWAYS (user house rules: formatting/content preferences, custom workflows, "always/never do X" automations). Procedural rules only — never a content source for claims |
+| cv.md | `{DATA_ROOT}/cv.md` | ALWAYS |
+| article-digest.md | `{DATA_ROOT}/article-digest.md` (if exists) | ALWAYS (detailed proof points) |
+| profile.yml | `{DATA_ROOT}/config/profile.yml` | ALWAYS (candidate identity and targets) |
+| _profile.md | `{DATA_ROOT}/modes/_profile.md` | ALWAYS (user archetypes, narrative, negotiation) |
+| writing-samples/ | `{DATA_ROOT}/writing-samples/` | When generating candidate-facing text — check `_profile.md` for cached `## Writing Style` first; only scan files if absent |
+| voice-dna.md | `{DATA_ROOT}/voice-dna.md` (if exists) | When generating candidate-facing text. Anti-AI-slop guardrail + voice. See Voice DNA precedence below. |
+| interview-prep | `{DATA_ROOT}/interview-prep/story-bank.md`, `{DATA_ROOT}/interview-prep/{company}-{role}.md` | When generating ATS form answers / interview content — the user's own STAR stories + prep notes. Narrative/phrasing trust; quantified claims are NOT automatically cv.md-equivalent — see AGENTS.md Source-of-Truth Boundary tiering (#2947) and `story-provenance-check.mjs`. Consumed by `apply`/`match-star` + interview modes |
+| _custom.md | `{DATA_ROOT}/modes/_custom.md` (if it exists) | ALWAYS (user house rules: formatting/content preferences, custom workflows, "always/never do X" automations). Procedural rules only — never a content source for claims |
 
 **RULE: NEVER hardcode metrics from proof points.** Read them from cv.md + article-digest.md at evaluation time.
 **RULE: For article/project metrics, article-digest.md takes precedence over cv.md.**
@@ -31,6 +31,22 @@ See "Untrusted External Content" in `AGENTS.md` / `CLAUDE.md` / `CODEX.md` for t
 **RULE: Read _custom.md (if it exists) AFTER _profile.md and honor its House Rules / Output Preferences in every mode.** It is where the user's persistent instructions live ("use this date format", "never reorder section X", "always include Y in summaries") — an instruction recorded there is NOT optional and does not expire between sessions or between items in a batch. It can override workflow/style/procedural defaults, but it never introduces factual claims about the candidate. When the user states a lasting preference in conversation, write it to `modes/_custom.md` so it survives the session.
 **RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
 **RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
+
+## Data Root & Path Resolution (CRITICAL)
+
+All User Layer files (`cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `voice-dna.md`, `data/applications.md`, `reports/`, `output/`, `interview-prep/`, `portals.yml`, …) resolve relative to the dynamically resolved **Data Root** (`{DATA_ROOT}`). Under this fork's multi-profile setup (`./profile <name>`) that is NOT the engine checkout — reading a User Layer file from the engine directory silently reads a different profile's data.
+
+### Data Root resolution order:
+1. **Environment variables**: `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`, if set (a relative value resolves against the engine root).
+2. **Marker file**: otherwise a `.career-ops-data` file in the engine root, if it exists and holds a non-empty path (relative values resolve against the engine root).
+3. **Default**: otherwise the engine root itself.
+
+Scripts get this from `resolveCareerOpsRoot(import.meta.url).dataRoot` or `getCareerOpsRoot()` in `path-resolver.mjs` — never from their own directory. Mode files and prompts stay in the engine checkout and are read from there.
+
+### Tracker path resolution order:
+* **Explicit override**: `CAREER_OPS_TRACKER`, if set, is the tracker path.
+* **Default (read)**: `{DATA_ROOT}/data/applications.md` if it exists, else `{DATA_ROOT}/applications.md`.
+* **Writing**: every write (merge or first-run creation) targets `{DATA_ROOT}/data/applications.md`.
 
 ---
 

@@ -6,8 +6,8 @@
 
 ---
 
-![engine version](https://img.shields.io/badge/engine-career--ops_v1.29.0-6366f1?style=flat-square)
-![dashboard version](https://img.shields.io/badge/dashboard-web_v0.8.0-22d3ee?style=flat-square)
+![engine version](https://img.shields.io/badge/engine-career--ops_v1.30.0-6366f1?style=flat-square)
+![dashboard version](https://img.shields.io/badge/dashboard-web_v0.8.1-22d3ee?style=flat-square)
 ![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript_7-3178C6?style=flat-square&logo=typescript&logoColor=white)
@@ -46,7 +46,7 @@
 
 </details>
 
-> **At a glance** — **84** zero-auth job-board providers · **4,100+** engine tests · **8** machine-checked
+> **At a glance** — **87** zero-auth job-board providers · **4,100+** engine tests · **8** machine-checked
 > fork adaptations · **38,854** ATS boards per full sweep, of which **~46%** are permanently dead and
 > skipped from `data/dead-boards.tsv`. Local-first: no hosted service, no account, your data never
 > leaves the machine.
@@ -447,7 +447,7 @@ quirks (rate limits, latency floors, pagination caps) are tuned locally in
 each file; Ashby, for example, carries a 30s timeout and a jittered retry
 because its public posting-api has a ~10s+ server-side latency floor that
 races the scanner's global 10s default. See
-[`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) for all 69,
+[`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) for all 87,
 and [`docs/local-parser-cookbook.md`](docs/local-parser-cookbook.md) to add one.
 
 ### Multi-profile resolution
@@ -462,6 +462,14 @@ order for any request:
    directory instead of the parent checkout
 4. No registry, no env var → falls back to the checkout root (single-profile mode,
    the default for a fresh install)
+
+`CAREER_OPS_DATA_DIR` is accepted as a synonym for `CAREER_OPS_ROOT`, and a
+`.career-ops-data` file in the engine root (holding an absolute or relative
+path) sets the data root with no env var — `path-resolver.mjs` checks it
+between steps 3 and 4. `CAREER_OPS_TRACKER` overrides the applications-tracker
+path directly; reads fall back from `{DATA_ROOT}/data/applications.md` to
+`{DATA_ROOT}/applications.md`, while writes always target the canonical
+`{DATA_ROOT}/data/applications.md`.
 
 This is why the web dashboard's "spawn the real `.mjs`" model (see
 [Under the hood](#under-the-hood)) works without any dashboard-specific
@@ -646,7 +654,8 @@ kirklazar-android/hiresignal --state merged`.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **career-ops v1.29.0 · web v0.8.0** (current) | 2026-08-25 | Absorbed the v1.29.0 window (17 commits / 63 files). New: **`linkedin-join.mjs`** — a warm-intro finder that joins a LinkedIn connections export against the tracker and `portals.yml`, which matters here because only 6 of 47 overdue rows have a repliable human; a `stem:` prefix for `title_filter` (`title-keywords.mjs`); `extract-json-object.mjs` (salvages truncated LLM JSON at each prefix's own depth); and `whats-new-suppression.mjs`. Hardening ported: `safeIntFlag` through `detect-reposts` and `process-quality` (the latter had NO shape check, so `--min-threshold 999999999999999999999` was accepted and reported as `1e+21`), and flag validation in `reconcile-pipeline.mjs` — where a typo'd `--dry-run` was silently ignored and fell through to a LIVE run that writes `pipeline.md`. |
+| **career-ops v1.30.0 · web v0.8.1** (current) | 2026-08-28 | Absorbing the v1.30.0 upstream window (150 commits / 292 files). New engine scripts: **`verify-ats.mjs`** (deterministic 0-100 ATS-parseability score over a generated CV's HTML — the twin of the `verify-cv-facts.mjs` fact gate: that one guards what a CV claims, this one guards whether an ATS can read it), **`calibrate.mjs`** (advisory-only: do your higher-scored applications actually convert, measured against `data/outcomes/` — in-flight rows are excluded rather than scored as failures), **`clean-markers.mjs`** (audit/strip invisible Unicode picked up from JDs and pasted recruiter mail before it ships inside a CV or cover letter), **`rank-pipeline.mjs`**, and **`scripts/export-ats-text.mjs`**. Three providers: **careerviet**, **itviec** (Vietnam) and **torre** (LatAm); Get on Board gained multi-category scanning, because the board files EM/Tech Lead and ML roles outside `programming` — the only category the old provider read. `lib/is-main-module.mjs` replaces the hand-rolled `import.meta.url === pathToFileURL(process.argv[1]).href` CLI guards, and `path-resolver.mjs` now carries upstream's `getCareerOpsRoot`/tracker resolvers alongside the fork's two-root `resolveCareerOpsRoot`. Doc drift caught in the same pass: three shipped providers had no row in `SUPPORTED_JOB_BOARDS.md` (`npm test`'s own coverage gate was red), and the At-a-glance provider count, both version badges and the board count in Scanner Architecture were all stale. |
+| career-ops v1.29.0 · web v0.8.0 | 2026-08-25 | Absorbed the v1.29.0 window (17 commits / 63 files). New: **`linkedin-join.mjs`** — a warm-intro finder that joins a LinkedIn connections export against the tracker and `portals.yml`, which matters here because only 6 of 47 overdue rows have a repliable human; a `stem:` prefix for `title_filter` (`title-keywords.mjs`); `extract-json-object.mjs` (salvages truncated LLM JSON at each prefix's own depth); and `whats-new-suppression.mjs`. Hardening ported: `safeIntFlag` through `detect-reposts` and `process-quality` (the latter had NO shape check, so `--min-threshold 999999999999999999999` was accepted and reported as `1e+21`), and flag validation in `reconcile-pipeline.mjs` — where a typo'd `--dry-run` was silently ignored and fell through to a LIVE run that writes `pipeline.md`. |
 | career-ops v1.28.0 · web v0.7.1 | 2026-08-24 | Absorbed the v1.28.0 upstream window (126 commits / 251 files): `providers/_ip-guard.mjs` (SSRF defence, wired into `_dns-cache` and `_http`), three providers (eightfold, jobbankca, mycareersfuture), `scan-hn.mjs`, `intake.mjs`, `story-provenance-check.mjs`, `title-keywords.mjs`, and the web `origin-guard` / `url-key` / `whats-new` modules. Fork-only work on top: **owed-actions tracking** (`owed-actions.mjs` — models the screening steps where *they* are waiting on *you*, the failure mode that killed four applications); repliable-contact urgency (`urgent` was reachable only on day 1, so live threads aged into `overdue` within 24h and sat with 46 no-reply rows); a self-identity filter so contact extraction stops reporting your own address; **telemetry truthfulness** — `scan-runs.tsv`'s header is written only at creation, so an appended column silently offset every name-based read and `stats.mjs` reported `avg 30.2 new per run` (the *dupes* column) when the truth was `0.17`; zero-yield escalation after the scanner reported `found=0` for **20 consecutive days** while exiting 0; and doc-drift guards (24 undocumented providers written up, README fork-delta section, both checked in `npm test`) |
 | career-ops v1.27.0 · web v0.7.0 | 2026-08-21 | Absorbed the v1.27.0 window (114 commits / 220 files): five named CV templates, senjob + yourator providers, `negotiation-roi.mjs`, `lib/ascii-fold`, `lib/gemini-node-floor`, `lib/local-today`, Indonesian + Russian interview modes, and the web CLI-spawn refactor. Fixed a live data-safety bug predating the window — the portals, profile and followups/cadence routes resolved `careerOpsRoot()` instead of `requestRoot()`, so every vitest run wrote fixture data into the real gitignored `portals.yml` and `config/profile.yml`. Fork-only: `salary_filter.min_by_currency` (per-market comp floors — a flat `min` cannot express ₹35L *and* $60k, and configuring one silently deletes the other market), `cutshort` salary extraction, the Careerjet v4 provider, and `tracker-sync-check.mjs` ported after `verify-pipeline.mjs` was found calling it with no import — printing a warning and exiting green. Also: `set-status.mjs` now seeds a follow-up on the Applied transition, so a row can no longer be born with nothing scheduled (`seedFollowup` was exported and tested but nothing called it); the reverse-ATS sweep regained its **iCIMS** source, whose wiring existed upstream but never reached this fork — provider, tests and fixture were all synced and only the `SOURCES` hunk was lost, though a 270-tenant sample measured **zero** genuine Android matches, so it ships as a null result rather than a win; and pipeline output now sorts by `postedAt` and tags anything under 24h |
 | career-ops post-v1.26.0 · web v0.6.1 | 2026-08-14 | Absorbed the post-v1.26.0 upstream window (104 commits / 194 files) — see [Relationship to Upstream Updates](#relationship-to-upstream-updates); `fork-adaptations.mjs` encodes the fork layer as machine-checked rules and runs in `test-all.mjs`; multi-profile adaptation normalized from ten shapes to one, making it autofixable; `scan.mjs` gains upstream country-eligibility filtering (reads the JD **body**, where "US-only" actually lives, rather than the structured location field), AND-groups in `title_filter.positive` ("android + kotlin"), and a scan-runs row on failed/interrupted sweeps; reverse-ATS sweep skips known-dead boards via `data/dead-boards.tsv` (~46% of the public directory is permanently 404) and drops single-host ATSs to 6 concurrent, which stopped self-throttling — unreachable boards 16,000 → 13,252 and DNS wait 14,133s → 83s; `tracker-lock` helpers converged onto upstream's `tracker-utils`; `voice-dna.md` split into a tracked template + gitignored working copy |

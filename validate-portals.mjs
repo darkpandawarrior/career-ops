@@ -10,6 +10,7 @@
  */
 
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -342,7 +343,7 @@ async function main() {
   if (result.errors.length > 0) process.exit(1);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`validate-portals failed: ${err.message}`);
     process.exit(1);

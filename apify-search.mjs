@@ -27,6 +27,7 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import path from 'path';
 import * as yaml from 'js-yaml';
 import { pathToFileURL } from 'url';
@@ -275,7 +276,7 @@ async function main() {
   await runBroadSearch({ dryRun, cliPlatforms });
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);

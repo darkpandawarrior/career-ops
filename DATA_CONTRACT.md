@@ -13,6 +13,7 @@ These files contain your personal data, customizations, and work product. Update
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases (optional; seeded from `config/cv-facts.example.json`) |
 | `modes/_profile.md` | Your archetypes, narrative, negotiation scripts |
 | `modes/_custom.md` | Your house rules, custom workflows & output preferences (procedural — survives updates) |
+| `modes/_brief.md` | Your triage brief. `modes/_brief.template.md` is TRACKED; `doctor.mjs` copies it to this working copy on first run, and the working copy is gitignored (same convention as `modes/_profile.md`). |
 | `voice-dna.md` | Your writing-voice profile. Fork-only split: `voice-dna.template.md` is TRACKED, this working copy is gitignored, and `doctor.mjs` copies template -> working copy on first run (same convention as `modes/_profile.md`). Upstream tracks `voice-dna.md` directly; personalizing a tracked file would publish your voice via the public sibling fork. |
 | `article-digest.md` | Your proof points from portfolio |
 | `interview-prep/story-bank.md` | Your accumulated STAR+R stories |
@@ -53,6 +54,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/_custom.template.md` | Template seed for the user's `modes/_custom.md` |
 | `modes/oferta.md` | Evaluation mode instructions |
 | `modes/pdf.md` | PDF generation instructions |
+| `modes/text.md` | Tailored markdown CV instructions |
 | `modes/scan.md` | Portal scanner instructions |
 | `modes/batch.md` | Batch processing instructions |
 | `modes/apply.md` | Application assistant instructions |
@@ -108,3 +110,19 @@ These files contain system logic, scripts, templates, and instructions that impr
 **If a file is in the User Layer, no update process may read, modify, or delete it.**
 
 **If a file is in the System Layer, it can be safely replaced with the latest version from the upstream repo.**
+
+## Custom Data Directory
+
+By default, all User Layer files reside inside the engine checkout root. You can configure a separate, external directory for your personal data — this is also what the fork's multi-profile launcher (`./profile <name>`) uses under the hood.
+
+### Resolution Precedence:
+1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory (a relative path is resolved against the engine root).
+2. **Marker File (`.career-ops-data`):** A file named `.career-ops-data` in the engine root containing the path (absolute or relative) to the user data directory.
+3. **Repository Default:** Defaults to the engine/checkout root directory.
+
+When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `data/`, `reports/`, `output/`, `portals.yml`) are resolved relative to that path. System Layer files continue to resolve relative to the engine root, keeping code and personal data completely separate. Scripts reach both roots through `resolveCareerOpsRoot(import.meta.url)` (`{engineRoot, dataRoot}`) or `getCareerOpsRoot()` in `path-resolver.mjs` — never their own directory.
+
+### Tracker Path & Writes:
+- **`CAREER_OPS_TRACKER`** can be set to override the applications tracker file path directly.
+- **Read Resolution:** If no tracker override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
+- **Write Resolution:** All writes (including merge operations and first-run creation) target the canonical location `{DATA_ROOT}/data/applications.md`.

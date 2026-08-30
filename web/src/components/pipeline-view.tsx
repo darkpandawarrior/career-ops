@@ -13,6 +13,7 @@ import { cn } from "@/lib/cn";
 import { PageShell, PageHeader } from "@/components/ui/page-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusDot } from "@/components/ui/status-dot";
+import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
 
 // INBOX (the action queue) is the default tab; the rest filter the tracker.
 const TABS = [
@@ -105,7 +106,7 @@ export function PipelineView({
     }
     if (q.trim()) {
       const needle = q.toLowerCase();
-      rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle));
+      rows = rows.filter((r) => companySearchText(r).toLowerCase().includes(needle));
     }
     return [...rows].sort((a, b) => {
       if (sort.key === "score") {
@@ -115,7 +116,12 @@ export function PipelineView({
         const bv = Number.isNaN(bn) ? -Infinity : bn;
         return (av - bv) * sort.dir;
       }
-      return (a[sort.key] || "").localeCompare(b[sort.key] || "") * sort.dir;
+      // Sort the company column by what the row actually SHOWS: a confidential
+      // employer renders as "Confidential · via X", so sorting the raw "?" would
+      // pile every masked row together under a label nobody sees.
+      const aValue = sort.key === "company" ? companyPresentation(a).label : a[sort.key] || "";
+      const bValue = sort.key === "company" ? companyPresentation(b).label : b[sort.key] || "";
+      return aValue.localeCompare(bValue) * sort.dir;
     });
   }, [applications, tab, q, sort, minFilter]);
 
@@ -237,12 +243,14 @@ export function PipelineView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filtered.map((r, i) => (
+                {filtered.map((r, i) => {
+                  const company = companyPresentation(r);
+                  return (
                   <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
                     <td className="px-4 py-3 font-medium">
                       <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
-                        <CompanyLogo name={r.company} size={20} />
-                        {r.company}
+                        <CompanyLogo name={company.logoName} size={20} />
+                        {company.label}
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-muted">
@@ -262,19 +270,22 @@ export function PipelineView({
                       <NotesCell n={r.n} notes={r.notes} onSaved={() => router.refresh()} />
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           {/* ── Tracker cards (mobile) ── */}
           <div className="mt-4 space-y-2.5 md:hidden">
-            {filtered.map((r, i) => (
+            {filtered.map((r, i) => {
+              const company = companyPresentation(r);
+              return (
               <div key={`${r.n}-${i}`} className="rounded-xl border border-border bg-surface/40 p-3.5 transition-colors hover:border-brand/30">
                 <div className="flex items-start gap-2.5">
-                  <CompanyLogo name={r.company} size={24} />
+                  <CompanyLogo name={company.logoName} size={24} />
                   <Link href={`/pipeline/${r.n}`} className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">{r.company}</p>
+                    <p className="truncate text-sm font-medium text-foreground">{company.label}</p>
                     <p className="truncate text-[13px] text-muted">
                       {r.role}
                       {r.via && r.via !== "—" && r.via !== "-" && <span className="ml-1 text-faint">via {r.via}</span>}
@@ -290,7 +301,8 @@ export function PipelineView({
                   <NotesCell n={r.n} notes={r.notes} onSaved={() => router.refresh()} />
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       ) : (

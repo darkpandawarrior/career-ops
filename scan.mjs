@@ -77,9 +77,10 @@ import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-par
 import { normalizeCompany } from './tracker-utils.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
-import { compileKeyword, compilePositiveKeyword, buildTitleFilter } from './title-keywords.mjs';
+import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter } from './title-keywords.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 const parseYaml = yaml.load;
 
@@ -119,7 +120,9 @@ const CONCURRENCY = 10;
 // logic until the two drifted; there is now one implementation and this file
 // re-exports it, so existing importers — scan-ats-full.mjs and test-all.mjs's
 // sections 11b and 44 among them — keep resolving it from here.
-export { compileKeyword, compilePositiveKeyword, buildTitleFilter };
+// compileContentKeyword shares the `word:`/`stem:` prefix machinery but skips
+// the title filter's short-acronym auto-anchor (#3274).
+export { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter };
 
 // Compiled-matcher cache for matchedTitleKeywords(), keyed by the
 // `title_filter.positive` array reference. The scan loop calls this once per
@@ -479,18 +482,26 @@ export function buildPostedDateFilter(afterIso, beforeIso) {
 // populate `job.description`. Lever (`descriptionPlain`) does today; others
 // leave it empty and therefore always pass this filter.
 
+// Normalize a keyword list (lowercase/trim/drop-empties) and compile each
+// survivor into a matcher, so a `word:`/`stem:` prefix is honoured and a bare
+// keyword keeps its substring behaviour. The `.length` checks downstream still
+// read as "did the user configure any keyword here".
+function compileContentKeywordList(value) {
+  return normalizeKeywordList(value).map(compileContentKeyword);
+}
+
 export function buildContentFilter(contentFilter) {
   if (!contentFilter) return () => true;
-  const positive = normalizeKeywordList(contentFilter.positive);
-  const negative = normalizeKeywordList(contentFilter.negative);
+  const positive = compileContentKeywordList(contentFilter.positive);
+  const negative = compileContentKeywordList(contentFilter.negative);
 
   const byTitleKeyword = new Map();
   if (contentFilter.by_title_keyword && typeof contentFilter.by_title_keyword === 'object' && !Array.isArray(contentFilter.by_title_keyword)) {
     for (const [kw, rule] of Object.entries(contentFilter.by_title_keyword)) {
       if (typeof kw !== 'string' || !kw.trim()) continue;
       byTitleKeyword.set(kw.trim().toLowerCase(), {
-        positive: normalizeKeywordList(rule?.positive),
-        negative: normalizeKeywordList(rule?.negative),
+        positive: compileContentKeywordList(rule?.positive),
+        negative: compileContentKeywordList(rule?.negative),
       });
     }
   }
@@ -506,15 +517,15 @@ export function buildContentFilter(contentFilter) {
 
     if (overrides.length > 0) {
       return overrides.some(rule => {
-        if (rule.negative.length > 0 && rule.negative.some(k => lower.includes(k))) return false;
+        if (rule.negative.length > 0 && rule.negative.some(m => m(lower))) return false;
         if (rule.positive.length === 0) return true;
-        return rule.positive.some(k => lower.includes(k));
+        return rule.positive.some(m => m(lower));
       });
     }
 
-    if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
+    if (negative.length > 0 && negative.some(m => m(lower))) return false;
     if (positive.length === 0) return true;
-    return positive.some(k => lower.includes(k));
+    return positive.some(m => m(lower));
   };
 }
 
@@ -1232,41 +1243,55 @@ function extractPipelineCompanyRole(line) {
   return { company, role };
 }
 
-export function loadSeenUrls(policy = {}) {
+/**
+ * Derive the seen-URL set from the TEXT of the three dedup sources (#2382).
+ * Pure: takes contents, reads nothing. loadSeenUrls is the filesystem wrapper,
+ * and loadDedupSnapshot reuses this over a single read of each file.
+ */
+export function collectSeenUrls(sources = {}, policy = {}) {
+  const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
   let recheckEligible = 0;
 
   // scan-history.tsv
-  if (existsSync(SCAN_HISTORY_PATH)) {
-    const lines = readFileSync(SCAN_HISTORY_PATH, 'utf-8').split('\n');
-    for (const line of lines.slice(1)) { // skip header
-      const [url, firstSeen, , , , status = 'added'] = line.split('\t');
-      if (!url) continue;
-      if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
-      else recheckEligible++;
-    }
+  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+    const [url, firstSeen, , , , status = 'added'] = line.split('\t');
+    if (!url) continue;
+    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
+    else recheckEligible++;
   }
 
   // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
   // line (see extractPipelineUrl: five of the six documented shapes lead with a
   // report number, a report link, or a strikethrough rather than the URL).
-  if (existsSync(PIPELINE_PATH)) {
-    const text = readFileSync(PIPELINE_PATH, 'utf-8');
-    for (const line of text.split('\n')) {
-      const url = extractPipelineUrl(line);
-      if (url) seen.add(normalizeUrlForDedup(url));
-    }
+  for (const line of pipelineText.split('\n')) {
+    const url = extractPipelineUrl(line);
+    if (url) seen.add(normalizeUrlForDedup(url));
   }
 
   // applications.md — extract URLs from report links and any inline URLs
-  if (existsSync(APPLICATIONS_PATH)) {
-    const text = readFileSync(APPLICATIONS_PATH, 'utf-8');
-    for (const match of text.matchAll(/https?:\/\/[^\s|)]+/g)) {
-      seen.add(normalizeUrlForDedup(match[0]));
-    }
+  for (const match of applicationsText.matchAll(/https?:\/\/[^\s|)]+/g)) {
+    seen.add(normalizeUrlForDedup(match[0]));
   }
 
   return { seen, recheckEligible };
+}
+
+// Path options mirror appendToPipeline's seam below: the defaults are the
+// CAREER_OPS_ROOT-anchored module constants, and a caller with its own lane
+// (or a test with a fixture) passes explicit paths. Before CAREER_OPS_ROOT the
+// defaults were cwd-relative strings, so callers could retarget them by
+// chdir'ing; an anchored default needs a real parameter instead.
+export function loadSeenUrls(policy = {}, {
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  pipelinePath = PIPELINE_PATH,
+  applicationsPath = APPLICATIONS_PATH,
+} = {}) {
+  return collectSeenUrls({
+    scanHistoryText: readIfExists(scanHistoryPath),
+    pipelineText: readIfExists(pipelinePath),
+    applicationsText: readIfExists(applicationsPath),
+  }, policy);
 }
 
 /**
@@ -1817,11 +1842,15 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
  * @param {string} [historyPath] - Override for tests.
  * @returns {Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}
  */
-export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
-  if (!existsSync(historyPath)) return [];
+export function collectFingerprintHistory(scanHistoryText = '') {
   const rows = [];
-  for (const line of readFileSync(historyPath, 'utf-8').split('\n')) {
+  for (const line of scanHistoryText.split('\n')) {
     const cols = line.split('\t');
+    // Skip the header row. Older 7-col headers fall out of the `cols.length < 8`
+    // guard below on their own, but this fork's 12-col header names col 7
+    // `fingerprint` (non-empty), so it would otherwise pass that guard and be
+    // read as data. Real rows always carry a URL in col 0, never the literal `url`.
+    if (cols[0] === 'url') continue;
     if (cols.length < 8 || !cols[7].trim()) continue;
     rows.push({
       url: (cols[0] || '').trim(),
@@ -1832,6 +1861,51 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
     });
   }
   return rows;
+}
+
+/**
+ * Filesystem wrapper over {@link collectFingerprintHistory}.
+ *
+ * @param {string} [historyPath] - Override for tests.
+ */
+export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
+  return collectFingerprintHistory(readIfExists(historyPath));
+}
+
+/**
+ * Read the three dedup sources once and derive every per-run dedup structure
+ * from that single read (#2382). A scan run used to parse scan-history.tsv
+ * three times and pipeline.md/applications.md twice each — at 50k history rows
+ * that is ~600 ms of redundant parsing per run.
+ *
+ * The snapshot is deliberately per-run: callers hold the returned object in
+ * run-scoped locals and nothing is cached at module level, so a later run
+ * always re-reads the files. Dedup state is therefore frozen at run start;
+ * rows appended by a concurrent process mid-run are picked up by the next run
+ * (the previous re-read at the cross-listing step could not safely observe
+ * them anyway — scan-history appends are not locked).
+ *
+ * Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
+ * paths for a caller with its own lane or a test with a fixture.
+ *
+ * @param {{recheckAfterDays?: number|null, today?: string}} [policy] -
+ *   Scan-history recheck policy, shared by the URL and company+role sets.
+ * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
+ *   Company canonicalizer for the role keys.
+ * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
+ */
+export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNormalizer, {
+  scanHistoryPath = SCAN_HISTORY_PATH,
+  pipelinePath = PIPELINE_PATH,
+  applicationsPath = APPLICATIONS_PATH,
+} = {}) {
+  const scanHistoryText = readIfExists(scanHistoryPath);
+  const pipelineText = readIfExists(pipelinePath);
+  const applicationsText = readIfExists(applicationsPath);
+  const { seen, recheckEligible } = collectSeenUrls({ scanHistoryText, pipelineText, applicationsText }, policy);
+  const seenCompanyRoles = collectSeenCompanyRoles({ applicationsText, scanHistoryText, pipelineText }, policy, canonicalize);
+  const fingerprintHistory = collectFingerprintHistory(scanHistoryText);
+  return { seen, recheckEligible, seenCompanyRoles, fingerprintHistory };
 }
 
 // Standard skeleton created on fresh install — matches the format documented
@@ -2543,12 +2617,16 @@ async function main() {
   // empty Map = the filter below never fires.
   const blacklist = loadBlacklist();
 
-  // 4. Load dedup sets
+  // 4. Load dedup sets — one read per source file for the whole run (#2382).
+  // The URL set, the company+role set and the fingerprint history all come off
+  // a single parse of scan-history.tsv / pipeline.md / applications.md instead
+  // of nine; at 50k history rows that is ~600 ms of redundant parsing per run.
   const historyPolicy = scanHistoryPolicy(config);
-  const seenUrlState = loadSeenUrls(historyPolicy);
-  const seenUrls = seenUrlState.seen;
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
-  const seenCompanyRoles = loadSeenCompanyRoles(APPLICATIONS_PATH, canonicalizeCompany, { policy: historyPolicy });
+  const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany);
+  const seenUrlState = dedupSnapshot;
+  const seenUrls = dedupSnapshot.seen;
+  const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
 
   // 5. Fetch from each target
   // LOCAL day. This one value does two things that both care which day it is:
@@ -2757,7 +2835,7 @@ async function main() {
   for (const offer of verifiedOffers) {
     offer.fingerprint = fingerprintText(offer.description);
   }
-  const crossListings = findCrossListings(verifiedOffers, loadFingerprintHistory());
+  const crossListings = findCrossListings(verifiedOffers, dedupSnapshot.fingerprintHistory);
 
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
@@ -3050,7 +3128,7 @@ async function main() {
 
 // Only run main() when invoked directly (`node scan.mjs`), not when imported by tests.
 // `|| ''` guards the case where Node is invoked without a script arg (e.g. `node -e`).
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);

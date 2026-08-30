@@ -21,6 +21,7 @@
  */
 
 import { fileURLToPath } from 'node:url';
+import { isMainModule } from './lib/is-main-module.mjs';
 // Shared implementation: it refuses non-emittable code points, so `&#0;` stays
 // literal instead of decoding to a raw NUL that would land in scan-history.
 export { decodeEntities } from './providers/_html-entities.mjs';
@@ -144,6 +145,6 @@ async function main() {
 }
 
 // Only run the CLI when invoked directly, so the module can be imported by tests.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => { process.stderr.write(`fetch-jd error: ${err.message}\n`); process.exit(1); });
 }

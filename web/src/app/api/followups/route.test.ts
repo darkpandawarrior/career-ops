@@ -5,10 +5,14 @@ import path from "node:path";
 
 /**
  * /api/followups runs the SAME followup-cadence.mjs --json as /api/cadence, but it
- * is the "home" view: it surfaces only the overdue/urgent top-6 (cadence returns
- * the full list). The shaping logic:
- *   overdue = entries.filter(status ~ /overdue|urgent/i).slice(0, 8)
- *   top     = (overdue.length ? overdue : entries).slice(0, 6)
+ * is the "home" view: it surfaces only what is DUE (cadence returns the full
+ * list). The shaping lives in lib/core/followup-view.mjs (#86):
+ *   entries     = selectDueFollowups(entries, 8)   // urgency urgent|overdue
+ *   nextUpcoming = due.length ? null : the nearest not-yet-due entry
+ *
+ * The old shape filtered on `status` (applied/responded/interview — never
+ * "overdue"), so it matched nothing and fell back to an unfiltered top-6 that
+ * the home rendered under a "Follow-ups due" heading. Nothing due now says so.
  *
  * Mocking mirrors the patterns/cadence tests: requestRoot → fixed data root,
  * careerOpsRoot/rootScript → tmp ENGINE (real script for the existsSync gate),
@@ -54,9 +58,9 @@ function feed(stdout: string, error: Error | null = null) {
   h.error = error;
 }
 
-// Build N entries with a given status, labelled so order is verifiable.
-function entriesWith(status: string, n: number, prefix = "C") {
-  return Array.from({ length: n }, (_, i) => ({ company: `${prefix}${i}`, status }));
+// Build N entries with a given cadence urgency, labelled so order is verifiable.
+function entriesWith(urgency: string, n: number, prefix = "C") {
+  return Array.from({ length: n }, (_, i) => ({ company: `${prefix}${i}`, urgency }));
 }
 
 beforeEach(() => {
@@ -89,6 +93,7 @@ describe("GET /api/followups — happy path + shaping", () => {
     expect(body.available).toBe(true);
     expect(body.metadata).toEqual({ total: 2 });
     expect(body.entries.map((e: { company: string }) => e.company)).toEqual(["C0", "C1"]);
+    expect(body.nextUpcoming).toBeNull();
   });
 
   it("?full=1 returns every entry uncapped, plus cadenceConfig", async () => {
@@ -108,50 +113,57 @@ describe("GET /api/followups — happy path + shaping", () => {
     expect(body.cadenceConfig).toBeNull();
   });
 
-  it("prioritises overdue/urgent entries over non-overdue ones", async () => {
+  it("keeps only what is due, urgent ahead of overdue", async () => {
     const payload = {
       metadata: null,
       entries: [
-        { company: "Scheduled1", status: "scheduled" },
-        { company: "Overdue1", status: "overdue" },
-        { company: "Urgent1", status: "URGENT" },
-        { company: "Due1", status: "due" },
+        { company: "Waiting1", urgency: "waiting" },
+        { company: "Overdue1", urgency: "overdue" },
+        { company: "Urgent1", urgency: "urgent" },
+        { company: "Cold1", urgency: "cold" },
       ],
     };
     feed(JSON.stringify(payload));
     const res = await GET(req());
     const body = await res.json();
-    // Only the overdue/urgent ones survive (filter), in their original order.
-    expect(body.entries.map((e: { company: string }) => e.company)).toEqual(["Overdue1", "Urgent1"]);
+    // 'waiting'/'cold' are NOT due and must never render under "Follow-ups due".
+    expect(body.entries.map((e: { company: string }) => e.company)).toEqual(["Urgent1", "Overdue1"]);
   });
 
-  it("matches 'urgent' case-insensitively (regex /overdue|urgent/i)", async () => {
-    feed(JSON.stringify({ entries: [{ company: "A", status: "Very Urgent Now" }, { company: "B", status: "ok" }] }));
+  it("reads urgency, not status — a tracker status never makes a row due", async () => {
+    // The pre-#86 shape filtered `status`, where "overdue"/"urgent" never appear.
+    feed(JSON.stringify({ entries: [{ company: "A", status: "Very Urgent Now" }, { company: "B", status: "overdue" }] }));
     const res = await GET(req());
     const body = await res.json();
-    expect(body.entries.map((e: { company: string }) => e.company)).toEqual(["A"]);
+    expect(body.entries).toEqual([]);
   });
 
-  it("caps the overdue set at 8 BEFORE the final top-6 trim → returns 6", async () => {
-    // 10 overdue → slice(0,8) → 8 → top = slice(0,6) → 6.
+  it("caps the due set at 8", async () => {
     feed(JSON.stringify({ entries: entriesWith("overdue", 10) }));
     const res = await GET(req());
     const body = await res.json();
-    expect(body.entries).toHaveLength(6);
-    expect(body.entries.map((e: { company: string }) => e.company)).toEqual(["C0", "C1", "C2", "C3", "C4", "C5"]);
+    expect(body.entries).toHaveLength(8);
+    expect(body.entries.map((e: { company: string }) => e.company)).toEqual(["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7"]);
   });
 
-  it("falls back to the (capped) full list when NOTHING is overdue/urgent", async () => {
-    // No overdue → overdue.length === 0 → use entries → slice(0,6).
-    feed(JSON.stringify({ entries: entriesWith("scheduled", 9) }));
+  it("returns NO entries when nothing is due, and names the nearest upcoming one", async () => {
+    feed(
+      JSON.stringify({
+        entries: [
+          { company: "Far", urgency: "waiting", nextFollowupDate: "2026-09-30" },
+          { company: "Near", urgency: "waiting", nextFollowupDate: "2026-09-01" },
+          { company: "Undated", urgency: "cold" },
+        ],
+      }),
+    );
     const res = await GET(req());
     const body = await res.json();
-    expect(body.entries).toHaveLength(6);
-    expect(body.entries.map((e: { company: string }) => e.company)).toEqual(["C0", "C1", "C2", "C3", "C4", "C5"]);
+    expect(body.entries).toEqual([]);
+    expect(body.nextUpcoming.company).toBe("Near");
   });
 
-  it("returns fewer than 6 when there are fewer than 6 entries", async () => {
-    feed(JSON.stringify({ entries: entriesWith("due", 3) }));
+  it("returns fewer than the cap when fewer entries are due", async () => {
+    feed(JSON.stringify({ entries: entriesWith("urgent", 3) }));
     const res = await GET(req());
     const body = await res.json();
     expect(body.entries).toHaveLength(3);
@@ -173,11 +185,12 @@ describe("GET /api/followups — happy path + shaping", () => {
     expect(body.entries).toEqual([]);
   });
 
-  it("tolerates entries with no status field (String(undefined) → 'undefined', no match)", async () => {
-    feed(JSON.stringify({ entries: [{ company: "NoStatus" }, { company: "Overdue", status: "overdue" }] }));
+  it("tolerates entries with no urgency field", async () => {
+    feed(JSON.stringify({ entries: [{ company: "NoUrgency" }, { company: "Overdue", urgency: "overdue" }] }));
     const res = await GET(req());
     const body = await res.json();
-    // Only the overdue one matches; the status-less one is filtered out.
+    // Only the overdue one is due; the urgency-less one is neither due nor
+    // upcoming (no nextFollowupDate), so it never surfaces.
     expect(body.entries.map((e: { company: string }) => e.company)).toEqual(["Overdue"]);
   });
 
@@ -204,7 +217,7 @@ describe("GET /api/followups — missing script", () => {
     fs.rmSync(SCRIPT, { force: true });
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [] });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
     expect(h.execFileMock).not.toHaveBeenCalled();
   });
 });
@@ -214,28 +227,28 @@ describe("GET /api/followups — bad output / non-zero exit", () => {
     feed("");
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [] });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
   });
 
   it("returns the empty shape when stdout has no '{'", async () => {
     feed("no json at all");
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [] });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
   });
 
   it("returns the empty shape when the JSON is malformed", async () => {
     feed("{ nope: not json }");
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [] });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
   });
 
   it("returns the empty shape on trailing junk after valid JSON (slice runs to END)", async () => {
     feed(JSON.stringify({ entries: entriesWith("overdue", 2) }) + "\nextra log\n");
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [] });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
   });
 
   it("does NOT trust partial stdout from a non-zero-exit child (regression)", async () => {
@@ -244,13 +257,13 @@ describe("GET /api/followups — bad output / non-zero exit", () => {
     feed(JSON.stringify({ metadata: { partial: true }, entries: entriesWith("overdue", 3) }), new Error("exit 1"));
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [] });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
   });
 
   it("returns the empty shape when the child errors AND produced no stdout", async () => {
     feed("", new Error("ENOENT"));
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [] });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
   });
 });

@@ -17,7 +17,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via `np
 | `npm run patterns` | `analyze-patterns.mjs` | Analyze tracker outcomes and report patterns |
 | `node add-entry.mjs` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
-| `npm run extract` | `browser-extract.mjs` | Headless read-only page extractor (opt-in `scan.extractor: cli`) — compact JSON for scan/JD |
+| `npm run extract` | `browser-extract.mjs` | Headless read-only page extractor (opt-in `scan.extractor: cli`) — compact JSON for scan/JD; Workday postings are read from their public CXS JSON endpoint instead of the client-rendered page, and an empty jd extraction exits 1 with `code: empty_text` |
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
 | `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
 | `npm run validate:portals` | `validate-portals.mjs` | Validate portals.yml shape before scanning |
@@ -32,6 +32,12 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via `np
 | `npm run application:init` | `application-artifacts.mjs` | Initialize one versioned application-scoped JD/CV/PDF artifact bundle |
 | `node fix-slugs.mjs` | `fix-slugs.mjs` | Write `verify-portals.mjs`'s suggested ATS slug fixes back to portals.yml (dry run by default, `--fix` to write) |
 | `npm run digest` | `weekly-digest.mjs` | Weekly interview digest — per-company rounds, recurring competency tags, recurring gaps |
+| `node linkedin-join.mjs` | `linkedin-join.mjs` | Warm-intro finder — join a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?" (offline, zero-token, read-only; see [LINKEDIN_JOIN.md](LINKEDIN_JOIN.md)) |
+| `node rank-pipeline.mjs` | `rank-pipeline.mjs` | Opt-in LLM relevance re-ranker — annotates pending pipeline rows with a score + reason (off by default) |
+| `node calibrate.mjs` | `calibrate.mjs` | Advisory calibration report — do higher-scored applications actually convert better for you? Reads the tracker + `data/outcomes/`, never edits scoring |
+| `node verify-ats.mjs` | `verify-ats.mjs` | Score a generated CV HTML for ATS parseability (0-100 + grade + fixable issues); deterministic, read-only, no LLM |
+| `node clean-markers.mjs` | `clean-markers.mjs` | Audit/strip invisible Unicode from generated text before it leaves the machine (`audit` reports, `clean` strips; see [CLEAN_MARKERS.md](CLEAN_MARKERS.md)) |
+| `node scripts/export-ats-text.mjs` | `scripts/export-ats-text.mjs` | Export profile/experience data as ATS-safe plain text for copy-pasting into application forms |
 
 ---
 

@@ -22,6 +22,19 @@ There are two layers. Read `DATA_CONTRACT.md` for the full list.
 
 **THE RULE: When the user asks to customize anything (archetypes, narrative, negotiation scripts, proof points, location policy, comp targets), ALWAYS write to `modes/_profile.md` or `config/profile.yml`. NEVER edit `modes/_shared.md` for user-specific content.** This ensures system updates don't overwrite their customizations.
 
+**Path Resolution Override & Precedence:**
+The User Layer location (Data Root) is resolved dynamically using the following precedence order:
+1. **Environment Variables:** `CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR` overrides the root path (a relative path is resolved against the engine root). Under `./profile <name>` the launcher sets this to the active profile's data dir.
+2. **Marker File:** If no environment variable is set, a `.career-ops-data` file in the engine root containing an absolute or relative path to the user data directory is used.
+3. **Repository Default:** If neither is present, the engine root directory itself is used.
+
+Scripts MUST reach that root through `resolveCareerOpsRoot(import.meta.url).dataRoot` or `getCareerOpsRoot()` from `./path-resolver.mjs` — never from their own directory, which under multi-profile reads a different profile's data.
+
+**Tracker Path & Canonical Writes:**
+- **Explicit override:** `CAREER_OPS_TRACKER` environment variable overrides the applications tracker file path.
+- **Reading:** If no override is set, reading resolves to `{DATA_ROOT}/data/applications.md` if it exists; otherwise falls back to `{DATA_ROOT}/applications.md`.
+- **Writing:** All write operations (first-run creation or merge operations) target the canonical location `{DATA_ROOT}/data/applications.md` (or the explicit `CAREER_OPS_TRACKER` override).
+
 ## Source-of-Truth Boundary (CRITICAL)
 
 User-facing content (CV, cover letters, form answers, recruiter outreach, application form responses) is generated **exclusively** from these files plus statements the user makes directly in the current conversation. The list is tiered by trust level (#2947) — read both tiers before generating content, but treat them differently for quantified claims:
@@ -155,7 +168,13 @@ Some users enable plugins (external integrations). If an enabled plugin ships a 
 node doctor.mjs --json
 ```
 
-Output: `{"onboardingNeeded": <bool>, "missing": [...], "warnings": [...]}`, where `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent. `warnings` is reserved for non-blocking setup signals.
+Output: `{"onboardingNeeded": <bool>, "missing": [...], "unpersonalized": [...], "warnings": [...], "autoCopied": [...]}` — `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent; `warnings` is reserved for non-blocking setup signals; `autoCopied` lists personalization files doctor copied from their templates on this run (`modes/_profile.md`, `modes/_custom.md`, `modes/_brief.md`, and fork-only `voice-dna.md`).
+
+**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that exists but still carries template content. Because doctor auto-copies `modes/_profile.md` and `modes/_brief.md`, they always exist — the existence check can never catch this. Left unedited, `_profile.md` feeds the **template author's** archetypes and North Star into every A-F evaluation, so offers get scored against a stranger's targeting; `_brief.md` hands the triage first pass literal `{placeholders}`. It is a warning, not a gate (the system works out of the box), but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user:
+
+> "`modes/_profile.md` is still the shipped template, so evaluations would score against the template author's targeting rather than yours. Want me to personalize it from your CV first? (~1 min, and it changes every score.)"
+
+`modes/_custom.md` is deliberately never reported — unedited house rules are a valid end state.
 
 - If `modes/_profile.md` is in `missing`, copy it silently from `modes/_profile.template.md` (the user's customization file — never overwritten by updates). It's then resolved.
 - **If, after that, `onboardingNeeded` is still true (any of `cv.md` / `config/profile.yml` / `portals.yml` is missing), enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
@@ -294,6 +313,7 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 | Wants to run practice interview questions with feedback | `interview/practice` |
 | Wants to debrief after a real interview and close gaps | `interview/debrief` |
 | Wants to generate CV/PDF | `pdf` |
+| Wants to check if a generated CV is ATS-friendly (parseability score + issues) | `ats` |
 | Evaluates a course/cert | `training` |
 | Evaluates portfolio project | `project` |
 | Asks about application status | `tracker` |
@@ -302,6 +322,7 @@ Default modes are in `modes/` (English). Additional language-specific modes are 
 | Processes pending URLs | `pipeline` |
 | Batch processes offers | `batch` |
 | Asks about rejection patterns or wants to improve targeting | `patterns` |
+| Wants to know whether the evaluation scores are predicting their real outcomes (interviews/offers) | `calibrate` — advisory report over `/outcome` data; never changes scoring |
 | Asks about follow-ups or application cadence | `followup` |
 | Wants adjacent job titles the scanner isn't searching for yet | `titles` |
 | Wants to know which missing skills recur across evaluated roles | `upskill` |

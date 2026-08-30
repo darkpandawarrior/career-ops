@@ -55,13 +55,14 @@
 import { readFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { normalizeCompanyName, companySimilarity } from './invite-match.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // Fork adaptation (rule 5): tracker DATA resolves through dataRoot, not the script directory —
 // upstream reads it relative to the script, which is the wrong tracker under multi-profile.
@@ -768,7 +769,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   }

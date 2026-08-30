@@ -25,12 +25,11 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { dirname, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolvePdfIndexPath } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
@@ -166,7 +165,7 @@ function main() {
     return;
   }
 
-  const trackerPath = process.env.CAREER_OPS_TRACKER || resolve(CAREER_OPS_DATA, 'data', 'applications.md');
+  const trackerPath = resolveTrackerPath(CAREER_OPS_DATA);
   if (!existsSync(trackerPath)) {
     console.error(`Error: ${trackerPath} not found — nothing to search.`);
     process.exitCode = 1;
@@ -207,6 +206,6 @@ function main() {
   console.error(`\n${matches.length} match(es)`); // stderr so stdout stays pipeable
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

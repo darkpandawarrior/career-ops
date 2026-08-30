@@ -59,11 +59,12 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
 import { parseStories } from './match-star.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // Data paths resolve through resolveCareerOpsRoot's dataRoot, not the script
 // directory (upstream uses dirname(import.meta.url) here) — this fork's
@@ -704,6 +705,6 @@ function main() {
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   main();
 }

@@ -34,22 +34,23 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { join, dirname, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
 // Engine directory: where this script and set-status.mjs live.
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-// Data root: same multi-profile resolution as set-status.mjs and
-// analyze-patterns.mjs, so CAREER_OPS_ROOT points reads AND --apply's writes
-// at the same profile.
-const CAREER_OPS_DATA = process.env.CAREER_OPS_ROOT ? resolve(process.env.CAREER_OPS_ROOT) : CAREER_OPS;
-const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
-  ? join(CAREER_OPS_DATA, 'data/applications.md')
-  : join(CAREER_OPS_DATA, 'applications.md');
+// Data root: the ACTIVE profile's data, so CAREER_OPS_ROOT points reads AND
+// --apply's writes at the same profile. Resolved through path-resolver rather
+// than re-derived here, which was the local copy's bug: it read CAREER_OPS_ROOT
+// only, so CAREER_OPS_DATA_DIR and the .career-ops-data marker were ignored and
+// this script read a different tracker than every other reader.
+const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+// resolveTrackerPath also honours CAREER_OPS_TRACKER (upstream 1.30.0) and
+// canonicalizes, so tests and non-standard layouts agree with merge-tracker.
+const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
 
 // --- CLI args ---
 const args = process.argv.slice(2);
@@ -88,7 +89,7 @@ const USAGE = `Usage:
 // silent-ignore failure mode this issue exists to close, just moved to a
 // different spelling. Leaving them out means that form is rejected loudly
 // as an unrecognized flag instead.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   validateFlags(args, KNOWN_FLAGS, USAGE);
 }
 
@@ -1123,7 +1124,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   } else {

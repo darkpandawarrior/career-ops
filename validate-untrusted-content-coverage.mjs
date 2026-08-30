@@ -26,8 +26,8 @@
 
 import { readFileSync, existsSync, globSync } from 'fs';
 import { join, sep } from 'path';
-import { pathToFileURL } from 'url';
 import { USER_PATHS } from './user-layer-paths.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // modes/ and AGENTS.md are ENGINE-layer content (they ship with the checkout,
@@ -151,7 +151,7 @@ export function hasCanonicalHeading(text) {
 // Everything below is the CLI. Guarded so importing this module for its pure
 // helpers (deriveIngestingModes, isUserLayerPath, hasDirectiveMarker) does not
 // run the validation and process.exit() out from under the importer.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     console.log('Running validate-untrusted-content-coverage.mjs self-tests...');
 

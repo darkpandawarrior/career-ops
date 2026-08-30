@@ -14,6 +14,7 @@ import { ApplyButton } from "@/components/apply-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 import { PageShell } from "@/components/ui/page-shell";
 import { EmptyState } from "@/components/ui/empty-state";
+import { companyPresentation } from "@/lib/company-presentation.mjs";
 
 // Progressive disclosure of the report body. Our reports (modes/oferta.md)
 // write "## A) Role Summary" / "## Block A — Role Summary" through G/H, plus
@@ -71,6 +72,7 @@ export function ReportView({
   const date = app?.date || field("Date");
   const archetype = field("Archetype");
   const url = field("URL");
+  const company = app ? companyPresentation(app) : null;
 
   return (
     <PageShell maxWidth="3xl">
@@ -84,9 +86,9 @@ export function ReportView({
       <header className="mt-5">
         <p className="font-mono text-xs uppercase tracking-[0.18em] text-faint">#{id}</p>
         <div className="mt-2 flex items-center gap-3">
-          <CompanyLogo name={app?.company ?? meta?.title ?? `Report #${id}`} size={40} />
+          <CompanyLogo name={company?.logoName ?? meta?.title ?? `Report #${id}`} size={40} />
           <h1 className="font-display text-3xl tracking-tight text-landing">
-            {app?.company ?? meta?.title ?? `Report #${id}`}
+            {company?.label ?? meta?.title ?? `Report #${id}`}
           </h1>
         </div>
         {app?.role && <p className="mt-1 text-muted">{app.role}</p>}

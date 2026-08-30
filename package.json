@@ -1,6 +1,6 @@
 {
   "name": "hiresignal",
-  "version": "1.29.0",
+  "version": "1.30.0",
   "description": "HireSignal: a local-first AI career dashboard for resume onboarding, job discovery, and fit scoring",
   "private": true,
   "scripts": {
@@ -25,6 +25,7 @@
     "eval:golden": "node eval-golden.mjs",
     "outcome": "node outcome.mjs",
     "cv:build-html": "node build-cv-html.mjs",
+    "cv:verify-ats": "node verify-ats.mjs",
     "cover-letter": "node generate-cover-letter.mjs --payload",
     "sync-check": "node cv-sync-check.mjs",
     "liveness": "node check-liveness.mjs",
@@ -41,6 +42,7 @@
     "tracker": "node tracker.mjs",
     "find": "node find.mjs",
     "patterns": "node analyze-patterns.mjs",
+    "calibrate": "node calibrate.mjs",
     "reposts": "node detect-reposts.mjs",
     "digest": "node weekly-digest.mjs",
     "company:funded": "node company-funded.mjs",
