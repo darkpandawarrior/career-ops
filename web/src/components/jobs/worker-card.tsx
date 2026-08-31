@@ -2,6 +2,7 @@
 
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
+import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
 
 // The ONE worker card — a pure function of a Job. Rendered in three surfaces:
@@ -37,6 +38,7 @@ export function WorkerCard({
   const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
+  const errorHint = jobErrorHint(job);
 
   return (
     <div className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
@@ -73,6 +75,11 @@ export function WorkerCard({
       </div>
       {bottom && (
         <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>{bottom}</div>
+      )}
+      {errorHint && (
+        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+          {errorHint.text}
+        </div>
       )}
     </div>
   );

@@ -11,6 +11,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { AssistantConsole } from "@/components/assistant-console";
 import { MobileNav } from "@/components/mobile-nav";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { BackToTop } from "@/components/back-to-top";
 import { JobsProvider } from "@/components/jobs/job-store";
 import { PipelineProvider } from "@/components/pipeline/pipeline-provider";
 import { ApplyProvider } from "@/components/apply/apply-provider";
@@ -107,6 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1 overflow-x-hidden">{children}</main>
         <CommandPalette />
         <AssistantConsole />
+        <BackToTop />
         <FirstScoreView />
         <BetaBanner />
       </div>

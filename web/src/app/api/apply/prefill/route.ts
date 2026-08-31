@@ -1,10 +1,11 @@
-import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { getSession } from "@/lib/apply/session";
+import { buildAnswerPrompt } from "@/lib/apply/answer-prompt.mjs";
+import { runPlanner } from "@/lib/apply/planner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,9 +127,6 @@ export async function POST(req: Request) {
       if (!resolved) return fail(`CLI '${cliId}' not found on this machine`);
       const { spec, binPath } = resolved;
 
-      const fieldsList = s.fields
-        .map((f) => `${f.id}\t${f.type}${f.required ? "*" : ""}\t${f.label}${f.options ? `\t[options: ${f.options.join(" | ")}]` : ""}`)
-        .join("\n");
       const mem = readMemory(dataRoot).trim();
       // Inline the candidate's REAL files into the prompt — we're LOCAL (same
       // machine, the very data the planner would Read anyway), so the planner needs
@@ -162,47 +160,11 @@ export async function POST(req: Request) {
       } catch {
         /* no matching report → fine, it's optional context */
       }
-      const ctxBlock = haveCv
-        ? `\n\n--- THE CANDIDATE'S REAL DATA (ground EVERY answer in this; invent NOTHING) ---\nCV (cv.md):\n"""\n${cv.slice(0, 16000)}\n"""${profile ? `\n\nProfile (config/profile.yml):\n"""\n${profile.slice(0, 4000)}\n"""` : ""}${report ? `\n\nPrior evaluation report for this role:\n"""\n${report}\n"""` : ""}`
-        : `\nRead cv.md and config/profile.yml; if a matching report for this company exists in reports/, read it too.`;
-      const prompt = `You are pre-filling a job application for the user (company/role: ${s.title}). Ground EVERY answer in the candidate's REAL data below — never invent facts.${mem ? `\n\nDurable notes about the user (prior answers they chose to remember):\n${mem}` : ""}${ctxBlock}
-
-FIELDS (id ⇥ type ⇥ label ⇥ options):
-${fieldsList}
-
-For each field give the best answer:
-- identity/contact (name, email, phone, github, linkedin, location) → from the data above.
-- free-text (Why us?, cover-letter, "most impactful thing you've built", etc.) → a concise, honest, concrete answer in the candidate's own voice (no buzzwords, active voice, real metrics only). Keep each under ~120 words.
-- select/radio → choose the best-matching option using the EXACT option text from the list.
-- NEVER auto-answer SENSITIVE or CONSENT fields → set needs_confirmation:true and value:"" (the user decides these themselves):
-  · legal / work-authorization / visa / sponsorship · salary / compensation expectations
-  · demographic / EEO / veteran / disability / "voluntary self-identification"
-  · CONSENT / acknowledgement / policy / guidelines / "I agree" / "I have read" / "I understand" / any Yes-No confirmation of terms — the user must READ and agree themselves.
-
-Output ONLY a compact JSON object mapping each field id → {"value": "...", "needs_confirmation": boolean}. No prose, no markdown, no code fence.`;
+      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem, cv, profile, report });
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
       log(`Planner: ${cliId} (${binPath})`);
       log(`Context: CV ${cv.length}c${profile ? ` + profile ${profile.length}c` : ""}${report ? ` + report ${report.length}c` : ""}${haveCv ? " — inlined, no file reads (fast path)" : " — none inlined; planner will read files"}`);
-
-      const isClaude = cliId === "claude";
-      // --output-format stream-json (+ --verbose --include-partial-messages) streams
-      // the answer token-by-token so the UI shows live progress instead of a dead
-      // "0 chars" wait (a big form = 1-2 min of drafting). Without it, `claude -p`
-      // buffers everything and emits nothing until the whole turn ends → looks hung.
-      // --strict-mcp-config with no --mcp-config loads ZERO MCP servers → faster
-      // startup (the planner only reads local files; it doesn't need the user's
-      // playwright/gmail/linear/… servers).
-      const args = isClaude
-        ? haveCv
-          ? // fast path: everything is inlined → NO tools → no file-read round-trips
-            ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits", "--strict-mcp-config", "--disallowedTools", "Bash,Read,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch,Glob,Grep"]
-          : // fallback (no cv.md inlined): let the planner read the files itself
-            ["-p", prompt, "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read,Glob,Grep", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"]
-        : spec.args(prompt);
-      // Scale the timeout with form size (big forms = more drafting). Cap < maxDuration.
-      const killMs = Math.min(300_000, 150_000 + s.fields.length * 6_000);
-      log(`Spawning planner (timeout ${Math.round(killMs / 1000)}s)…`);
 
       // Consent/sensitive detector — used BOTH while streaming (so a policy "Yes"
       // never even flashes into the UI) and in the final post-filter. Scoped to
@@ -214,102 +176,52 @@ Output ONLY a compact JSON object mapping each field id → {"value": "...", "ne
         return !!f && CONSENT_RX.test(f.label || "") && ["radio", "select", "checkbox"].includes(f.type);
       };
 
-      const result = await new Promise<{ buf: string; code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-        // spawnHeadlessCli closes stdin right after spawning, so the CLI doesn't
-        // wait on piped input that will never arrive.
-        const child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, shell: process.platform === "win32" });
-        let buf = "";
-        let lineBuf = "";
-        let firstByteAt = 0;
-        // Stream each ANSWER the instant its JSON entry `"coN":{…}` closes → the UI
-        // fills fields top-to-bottom (the shimmer recedes like a wave) instead of
-        // all-at-once at the end. The value-object is flat (no nested braces except
-        // inside strings), so this brace/string-aware regex only matches a COMPLETE
-        // entry. Consent fields are guarded here too (a policy "Yes" never flashes).
-        const emittedKeys = new Set<string>();
-        let fieldsDone = 0;
-        const FIELD_RX = /"(co\d+)"\s*:\s*(\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*\})/g;
-        const flushFields = () => {
-          FIELD_RX.lastIndex = 0;
-          let m: RegExpExecArray | null;
-          while ((m = FIELD_RX.exec(buf)) !== null) {
-            const id = m[1];
-            if (emittedKeys.has(id)) continue;
-            let v: { value?: unknown; needs_confirmation?: boolean };
-            try {
-              v = JSON.parse(m[2]);
-            } catch {
-              continue; // value not fully closed yet → wait for more deltas
-            }
-            emittedKeys.add(id);
-            const consent = isConsent(id);
-            const value = consent ? "" : typeof v?.value === "string" ? v.value : v?.value != null ? String(v.value) : "";
-            const needs = consent || !!v?.needs_confirmation;
-            fieldsDone++;
-            emit({ t: "field", id, value, needs });
-            log(`drafted ${(byId.get(id)?.label || id).slice(0, 36)} (${fieldsDone}/${s.fields.length})`);
-          }
-        };
-        const onText = (text: string) => {
-          if (!firstByteAt) {
-            firstByteAt = Date.now();
-            log(`first answer token at ${Math.round((firstByteAt - t0) / 1000)}s`);
-          }
-          buf += text;
-          flushFields();
-        };
-        const hb = setInterval(() => {
-          log(`…running ${Math.round((Date.now() - t0) / 1000)}s · ${buf.length} chars drafted`);
-        }, 4000);
-        child.stdout.on("data", (d: Buffer) => {
-          const chunk = d.toString();
-          if (!isClaude) {
-            onText(chunk); // other CLIs: raw stdout is the answer
-            return;
-          }
-          // Claude stream-json = NDJSON; accumulate ONLY the assistant text deltas
-          // (content_block_delta.text) — the drafted answer — into buf. A marker can
-          // split across chunks, so buffer partial lines and parse line-by-line.
-          lineBuf += chunk;
-          let nl: number;
-          while ((nl = lineBuf.indexOf("\n")) !== -1) {
-            const line = lineBuf.slice(0, nl).trim();
-            lineBuf = lineBuf.slice(nl + 1);
-            if (!line) continue;
-            try {
-              const obj = JSON.parse(line);
-              if (obj.type === "stream_event" && obj.event?.type === "content_block_delta") {
-                const text = obj.event.delta?.text;
-                if (typeof text === "string") onText(text);
-              }
-            } catch {
-              /* partial / non-json line — ignore */
-            }
-          }
-        });
-        child.stderr.on("data", (d: Buffer) => {
-          const e = d.toString().trim();
-          if (e) log(`stderr: ${e.slice(0, 160).replace(/\s+/g, " ")}`);
-        });
-        const killer = setTimeout(() => {
-          log("TIMEOUT reached → SIGTERM");
+      // Stream each ANSWER the instant its JSON entry `"coN":{…}` closes → the UI
+      // fills fields top-to-bottom (the shimmer recedes like a wave) instead of
+      // all-at-once at the end. The value-object is flat (no nested braces except
+      // inside strings), so this brace/string-aware regex only matches a COMPLETE
+      // entry. Consent fields are guarded here too (a policy "Yes" never flashes).
+      let draftBuf = "";
+      const emittedKeys = new Set<string>();
+      let fieldsDone = 0;
+      const FIELD_RX = /"(co\d+)"\s*:\s*(\{(?:[^{}"]|"(?:[^"\\]|\\.)*")*\})/g;
+      const flushFields = () => {
+        FIELD_RX.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = FIELD_RX.exec(draftBuf)) !== null) {
+          const id = m[1];
+          if (emittedKeys.has(id)) continue;
+          let v: { value?: unknown; needs_confirmation?: boolean };
           try {
-            child.kill("SIGTERM");
+            v = JSON.parse(m[2]);
           } catch {
-            /* ignore */
+            continue; // value not fully closed yet → wait for more deltas
           }
-        }, killMs);
-        child.on("close", (code, signal) => {
-          clearTimeout(killer);
-          clearInterval(hb);
-          resolve({ buf, code, signal });
-        });
-        child.on("error", (e) => {
-          clearTimeout(killer);
-          clearInterval(hb);
-          log(`spawn error: ${e.message}`);
-          resolve({ buf, code: null, signal: null });
-        });
+          emittedKeys.add(id);
+          const consent = isConsent(id);
+          const value = consent ? "" : typeof v?.value === "string" ? v.value : v?.value != null ? String(v.value) : "";
+          const needs = consent || !!v?.needs_confirmation;
+          fieldsDone++;
+          emit({ t: "field", id, value, needs });
+          log(`drafted ${(byId.get(id)?.label || id).slice(0, 36)} (${fieldsDone}/${s.fields.length})`);
+        }
+      };
+
+      const result = await runPlanner({
+        cliId,
+        spec,
+        binPath,
+        prompt,
+        fieldCount: s.fields.length,
+        cwd: careerOpsRoot(),
+        env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
+        haveCv,
+        t0,
+        log,
+        onText: (text) => {
+          draftBuf += text;
+          flushFields();
+        },
       });
 
       log(`Planner exited code=${result.code} signal=${result.signal} · ${result.buf.length} chars total`);
