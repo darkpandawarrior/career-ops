@@ -1,0 +1,313 @@
+{
+  "schemaVersion": 1,
+  "provenance": "authored",
+  "provenanceNote": "No existing test in this repo calls sanitizeTsvField, sanitizeMarkdownField, or sanitizePipelineUrl directly (grepped tests/ and web/ — zero hits as of this commit). These cases were AUTHORED against the live implementation in scan.mjs: each expected value was produced by running the real function, not derived from a pre-existing, independently-verified assertion. That means this fixture file proves a second implementation AGREES with the current JS behaviour — it does NOT prove that behaviour is correct. If the JS itself has a latent bug in one of these functions, this fixture will faithfully freeze that bug into the conformance kit. See the order-dependence and internal-space-truncation notes on individual cases below for behaviour worth a second look before trusting it as intentional.",
+  "functions": {
+    "sanitizeTsvField": [
+      {
+        "id": "empty_string",
+        "input": "",
+        "expected": "",
+        "note": "empty string"
+      },
+      {
+        "id": "null_input",
+        "input": null,
+        "expected": "",
+        "note": "null coalesces to empty string via `value ?? ''`; JS `undefined` takes the identical nullish path and is not encoded separately"
+      },
+      {
+        "id": "whitespace_only",
+        "input": "   ",
+        "expected": "",
+        "note": "whitespace-only collapses/trims to empty string"
+      },
+      {
+        "id": "plain_text",
+        "input": "Senior Engineer",
+        "expected": "Senior Engineer",
+        "note": "ordinary text passes through unchanged"
+      },
+      {
+        "id": "leading_equals",
+        "input": "=SUM(A1:A9)",
+        "expected": "'=SUM(A1:A9)",
+        "note": "CSV-injection char = alone, must be neutralized with a leading quote"
+      },
+      {
+        "id": "leading_plus",
+        "input": "+1-555-0100",
+        "expected": "'+1-555-0100",
+        "note": "CSV-injection char +"
+      },
+      {
+        "id": "leading_minus",
+        "input": "-5",
+        "expected": "'-5",
+        "note": "CSV-injection char -"
+      },
+      {
+        "id": "leading_at",
+        "input": "@mention",
+        "expected": "'@mention",
+        "note": "CSV-injection char @"
+      },
+      {
+        "id": "leading_hash_not_injection",
+        "input": "#hello",
+        "expected": "#hello",
+        "note": "a leading char outside the =+-@ set must NOT be quoted"
+      },
+      {
+        "id": "injection_char_not_leading",
+        "input": "a=b",
+        "expected": "a=b",
+        "note": "an injection char that is not the first character must NOT be quoted"
+      },
+      {
+        "id": "leading_whitespace_then_injection",
+        "input": "  =cmd",
+        "expected": "'=cmd",
+        "note": "leading whitespace is trimmed BEFORE the injection test, so this still gets quoted"
+      },
+      {
+        "id": "embedded_newline",
+        "input": "Company\nName",
+        "expected": "Company Name",
+        "note": "embedded newline collapses to a single space"
+      },
+      {
+        "id": "embedded_tab",
+        "input": "Company\tName",
+        "expected": "Company Name",
+        "note": "embedded tab collapses to a single space (protects TSV column alignment)"
+      },
+      {
+        "id": "embedded_crlf_runs",
+        "input": "Line1\r\n\r\nLine2",
+        "expected": "Line1 Line2",
+        "note": "multiple \\r\\n in a row collapse to exactly one space"
+      },
+      {
+        "id": "double_space_collapse",
+        "input": "Too    many   spaces",
+        "expected": "Too many spaces",
+        "note": "runs of 2+ literal spaces collapse to one"
+      },
+      {
+        "id": "pipe_untouched",
+        "input": "a|b|c",
+        "expected": "a|b|c",
+        "note": "TSV sanitizer does NOT escape pipe (contrast with sanitizeMarkdownField)"
+      },
+      {
+        "id": "backslash_bracket_untouched",
+        "input": "C:\\path\\[note]",
+        "expected": "C:\\path\\[note]",
+        "note": "TSV sanitizer does NOT escape backslash/brackets at all (contrast with sanitizeMarkdownField/sanitizePipelineUrl)"
+      },
+      {
+        "id": "unicode_passthrough",
+        "input": "Café Müller 日本語 🚀",
+        "expected": "Café Müller 日本語 🚀",
+        "note": "unicode text passes through unchanged"
+      }
+    ],
+    "sanitizeMarkdownField": [
+      {
+        "id": "empty_string",
+        "input": "",
+        "expected": "",
+        "note": "empty string"
+      },
+      {
+        "id": "null_input",
+        "input": null,
+        "expected": "",
+        "note": "null coalesces to empty string; undefined takes the identical nullish path"
+      },
+      {
+        "id": "whitespace_only",
+        "input": "   ",
+        "expected": "",
+        "note": "whitespace-only collapses/trims to empty string"
+      },
+      {
+        "id": "plain_text",
+        "input": "Senior Engineer",
+        "expected": "Senior Engineer",
+        "note": "ordinary text passes through unchanged"
+      },
+      {
+        "id": "backslash_alone",
+        "input": "\\",
+        "expected": "\\\\",
+        "note": "a lone backslash is escaped to two backslashes"
+      },
+      {
+        "id": "left_bracket_alone",
+        "input": "[",
+        "expected": "\\[",
+        "note": "a lone [ is escaped"
+      },
+      {
+        "id": "right_bracket_alone",
+        "input": "]",
+        "expected": "\\]",
+        "note": "a lone ] is escaped"
+      },
+      {
+        "id": "backslash_then_bracket",
+        "input": "\\[",
+        "expected": "\\\\\\[",
+        "note": "ORDER-DEPENDENCE case: backslash immediately followed by [ -- catches a Kotlin port doing sequential .replace() calls in the wrong order"
+      },
+      {
+        "id": "bracket_then_backslash",
+        "input": "]\\",
+        "expected": "\\]\\\\",
+        "note": "ORDER-DEPENDENCE case, reversed: ] immediately followed by backslash"
+      },
+      {
+        "id": "backslash_bracket_combo_realistic",
+        "input": "C:\\path\\[note]",
+        "expected": "C:\\\\path\\\\\\[note\\]",
+        "note": "ORDER-DEPENDENCE case, realistic data shape: a Windows path containing a bracketed note"
+      },
+      {
+        "id": "both_brackets_and_backslash",
+        "input": "\\[x]\\",
+        "expected": "\\\\\\[x\\]\\\\",
+        "note": "all three escaped characters present together"
+      },
+      {
+        "id": "pipe_single",
+        "input": "a|b",
+        "expected": "a/b",
+        "note": "a single pipe is replaced with / (markdown table column separator)"
+      },
+      {
+        "id": "pipe_multiple",
+        "input": "a|b|c",
+        "expected": "a/b/c",
+        "note": "multiple pipes all replaced"
+      },
+      {
+        "id": "pipe_and_bracket_combo",
+        "input": "[a|b]",
+        "expected": "\\[a/b\\]",
+        "note": "pipe replaced AND bracket escaped in the same value"
+      },
+      {
+        "id": "csv_injection_char_not_escaped",
+        "input": "=SUM(A1:A9)",
+        "expected": "=SUM(A1:A9)",
+        "note": "sanitizeMarkdownField has NO CSV-injection guard (contrast with sanitizeTsvField) -- a leading = is left alone"
+      },
+      {
+        "id": "embedded_newline",
+        "input": "Line1\nLine2",
+        "expected": "Line1 Line2",
+        "note": "embedded newline collapses to a single space"
+      },
+      {
+        "id": "embedded_tab",
+        "input": "Col1\tCol2",
+        "expected": "Col1 Col2",
+        "note": "embedded tab collapses to a single space"
+      },
+      {
+        "id": "unicode_passthrough",
+        "input": "İstanbul Şirketi 日本語 🚀",
+        "expected": "İstanbul Şirketi 日本語 🚀",
+        "note": "unicode text (including Turkish) passes through unchanged"
+      }
+    ],
+    "sanitizePipelineUrl": [
+      {
+        "id": "empty_string",
+        "input": "",
+        "expected": "",
+        "note": "empty string"
+      },
+      {
+        "id": "null_input",
+        "input": null,
+        "expected": "",
+        "note": "null coalesces to empty string; undefined takes the identical nullish path"
+      },
+      {
+        "id": "whitespace_only",
+        "input": "   ",
+        "expected": "",
+        "note": "whitespace-only collapses to empty string"
+      },
+      {
+        "id": "plain_url",
+        "input": "https://example.com/jobs?id=1",
+        "expected": "https://example.com/jobs?id=1",
+        "note": "an ordinary URL passes through unchanged"
+      },
+      {
+        "id": "leading_trailing_whitespace",
+        "input": "  https://example.com  ",
+        "expected": "https://example.com",
+        "note": "surrounding whitespace is trimmed"
+      },
+      {
+        "id": "internal_space_truncates",
+        "input": "https://example.com/a b",
+        "expected": "https://example.com/a",
+        "note": "unlike the other two sanitizers, a URL is FIRST-WHITESPACE-TOKEN only -- anything after a space is silently dropped, not collapsed"
+      },
+      {
+        "id": "internal_newline_truncates",
+        "input": "https://example.com/a\nb",
+        "expected": "https://example.com/a",
+        "note": "an embedded newline truncates the same way a space does (both match \\s in the split)"
+      },
+      {
+        "id": "internal_tab_truncates",
+        "input": "https://example.com/a\tb",
+        "expected": "https://example.com/a",
+        "note": "an embedded tab truncates the same way"
+      },
+      {
+        "id": "backslash_then_bracket",
+        "input": "https://x.com/a\\[b]",
+        "expected": "https://x.com/a\\\\\\[b\\]",
+        "note": "ORDER-DEPENDENCE case on a URL-shaped value: backslash immediately followed by ["
+      },
+      {
+        "id": "bracket_then_backslash",
+        "input": "https://x.com/a]\\b",
+        "expected": "https://x.com/a\\]\\\\b",
+        "note": "ORDER-DEPENDENCE case, reversed"
+      },
+      {
+        "id": "both_brackets_and_backslash",
+        "input": "https://x.com/\\[id]\\",
+        "expected": "https://x.com/\\\\\\[id\\]\\\\",
+        "note": "all three escaped characters together in one URL"
+      },
+      {
+        "id": "pipe_url_encoded",
+        "input": "https://x.com?a=1|b=2",
+        "expected": "https://x.com?a=1%7Cb=2",
+        "note": "a pipe is replaced with %7C (URL-encoded), NOT / like sanitizeMarkdownField -- because this value rides in a markdown table cell that is ALSO a literal URL"
+      },
+      {
+        "id": "csv_injection_char_not_escaped",
+        "input": "=http://evil.example",
+        "expected": "=http://evil.example",
+        "note": "sanitizePipelineUrl has no CSV-injection guard either -- a leading = is left alone"
+      },
+      {
+        "id": "unicode_url",
+        "input": "https://xn--r8jz45g.jp/求人",
+        "expected": "https://xn--r8jz45g.jp/求人",
+        "note": "a unicode (IDN/path) URL with no whitespace/bracket/backslash/pipe passes through unchanged"
+      }
+    ]
+  }
+}
