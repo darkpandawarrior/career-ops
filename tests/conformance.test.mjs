@@ -24,6 +24,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { sanitizeTsvField, sanitizeMarkdownField, sanitizePipelineUrl } from '../scan.mjs';
 import { canonStatus } from '../web/src/lib/status-alias.mjs';
+import { lockDirFor } from '../tracker-lock.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = join(__dirname, '..', 'conformance', 'fixtures');
@@ -83,3 +84,42 @@ const SANITIZER_FNS = { sanitizeTsvField, sanitizeMarkdownField, sanitizePipelin
     }
   }
 }
+
+// ── tracker-lock.json ───────────────────────────────────────────────
+// The lock's NAME is the whole of its mutual exclusion. Two implementations
+// that derive different lock directories for the same tracker do not contend
+// at all — both believe they hold it and write applications.md concurrently.
+// Backoff and retry may differ harmlessly; this may not.
+{
+  const LOCK_PREFIX = 'career-ops-merge-tracker-';
+  const base = (p) => lockDirFor(p).split(/[\\/]/).pop();
+  const LOCK_FNS = {
+    lockDirName: base,
+    lockKey: (p) => base(p).slice(LOCK_PREFIX.length, -'.lock'.length),
+  };
+  const doc = JSON.parse(readFileSync(join(FIXTURES_DIR, 'tracker-lock.json'), 'utf8'));
+  if (doc.schemaVersion !== 1) {
+    fail(`conformance/fixtures/tracker-lock.json: unsupported schemaVersion ${doc.schemaVersion}`);
+  } else {
+    const bad = [];
+    for (const [fnName, cases] of Object.entries(doc.functions)) {
+      const fn = LOCK_FNS[fnName];
+      if (!fn) {
+        fail(`conformance/fixtures/tracker-lock.json: names unknown function "${fnName}"`);
+        continue;
+      }
+      for (const c of cases) {
+        const actual = fn(c.input);
+        if (actual !== c.expected) {
+          bad.push(`${fnName}(${JSON.stringify(c.input)}) = ${JSON.stringify(actual)}, want ${JSON.stringify(c.expected)}`);
+        }
+      }
+    }
+    if (bad.length) {
+      fail(`tracker-lock: ${bad.length} conformance fixture(s) disagree with the live implementation:\n    ${bad.join('\n    ')}`);
+    } else {
+      pass('tracker-lock: every fixture case matches lockDirFor');
+    }
+  }
+}
+

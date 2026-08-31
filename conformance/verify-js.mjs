@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { sanitizeTsvField, sanitizeMarkdownField, sanitizePipelineUrl } from '../scan.mjs';
 import { canonStatus } from '../web/src/lib/status-alias.mjs';
+import { lockDirFor } from '../tracker-lock.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = join(__dirname, 'fixtures');
@@ -29,6 +30,14 @@ const FIXTURES_DIR = join(__dirname, 'fixtures');
 // function key not in one of these maps fails loudly rather than being
 // silently skipped.
 const SANITIZER_FNS = { sanitizeTsvField, sanitizeMarkdownField, sanitizePipelineUrl };
+
+// tracker-lock.mjs exposes only lockDirFor (a full path). The corpus pins the two pieces that
+// actually decide mutual exclusion, so derive them from it rather than reaching into internals.
+const LOCK_PREFIX = 'career-ops-merge-tracker-';
+const LOCK_FNS = {
+  lockDirName: (appsFile) => lockDirFor(appsFile).split(/[\\/]/).pop(),
+  lockKey: (appsFile) => lockDirFor(appsFile).split(/[\\/]/).pop().slice(LOCK_PREFIX.length, -'.lock'.length),
+};
 const STATUS_FNS = { canonStatus };
 
 /**
@@ -87,9 +96,35 @@ function verifyStatusAliases(path) {
   return { ok, failures };
 }
 
+function verifyTrackerLock(path) {
+  const doc = JSON.parse(readFileSync(path, 'utf8'));
+  if (doc.schemaVersion !== 1) throw new Error(`${path}: unsupported schemaVersion ${doc.schemaVersion}`);
+  let ok = 0;
+  const failures = [];
+  for (const [fnName, cases] of Object.entries(doc.functions)) {
+    const fn = LOCK_FNS[fnName];
+    if (!fn) throw new Error(`${path}: fixture names unknown function "${fnName}"`);
+    for (const c of cases) {
+      const actual = fn(c.input);
+      if (actual === c.expected) {
+        ok++;
+      } else {
+        failures.push(
+          `[tracker-lock.json] ${fnName}(${JSON.stringify(c.input)}) [${c.id}]\n` +
+          `    expected: ${JSON.stringify(c.expected)}\n` +
+          `    actual:   ${JSON.stringify(actual)}\n` +
+          `    note:     ${c.note ?? ''}`
+        );
+      }
+    }
+  }
+  return { ok, failures };
+}
+
 const VERIFIERS = {
   'sanitizers.json': verifySanitizers,
   'status-aliases.json': verifyStatusAliases,
+  'tracker-lock.json': verifyTrackerLock,
 };
 
 function main() {
