@@ -1,44 +1,22 @@
-#!/usr/bin/env node
-// @ts-check
-/**
- * test-trust-validator.mjs — Comprehensive test suite for trust validation.
- * Run: node test-trust-validator.mjs
- *
- * Tests cover:
- *   - buildTrustValidator: disabled/enabled, config merging
- *   - validateUrl: valid, malformed, non-http protocols
- *   - matchesDomainList: exact, subdomain, no-match
- *   - companyMatchesHostname: slug, word-level, edge cases
- *   - Score calculation, clamping, and classification
- *   - Integration: multiple flags stacking
- */
-
+// tests/trust-validator.test.mjs — providers/_trust-validator.mjs, end to end.
+//
+// Lived at the repo root as test-trust-validator.mjs, where discovery does not
+// reach: test-all.mjs only walks tests/**/*.test.mjs, and no registration list
+// named it. 107 assertions passed the entire time nothing ran them. Moved here
+// so discovery picks it up with no registration to forget.
+import { pass, fail } from './helpers.mjs';
 import {
   buildTrustValidator,
   validateUrl,
   matchesDomainList,
   companyMatchesHostname,
   classifyTrustLevel,
-} from './providers/_trust-validator.mjs';
+} from '../providers/_trust-validator.mjs';
 
-// ── Test runner ──────────────────────────────────────────────────────
+console.log('\nproviders/_trust-validator.mjs — trust validation');
 
-let passed = 0;
-let failed = 0;
-
-function assert(condition, testName) {
-  if (condition) {
-    passed++;
-    console.log(`  ✓ ${testName}`);
-  } else {
-    failed++;
-    console.error(`  ✗ FAIL: ${testName}`);
-  }
-}
-
-function section(name) {
-  console.log(`\n━━━ ${name} ━━━`);
-}
+const assert = (condition, testName) => (condition ? pass(testName) : fail(testName));
+const section = (name) => console.log(`\n━━━ ${name} ━━━`);
 
 // ══════════════════════════════════════════════════════════════════════
 // PART 1: classifyTrustLevel
@@ -440,19 +418,4 @@ section('buildTrustValidator — config without enabled key');
   const v = buildTrustValidator({});
   const r = v({ url: 'not-a-url', company: 'Test' });
   assert(r.flags.includes('invalid_url'), 'empty config (no enabled key) → defaults to enabled');
-}
-
-// ══════════════════════════════════════════════════════════════════════
-// Summary
-// ══════════════════════════════════════════════════════════════════════
-
-console.log(`\n${'═'.repeat(50)}`);
-console.log(`  Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-console.log(`${'═'.repeat(50)}`);
-
-if (failed > 0) {
-  console.error(`\n❌ ${failed} test(s) FAILED`);
-  process.exit(1);
-} else {
-  console.log(`\n✅ All ${passed} tests passed!`);
 }
