@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { readReport, readReportForApplication, findApplication, trackerCanDelete } from "@/lib/career-ops";
+import { readReport, readReportForApplication, findApplication, pdfReadyForReport, trackerCanDelete } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { ReportView } from "@/components/report-view";
 
@@ -20,6 +20,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       report={report?.content ?? null}
       file={report?.file ?? null}
       canDelete={trackerCanDelete()}
+      pdfReadyFromIndex={await pdfReadyForReport(id, root)}
     />
   );
 }

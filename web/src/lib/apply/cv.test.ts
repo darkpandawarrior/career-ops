@@ -79,7 +79,7 @@ describe("resolveTailoredCv", () => {
   });
 
   it("returns null for an empty / missing company (no guessing)", () => {
-    writePdf("acme-cv.pdf");
+    writePdf("cv-acme-2026-09-02.pdf");
     expect(resolveTailoredCv(ROOT, "")).toBeNull();
     expect(resolveTailoredCv(ROOT, "   ")).toBeNull();
     expect(resolveTailoredCv(ROOT, undefined)).toBeNull();
@@ -91,19 +91,22 @@ describe("resolveTailoredCv", () => {
   });
 
   it("resolves a PDF whose name contains the full company slug", () => {
-    const p = writePdf("alex-acme-corp-cv.pdf");
+    const p = writePdf("cv-alex-acme-corp-2026-09-02.pdf");
     expect(resolveTailoredCv(ROOT, "Acme Corp")).toBe(p);
   });
 
-  it("matches on the first slug token when it is >2 chars and the full slug is absent", () => {
-    // company "Acme Corp" -> slug "acme-corp", first token "acme". File only has "acme".
-    const p = writePdf("acme-resume.pdf");
-    expect(resolveTailoredCv(ROOT, "Acme Corp")).toBe(p);
+  it("does NOT match on the first slug token alone", () => {
+    // Was the opposite assertion until #2156/#3214. "Acme Corp" -> first token "acme"
+    // resolved an unrelated "Acme Bank" file and attached it to a real application.
+    // matchesTailoredCv now requires the cv- prefix AND a token boundary on the FULL
+    // slug, so a first-token near-miss must find nothing rather than the wrong CV.
+    writePdf("cv-acme-2026-09-02.pdf");
+    expect(resolveTailoredCv(ROOT, "Acme Corp")).toBeNull();
   });
 
   it("does NOT fall back to a short (<=2 char) first token", () => {
     // company "Hi There" -> first token "hi" (len 2) — too short to fuzzy-match.
-    writePdf("hi-everyone.pdf");
+    writePdf("cv-hi-everyone-2026-09-02.pdf");
     expect(resolveTailoredCv(ROOT, "Hi There")).toBeNull();
   });
 
@@ -114,20 +117,20 @@ describe("resolveTailoredCv", () => {
   });
 
   it("returns null when no file matches the company at all (never the wrong CV)", () => {
-    writePdf("globex-cv.pdf");
+    writePdf("cv-globex-2026-09-02.pdf");
     expect(resolveTailoredCv(ROOT, "Acme")).toBeNull();
   });
 
   it("returns the NEWEST match when several files match (mtime desc)", () => {
     const base = Date.now();
-    writePdf("acme-old.pdf", base - 100_000);
-    const newest = writePdf("acme-new.pdf", base);
-    writePdf("acme-mid.pdf", base - 50_000);
+    writePdf("cv-acme-old.pdf", base - 100_000);
+    const newest = writePdf("cv-acme-new.pdf", base);
+    writePdf("cv-acme-mid.pdf", base - 50_000);
     expect(resolveTailoredCv(ROOT, "Acme")).toBe(newest);
   });
 
   it("is case-insensitive on the company name", () => {
-    const p = writePdf("acme-cv.pdf");
+    const p = writePdf("cv-acme-2026-09-02.pdf");
     expect(resolveTailoredCv(ROOT, "ACME")).toBe(p);
   });
 

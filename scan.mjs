@@ -81,6 +81,7 @@ import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { promoteKnownFragmentIdentity } from './url-key.mjs';
 
 const parseYaml = yaml.load;
 
@@ -218,17 +219,18 @@ function compileLocationKeywordList(value) {
 // Deliberately narrow: only the post-`/job/` segment is inspected, never the whole
 // URL. Scanning the full URL would match company slugs and ATS subdomains by
 // accident (a "china" or "india" substring inside an unrelated path). Providers
-// without the `/job/{location}/` convention (Greenhouse, Lever, Ashby) yield no
-// hint and keep their previous behaviour exactly.
+// without the Workday hostname convention yield no hint and keep their previous
+// behaviour exactly, even if their own routes also contain `/job/{id}`.
 export function locationHintFromUrl(url) {
   if (typeof url !== 'string' || url.trim() === '') return '';
-  let pathname;
+  let parsed;
   try {
-    pathname = new URL(url).pathname;
+    parsed = new URL(url);
   } catch {
     return '';
   }
-  const segments = pathname.split('/').filter(Boolean);
+  if (!parsed.hostname.toLowerCase().endsWith('.myworkdayjobs.com')) return '';
+  const segments = parsed.pathname.split('/').filter(Boolean);
   const jobIdx = segments.lastIndexOf('job');
   if (jobIdx === -1 || jobIdx === segments.length - 1) return '';
   let segment = segments[jobIdx + 1];
@@ -1105,6 +1107,7 @@ export function normalizeUrlForDedup(url) {
       parsed.searchParams.delete(param);
     }
   }
+  promoteKnownFragmentIdentity(parsed);
   parsed.hash = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
   return parsed.toString();
@@ -1247,18 +1250,34 @@ function extractPipelineCompanyRole(line) {
  * Derive the seen-URL set from the TEXT of the three dedup sources (#2382).
  * Pure: takes contents, reads nothing. loadSeenUrls is the filesystem wrapper,
  * and loadDedupSnapshot reuses this over a single read of each file.
+ *
+ * `extraTokensFor(url, portal)` (optional) lets a caller add provider-scoped
+ * dedup tokens alongside the plain normalized-URL one — e.g. a Workday
+ * requisition served under several tenant sites (#3439): a historical row
+ * recorded under site A's URL wouldn't otherwise match a fresh job fetched
+ * from site B, since normalizeUrlForDedup compares URLs verbatim. Only
+ * scan-history.tsv rows carry a `portal` column (the pipeline.md/
+ * applications.md sources don't record which scanner/provider produced a
+ * URL), so the hook only fires there. Return a string, an array of strings,
+ * or a falsy value for "nothing extra".
  */
-export function collectSeenUrls(sources = {}, policy = {}) {
+export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = {}) {
   const { scanHistoryText = '', pipelineText = '', applicationsText = '' } = sources;
   const seen = new Set();
   let recheckEligible = 0;
 
   // scan-history.tsv
   for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
-    const [url, firstSeen, , , , status = 'added'] = line.split('\t');
+    const [url, firstSeen, portal, , , status = 'added'] = line.split('\t');
     if (!url) continue;
-    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) seen.add(normalizeUrlForDedup(url));
-    else recheckEligible++;
+    if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
+      seen.add(normalizeUrlForDedup(url));
+      if (extraTokensFor) {
+        for (const token of [].concat(extraTokensFor(url, portal) || [])) {
+          if (token) seen.add(token);
+        }
+      }
+    } else recheckEligible++;
   }
 
   // pipeline.md — extract URLs from checkbox lines, wherever the URL sits in the
@@ -1286,12 +1305,13 @@ export function loadSeenUrls(policy = {}, {
   scanHistoryPath = SCAN_HISTORY_PATH,
   pipelinePath = PIPELINE_PATH,
   applicationsPath = APPLICATIONS_PATH,
+  extraTokensFor,
 } = {}) {
   return collectSeenUrls({
     scanHistoryText: readIfExists(scanHistoryPath),
     pipelineText: readIfExists(pipelinePath),
     applicationsText: readIfExists(applicationsPath),
-  }, policy);
+  }, policy, { extraTokensFor });
 }
 
 /**

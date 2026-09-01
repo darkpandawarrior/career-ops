@@ -21,7 +21,7 @@
 
 **[Screenshots](#screenshots)** · **[Why](#why-hiresignal-exists)** · **[Features](#features)** · **[Quick start](#quick-start)** · **[Architecture](#architecture)** · **[Upstream relationship](#relationship-to-upstream-updates)** · **[Privacy](#data--privacy)**
 
-**Built on:** [santifer/career-ops](https://github.com/santifer/career-ops) &nbsp;·&nbsp; **Portfolio:** [cv-siddharth.vercel.app](https://cv-siddharth.vercel.app/)
+**Built on:** [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) &nbsp;·&nbsp; **Portfolio:** [cv-siddharth.vercel.app](https://cv-siddharth.vercel.app/)
 
 </div>
 
@@ -46,7 +46,7 @@
 
 </details>
 
-> **At a glance** — **87** zero-auth job-board providers · **4,100+** engine tests · **8** machine-checked
+> **At a glance** — **89** zero-auth job-board providers · **4,100+** engine tests · **8** machine-checked
 > fork adaptations · **38,854** ATS boards per full sweep, of which **~46%** are permanently dead and
 > skipped from `data/dead-boards.tsv`. Local-first: no hosted service, no account, your data never
 > leaves the machine.
@@ -55,7 +55,7 @@
 
 ## What Is This
 
-HireSignal is a focused career dashboard built on top of the open-source [career-ops](https://github.com/santifer/career-ops) project by Santiago Fernandez de Valderrama.
+HireSignal is a focused career dashboard built on top of the open-source [career-ops](https://github.com/career-ops-hq/career-ops) project by Santiago Fernandez de Valderrama.
 
 career-ops provides the foundation: the job-search pipeline, AI-agent workflow, scanner architecture, tracker conventions, PDF generation flow, liveness checks, and the philosophy of quality applications over spray-and-pray automation.
 
@@ -447,7 +447,7 @@ quirks (rate limits, latency floors, pagination caps) are tuned locally in
 each file; Ashby, for example, carries a 30s timeout and a jittered retry
 because its public posting-api has a ~10s+ server-side latency floor that
 races the scanner's global 10s default. See
-[`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) for all 87,
+[`docs/SUPPORTED_JOB_BOARDS.md`](docs/SUPPORTED_JOB_BOARDS.md) for all 89,
 and [`docs/local-parser-cookbook.md`](docs/local-parser-cookbook.md) to add one.
 
 ### Multi-profile resolution
@@ -527,7 +527,7 @@ HireSignal removed upstream files that do not affect this local dashboard: upstr
 
 ## Built On career-ops
 
-This project uses [santifer/career-ops](https://github.com/santifer/career-ops) as its upstream base.
+This project uses [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) as its upstream base.
 
 - career-ops created the original AI job-search command center
 - career-ops established the scanner, tracker, report, PDF, and agent-skill workflow
@@ -540,7 +540,7 @@ The original code is MIT licensed. The `career-ops` name and brand belong to the
 
 ## Relationship to Upstream Updates
 
-`upstream` points at [santifer/career-ops](https://github.com/santifer/career-ops). This repo is
+`upstream` points at [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops). This repo is
 **not a mirror** — it is a fork that absorbs upstream deliberately, and contributes back.
 
 ### The two directions
@@ -671,7 +671,7 @@ kirklazar-android/hiresignal --state merged`.
 | career-ops v1.16.0 | 2026-07-03/04 | Email-sweep mode; fixed a desktop-app crash loop |
 | career-ops v1.15.0 | 2026-07-01 | Synced into `hiresignal` main |
 | career-ops v1.14.0 | 2026-06-29 | First System-Layer sync from upstream career-ops |
-| career-ops v1.2.0 – v1.13.0 | earlier 2026 | Pre-fusion engine history, inherited from [santifer/career-ops](https://github.com/santifer/career-ops) |
+| career-ops v1.2.0 – v1.13.0 | earlier 2026 | Pre-fusion engine history, inherited from [career-ops-hq/career-ops](https://github.com/career-ops-hq/career-ops) |
 
 ---
 
@@ -694,7 +694,7 @@ kirklazar-android/hiresignal --state merged`.
 
 ## Attribution
 
-HireSignal is derived from and built on [career-ops](https://github.com/santifer/career-ops), created by Santiago Fernandez de Valderrama and contributors.
+HireSignal is derived from and built on [career-ops](https://github.com/career-ops-hq/career-ops), created by Santiago Fernandez de Valderrama and contributors.
 
 The upstream project made this dashboard possible by providing the core job-search pipeline, agent instructions, scanner ecosystem, tracker model, PDF tooling, and update-safe data contract.
 

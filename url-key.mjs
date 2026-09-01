@@ -45,6 +45,22 @@ const TRACKING_PARAMS = [
 ];
 
 /**
+ * MokaHR serves a posting's identity in the URL FRAGMENT (#/job/<id>), and fragments are dropped
+ * as never identifying. Promote that id into a query param first, so two links to the same MokaHR
+ * posting still collapse to one key instead of every posting on a tenant sharing the bare host.
+ *
+ * @param {URL} url
+ */
+export function promoteKnownFragmentIdentity(url) {
+  if (url.hostname.toLowerCase() !== 'app.mokahr.com') return;
+  const match = /^#\/job\/([^/?#]+)(?:\?[^#]*)?$/.exec(url.hash);
+  if (!match) return;
+  let jobId;
+  try { jobId = decodeURIComponent(match[1]); } catch { return; }
+  if (jobId) url.searchParams.set('mokahr_job_id', jobId);
+}
+
+/**
  * Reduce a posting URL to a stable comparison key.
  *
  * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
@@ -73,6 +89,7 @@ export function normalizeUrl(raw) {
 
   u.protocol = 'https:';            // http vs https is the same posting
   u.hostname = u.hostname.toLowerCase();
+  promoteKnownFragmentIdentity(u);
   u.hash = '';                      // fragments never identify the posting
 
   // Drop tracking params, keep functional ones, sort for order-independence.
