@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "provenance": "authored",
+  "provenanceNote": "AUTHORED, not extracted. tracker-lock.mjs has no existing test pinning lockDirFor's key derivation, so each expected value was produced by running the live implementation rather than taken from a pre-existing verified assertion. This file proves a second implementation AGREES with the current JS derivation; it does not prove that derivation is independently correct.",
+  "why": "A cross-process lock only excludes if every implementation derives the SAME lock directory from the same tracker path. Backoff and retry timing may differ harmlessly; the NAME may not. Two implementations that disagree here do not contend at all — both believe they hold the lock and write the user's applications.md concurrently. That is silent corruption, not a visible failure. This is the half of the lock protocol expressible as input -> output, and it is the half that decides whether mutual exclusion exists at all.",
+  "notCovered": "Acquisition retry/backoff, stale-lock recovery windows and the recover-guard handshake are sequenced and clock-dependent, so a case table cannot express them. They still rest on convention across the three implementations. Also not covered: the CAREER_OPS_TRACKER_LOCK override validation (absolute + inside temp root + correct prefix, because release deletes recursively). The rule is real and both sides implement it, but the JS form is a private helper taking an env value and a lock key against the live filesystem, while the Kotlin form is a pure three-boolean predicate. There is no shared callable shape to pin, and a fixture the reference implementation cannot answer does not belong in a shared corpus.",
+  "functions": {
+    "lockKey": [
+      {
+        "id": "lockKey_abs_typical",
+        "input": "/Users/x/career-ops/data/applications.md",
+        "expected": "281015b2ea99c89b",
+        "note": "a normal absolute tracker path"
+      },
+      {
+        "id": "lockKey_abs_short",
+        "input": "/tmp/a.md",
+        "expected": "15f9566a84264471",
+        "note": "short path"
+      },
+      {
+        "id": "lockKey_abs_tempstyle",
+        "input": "/var/folders/9b/T/co-seed/applications.md",
+        "expected": "db809786f17cfcdb",
+        "note": "macOS temp-style path, the shape real test roots take"
+      },
+      {
+        "id": "lockKey_relative",
+        "input": "relative/data/applications.md",
+        "expected": "a01298f58be4ebef",
+        "note": "relative input is hashed VERBATIM, not resolved — both sides must agree on that"
+      },
+      {
+        "id": "lockKey_non_ascii",
+        "input": "/unicode/ünïcodé/data/applications.md",
+        "expected": "6294ef0c6e504c77",
+        "note": "non-ASCII path: pins UTF-8 byte agreement across languages"
+      },
+      {
+        "id": "lockKey_empty",
+        "input": "",
+        "expected": "e3b0c44298fc1c14",
+        "note": "sha256 of the empty string — a canary for accidental normalisation"
+      }
+    ],
+    "lockDirName": [
+      {
+        "id": "lockDirName_abs_typical",
+        "input": "/Users/x/career-ops/data/applications.md",
+        "expected": "career-ops-merge-tracker-281015b2ea99c89b.lock",
+        "note": "a normal absolute tracker path"
+      },
+      {
+        "id": "lockDirName_abs_short",
+        "input": "/tmp/a.md",
+        "expected": "career-ops-merge-tracker-15f9566a84264471.lock",
+        "note": "short path"
+      },
+      {
+        "id": "lockDirName_abs_tempstyle",
+        "input": "/var/folders/9b/T/co-seed/applications.md",
+        "expected": "career-ops-merge-tracker-db809786f17cfcdb.lock",
+        "note": "macOS temp-style path, the shape real test roots take"
+      },
+      {
+        "id": "lockDirName_relative",
+        "input": "relative/data/applications.md",
+        "expected": "career-ops-merge-tracker-a01298f58be4ebef.lock",
+        "note": "relative input is hashed VERBATIM, not resolved — both sides must agree on that"
+      },
+      {
+        "id": "lockDirName_non_ascii",
+        "input": "/unicode/ünïcodé/data/applications.md",
+        "expected": "career-ops-merge-tracker-6294ef0c6e504c77.lock",
+        "note": "non-ASCII path: pins UTF-8 byte agreement across languages"
+      },
+      {
+        "id": "lockDirName_empty",
+        "input": "",
+        "expected": "career-ops-merge-tracker-e3b0c44298fc1c14.lock",
+        "note": "sha256 of the empty string — a canary for accidental normalisation"
+      }
+    ]
+  }
+}

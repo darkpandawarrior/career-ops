@@ -1,0 +1,548 @@
+{
+  "schemaVersion": 1,
+  "provenance": "extracted",
+  "provenanceNote": "The alias/label enumeration is generated programmatically from templates/states.yml (the declared cross-system source of truth), never hand-typed. The capitalised-Turkish-İ, bolded-status, and empty/dash-to-Discarded cases are copied verbatim from the existing, verified tests in web/src/lib/status-alias.test.mjs (see each case's `note`). Every case here corresponds to an assertion that file already makes and CI already runs.",
+  "matchRule": "A conforming implementation's canonical-status resolver, given `input`, must resolve to the state whose id is `expectedId` (equivalently: whose label, uppercased, is a SUBSTRING of the resolver's return value — this mirrors the `.includes()` contract status-alias.test.mjs itself asserts against, not exact equality, because the JS implementation's return value is a token like \"EVALUATED\" that is not always byte-identical to the label).",
+  "function": "canonStatus",
+  "cases": [
+    {
+      "id": "label_self_evaluated",
+      "input": "Evaluated",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_evaluated_0",
+      "input": "evaluada",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_evaluated_1",
+      "input": "condicional",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_evaluated_2",
+      "input": "hold",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_evaluated_3",
+      "input": "evaluar",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_evaluated_4",
+      "input": "verificar",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_evaluated_5",
+      "input": "değerlendirildi",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_evaluated_6",
+      "input": "degerlendirildi",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "label_self_applied",
+      "input": "Applied",
+      "expectedId": "applied",
+      "expectedLabel": "Applied",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_applied_0",
+      "input": "aplicado",
+      "expectedId": "applied",
+      "expectedLabel": "Applied",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_applied_1",
+      "input": "enviada",
+      "expectedId": "applied",
+      "expectedLabel": "Applied",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_applied_2",
+      "input": "aplicada",
+      "expectedId": "applied",
+      "expectedLabel": "Applied",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_applied_3",
+      "input": "sent",
+      "expectedId": "applied",
+      "expectedLabel": "Applied",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_applied_4",
+      "input": "başvuruldu",
+      "expectedId": "applied",
+      "expectedLabel": "Applied",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_applied_5",
+      "input": "basvuruldu",
+      "expectedId": "applied",
+      "expectedLabel": "Applied",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "label_self_responded",
+      "input": "Responded",
+      "expectedId": "responded",
+      "expectedLabel": "Responded",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_responded_0",
+      "input": "respondido",
+      "expectedId": "responded",
+      "expectedLabel": "Responded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_responded_1",
+      "input": "yanıt verildi",
+      "expectedId": "responded",
+      "expectedLabel": "Responded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_responded_2",
+      "input": "yanıt_verildi",
+      "expectedId": "responded",
+      "expectedLabel": "Responded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_responded_3",
+      "input": "yanit verildi",
+      "expectedId": "responded",
+      "expectedLabel": "Responded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_responded_4",
+      "input": "yanit_verildi",
+      "expectedId": "responded",
+      "expectedLabel": "Responded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "label_self_interview",
+      "input": "Interview",
+      "expectedId": "interview",
+      "expectedLabel": "Interview",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_interview_0",
+      "input": "entrevista",
+      "expectedId": "interview",
+      "expectedLabel": "Interview",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_interview_1",
+      "input": "mülakat",
+      "expectedId": "interview",
+      "expectedLabel": "Interview",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_interview_2",
+      "input": "mulakat",
+      "expectedId": "interview",
+      "expectedLabel": "Interview",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "label_self_offer",
+      "input": "Offer",
+      "expectedId": "offer",
+      "expectedLabel": "Offer",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_offer_0",
+      "input": "oferta",
+      "expectedId": "offer",
+      "expectedLabel": "Offer",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_offer_1",
+      "input": "teklif",
+      "expectedId": "offer",
+      "expectedLabel": "Offer",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "label_self_rejected",
+      "input": "Rejected",
+      "expectedId": "rejected",
+      "expectedLabel": "Rejected",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_rejected_0",
+      "input": "rechazado",
+      "expectedId": "rejected",
+      "expectedLabel": "Rejected",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_rejected_1",
+      "input": "rechazada",
+      "expectedId": "rejected",
+      "expectedLabel": "Rejected",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_rejected_2",
+      "input": "reddedildi",
+      "expectedId": "rejected",
+      "expectedLabel": "Rejected",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "label_self_discarded",
+      "input": "Discarded",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_discarded_0",
+      "input": "descartado",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_discarded_1",
+      "input": "descartada",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_discarded_2",
+      "input": "cerrada",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_discarded_3",
+      "input": "cancelada",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_discarded_4",
+      "input": "iptal edildi",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_discarded_5",
+      "input": "iptal_edildi",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_discarded_6",
+      "input": "ıptal edildi",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_discarded_7",
+      "input": "ıptal_edildi",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "label_self_skip",
+      "input": "SKIP",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_skip_0",
+      "input": "no_aplicar",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_1",
+      "input": "no aplicar",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_2",
+      "input": "skip",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_3",
+      "input": "monitor",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_4",
+      "input": "geo blocker",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_5",
+      "input": "geo_blocker",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_6",
+      "input": "uygun değil",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_7",
+      "input": "uygun_değil",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_8",
+      "input": "uygun degil",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_skip_9",
+      "input": "uygun_degil",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "label_self_hired",
+      "input": "Hired",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "bare canonical label from states.yml resolves to itself"
+    },
+    {
+      "id": "alias_hired_0",
+      "input": "contratado",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_1",
+      "input": "contratada",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_2",
+      "input": "hired",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_3",
+      "input": "accepted",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_4",
+      "input": "accept",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_5",
+      "input": "kabul edildi",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_6",
+      "input": "kabul_edildi",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_7",
+      "input": "işe alındı",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_8",
+      "input": "ise alindi",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "alias_hired_9",
+      "input": "işe alindi",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "alias exactly as spelled in templates/states.yml"
+    },
+    {
+      "id": "capitalized_hired_ealnd",
+      "input": "İşe alındı",
+      "expectedId": "hired",
+      "expectedLabel": "Hired",
+      "note": "capitalised input, including the Turkish dotted capital İ fold (NFKC + strip U+0307) — extracted from web/src/lib/status-alias.test.mjs"
+    },
+    {
+      "id": "capitalized_interview_Mlakat",
+      "input": "Mülakat",
+      "expectedId": "interview",
+      "expectedLabel": "Interview",
+      "note": "capitalised input, including the Turkish dotted capital İ fold (NFKC + strip U+0307) — extracted from web/src/lib/status-alias.test.mjs"
+    },
+    {
+      "id": "capitalized_offer_Teklif",
+      "input": "Teklif",
+      "expectedId": "offer",
+      "expectedLabel": "Offer",
+      "note": "capitalised input, including the Turkish dotted capital İ fold (NFKC + strip U+0307) — extracted from web/src/lib/status-alias.test.mjs"
+    },
+    {
+      "id": "capitalized_evaluated_Deerlendirildi",
+      "input": "Değerlendirildi",
+      "expectedId": "evaluated",
+      "expectedLabel": "Evaluated",
+      "note": "capitalised input, including the Turkish dotted capital İ fold (NFKC + strip U+0307) — extracted from web/src/lib/status-alias.test.mjs"
+    },
+    {
+      "id": "capitalized_applied_Bavuruldu",
+      "input": "Başvuruldu",
+      "expectedId": "applied",
+      "expectedLabel": "Applied",
+      "note": "capitalised input, including the Turkish dotted capital İ fold (NFKC + strip U+0307) — extracted from web/src/lib/status-alias.test.mjs"
+    },
+    {
+      "id": "capitalized_skip_Uygundeil",
+      "input": "Uygun değil",
+      "expectedId": "skip",
+      "expectedLabel": "SKIP",
+      "note": "capitalised input, including the Turkish dotted capital İ fold (NFKC + strip U+0307) — extracted from web/src/lib/status-alias.test.mjs"
+    },
+    {
+      "id": "capitalized_rejected_Reddedildi",
+      "input": "Reddedildi",
+      "expectedId": "rejected",
+      "expectedLabel": "Rejected",
+      "note": "capitalised input, including the Turkish dotted capital İ fold (NFKC + strip U+0307) — extracted from web/src/lib/status-alias.test.mjs"
+    },
+    {
+      "id": "capitalized_interview_Entrevista",
+      "input": "Entrevista",
+      "expectedId": "interview",
+      "expectedLabel": "Interview",
+      "note": "capitalised input, including the Turkish dotted capital İ fold (NFKC + strip U+0307) — extracted from web/src/lib/status-alias.test.mjs"
+    },
+    {
+      "id": "bolded_offer",
+      "input": "**Oferta**",
+      "expectedId": "offer",
+      "expectedLabel": "Offer",
+      "note": "markdown-bold status text must still resolve — extracted from status-alias.test.mjs"
+    },
+    {
+      "id": "bolded_interview",
+      "input": "**Mülakat**",
+      "expectedId": "interview",
+      "expectedLabel": "Interview",
+      "note": "markdown-bold status text must still resolve — extracted from status-alias.test.mjs"
+    },
+    {
+      "id": "blank_empty_discarded",
+      "input": "",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "empty/placeholder status text maps to Discarded, not a crash or blank — extracted from status-alias.test.mjs"
+    },
+    {
+      "id": "blank_whitespace_discarded",
+      "input": "   ",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "empty/placeholder status text maps to Discarded, not a crash or blank — extracted from status-alias.test.mjs"
+    },
+    {
+      "id": "blank_em_dash_discarded",
+      "input": "—",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "empty/placeholder status text maps to Discarded, not a crash or blank — extracted from status-alias.test.mjs"
+    },
+    {
+      "id": "blank_hyphen_discarded",
+      "input": "-",
+      "expectedId": "discarded",
+      "expectedLabel": "Discarded",
+      "note": "empty/placeholder status text maps to Discarded, not a crash or blank — extracted from status-alias.test.mjs"
+    }
+  ]
+}
