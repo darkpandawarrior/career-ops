@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { companySlug } from "@/lib/company-slug.mjs";
+import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
 
 /**
  * Locate the tailored CV PDF the real `pdf` mode wrote to output/ for a given
@@ -23,17 +25,21 @@ export function resolveTailoredCv(root: string, company?: string): string | null
   } catch {
     return null;
   }
-  const slug = c.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const first = slug.split("-")[0];
-  const matches = files.filter((f) => {
-    const l = f.toLowerCase();
-    if (l.includes(slug)) return true;
-    const segs = l.replace(/\.pdf$/, "").split(/[^a-z0-9]+/);
-    return first.length > 2 && segs.includes(first);
-  });
+  // No usable key means this company cannot be identified from a filename, so find
+  // nothing. The old empty-string slug was a substring of EVERY name in output/, so
+  // it resolved the newest unrelated CV instead (#2352) — attached to a real
+  // application. The only safe answer is no answer.
+  const key = companySlug(c);
+  if (!key) return null;
+  const { slug } = key;
+  // key.first is deliberately NOT used as a fallback: matching on the first token
+  // alone made "Acme" resolve an unrelated "Acme Bank" file, and matchesTailoredCv
+  // already requires the cv- prefix AND a token boundary (#2156, #3214).
+  const matches = files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug));
   if (!matches.length) return null;
-  matches.sort((a, b) => fs.statSync(path.join(dir, b)).mtimeMs - fs.statSync(path.join(dir, a)).mtimeMs);
-  return path.join(dir, matches[0]);
+  const sorted = sortNewestFirst(dir, matches);
+  if (!sorted.length) return null;
+  return path.join(dir, sorted[0]);
 }
 
 /**

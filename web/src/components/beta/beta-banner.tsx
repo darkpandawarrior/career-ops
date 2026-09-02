@@ -3,8 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Bug, X, ShieldCheck, ThumbsUp, Search, Loader2 } from "lucide-react";
 import { collect, fingerprint, issueBody, issueUrl, type Diag } from "@/lib/report/report";
-import { searchIssues, type SimilarIssue } from "@/lib/report/similar-issues";
+import { searchIssues } from "@/lib/beta/issue-search.mjs";
 import "@/lib/report/logbuf"; // install the client error ring-buffer (side-effect)
+
+type SimilarIssue = { number: number; title: string; url: string };
+
+// Dupe-deflection at write (the maintainer's #1 triage cost): search open
+// issues client-side via GitHub's public search API — no key, no server of
+// ours. The search itself lives in lib/beta/issue-search.mjs, which returns
+// null when it could NOT run rather than folding that into an empty array —
+// see that file for the two days of silent false negatives that cost us.
+// Same repo report.ts already points "file a bug" at (this fork's own).
+const REPO = "kirklazar-android/hiresignal";
+const findSimilar = (q: string) => searchIssues(q, REPO, fetch);
 
 // Beta/RC differentiator: a small version+channel pill (only on a pre-release
 // channel) + a one-click "Report a bug" that opens a PRE-FILLED GitHub issue. No
@@ -17,6 +28,9 @@ export function BetaBanner() {
   const [diag, setDiag] = useState<Diag | null>(null);
   const [similar, setSimilar] = useState<SimilarIssue[]>([]);
   const [checking, setChecking] = useState(false);
+  // Distinct from "similar is empty": one means we looked and found nothing,
+  // the other means we could not look. Merging them is the bug this fixes.
+  const [searchFailed, setSearchFailed] = useState(false);
   // Debounces the free-text search once the user has opted in (see checkExisting) so
   // repeated clicks/edits don't spam the API — the click is what gates the network
   // call at all, the debounce just coalesces the calls after that consent is given.
@@ -74,8 +88,11 @@ export function BetaBanner() {
     // Exact-match search by fingerprint only — a content-free co-web-<hash>, never
     // free text — so this is safe to fire the moment the report modal opens (the
     // user has already committed to reporting a bug by clicking the trigger above).
-    searchIssues(`in:body "${fingerprint(d)}"`).then((found) => {
-      if (found.length) setSimilar(found);
+    // Fired without the user asking, so a failure here stays silent: an error
+    // about a question nobody asked is noise. The explicit "check existing"
+    // button below is where a failure has to be visible.
+    findSimilar(`in:body "${fingerprint(d)}"`).then((found) => {
+      if (found?.length) setSimilar(found);
     });
   };
 
@@ -88,9 +105,17 @@ export function BetaBanner() {
     if (!words) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     setChecking(true);
+    setSearchFailed(false);
     debounceRef.current = setTimeout(async () => {
-      const found = await searchIssues(`label:web-alpha ${words}`);
+      const found = await findSimilar(`label:web-alpha ${words}`);
       setChecking(false);
+      // The user ASKED this question, so the user gets an answer — including
+      // "I could not check". Returning the button to its resting state on a
+      // failed search made it look like a successful search that found nothing.
+      if (found === null) {
+        setSearchFailed(true);
+        return;
+      }
       if (found.length) setSimilar(found);
     }, 500);
   };
@@ -135,6 +160,14 @@ export function BetaBanner() {
               >
                 {checking ? <Loader2 className="size-3 animate-spin" /> : <Search className="size-3" />} Check for existing reports first
               </button>
+            )}
+            {searchFailed && (
+              // Says what to DO, not just what broke: the whole point of the
+              // check is to spare a duplicate, and if we cannot run it the
+              // right move is to file anyway rather than to stall.
+              <p className="mt-2 text-xs text-muted">
+                Couldn&apos;t reach GitHub to check — file it anyway, a duplicate is cheaper than a lost report.
+              </p>
             )}
             <details className="mt-3 rounded-lg border border-border bg-surface/40">
               <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted">Exactly what gets attached — review before sending ↓</summary>

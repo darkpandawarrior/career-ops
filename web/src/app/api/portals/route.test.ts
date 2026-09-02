@@ -17,6 +17,15 @@ import { POST } from "./route";
 const portalsPath = () => path.join(TMP, "portals.yml");
 const examplePath = () => path.join(TMP, "templates", "portals.example.yml");
 
+// Real installs always ship templates/portals.example.yml; tests that exercise
+// the write path (not the seeding path itself) seed a minimal one so a missing
+// template — an installation error under the new contract (see
+// portals-config.mjs) — doesn't mask what the test actually checks.
+function seedTemplate() {
+  fs.mkdirSync(path.join(TMP, "templates"), { recursive: true });
+  fs.writeFileSync(examplePath(), yaml.dump({ title_filter: { positive: [] } }));
+}
+
 function makeReq(body: unknown, raw?: string) {
   return new Request("http://localhost/api/portals", {
     method: "POST",
@@ -75,7 +84,8 @@ describe("POST /api/portals — validation", () => {
 });
 
 describe("POST /api/portals — write behavior", () => {
-  it("creates portals.yml from scratch when no file/template exists", async () => {
+  it("creates portals.yml from a real template when no user file exists yet", async () => {
+    seedTemplate();
     const res = await POST(makeReq({ roles: ["Android Engineer", "Mobile Lead"] }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, roles: 2 });
@@ -88,7 +98,16 @@ describe("POST /api/portals — write behavior", () => {
     ]);
   });
 
+  it("500s as an installation error when neither portals.yml nor its template exist", async () => {
+    // Distinct from a broken USER file (409): nothing to seed from at all means
+    // the install itself is incomplete, not that the user has something to fix.
+    const res = await POST(makeReq({ roles: ["Android"] }));
+    expect(res.status).toBe(500);
+    expect(fs.existsSync(portalsPath())).toBe(false);
+  });
+
   it("trims, drops blanks, and caps roles at 24", async () => {
+    seedTemplate();
     const roles = ["  Android  ", "", "iOS", ...Array.from({ length: 30 }, (_, i) => `R${i}`)];
     const res = await POST(makeReq({ roles }));
     const body = await res.json();
@@ -144,6 +163,7 @@ describe("POST /api/portals — write behavior", () => {
   });
 
   it("writes location_filter.allow when location is a non-empty array", async () => {
+    seedTemplate();
     const res = await POST(makeReq({ roles: ["Android"], location: ["  Pune  ", "Remote", ""] }));
     expect(res.status).toBe(200);
 
@@ -152,6 +172,7 @@ describe("POST /api/portals — write behavior", () => {
   });
 
   it("omits location_filter entirely when location is empty/absent", async () => {
+    seedTemplate();
     const res = await POST(makeReq({ roles: ["Android"], location: [] }));
     expect(res.status).toBe(200);
     expect(readPortals().location_filter).toBeUndefined();
@@ -184,22 +205,29 @@ describe("POST /api/portals — write behavior", () => {
     expect(lf.deny).toEqual(["US"]); // preserved
   });
 
-  it("recovers when an existing portals.yml is malformed yaml (falls back to template, else {})", async () => {
-    // Unparseable portals.yml + no template -> doc resets to {}; positive still written.
-    fs.writeFileSync(portalsPath(), "title_filter: \"unterminated\n  : : :");
+  it("409s and PRESERVES a malformed portals.yml instead of overwriting it with the example", async () => {
+    // The data-loss fix: an existing user-layer file that fails to parse must
+    // never be silently replaced by the shipped template — that's how a real
+    // portals.yml got destroyed before (see portals-config.mjs). The user gets
+    // a 409 (their file to fix), and the file on disk is untouched byte-for-byte.
+    const malformed = "title_filter: \"unterminated\n  : : :";
+    fs.writeFileSync(portalsPath(), malformed);
     const res = await POST(makeReq({ roles: ["Recovered"] }));
-    expect(res.status).toBe(200);
-    expect((readPortals().title_filter as Record<string, unknown>).positive).toEqual(["Recovered"]);
+    expect(res.status).toBe(409);
+    expect(fs.readFileSync(portalsPath(), "utf8")).toBe(malformed);
   });
 
-  it("treats an existing empty portals.yml as {} (js-yaml v5 throws on load(''))", async () => {
+  it("409s on an existing empty portals.yml rather than treating it as {} (js-yaml v5 throws on load(''))", async () => {
+    // An empty file parses to `undefined`, not a mapping — same "broken user
+    // file, don't guess" contract as the malformed case above.
     fs.writeFileSync(portalsPath(), "");
     const res = await POST(makeReq({ roles: ["Recovered"] }));
-    expect(res.status).toBe(200);
-    expect((readPortals().title_filter as Record<string, unknown>).positive).toEqual(["Recovered"]);
+    expect(res.status).toBe(409);
+    expect(fs.readFileSync(portalsPath(), "utf8")).toBe("");
   });
 
   it("coerces non-string role entries to strings before trimming", async () => {
+    seedTemplate();
     const res = await POST(makeReq({ roles: [123, "  Real  ", true] }));
     expect(res.status).toBe(200);
 
