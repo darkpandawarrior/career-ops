@@ -24,11 +24,20 @@ import * as yaml from 'js-yaml';
 // cv-templates.mjs, followup-cadence.mjs, plugins/_engine.mjs, and
 // test-all.mjs — without this, a user with that env var set would get
 // silently different fallback behavior here than everywhere else.
-// User Layer: resolved from the ACTIVE PROFILE's data root, not the cwd. A bare
-// relative default reads whatever directory the command was run from, so this file
-// and its siblings could name different copies and both report success.
-const { dataRoot: PK_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
-const DEFAULT_PROFILE_PATH = process.env.CAREER_OPS_PROFILE || join(PK_DATA_ROOT, 'config/profile.yml');
+// User Layer: resolved from the ACTIVE PROFILE's data root, not the cwd. The old
+// bare-relative default read whatever directory the command ran from, so under
+// `./profile <name>` this fell back to the WRONG profile's target_roles — and
+// because resolveProfileKeywords() fails open to [], that degraded keyword
+// matching silently instead of erroring. The three providers below call it with
+// no argument, so this default is the production path.
+//
+// Resolved at CALL time, not module load: a module-scope const is the right shape
+// for a CLI that runs once, but it freezes the root before any caller (or test)
+// can set CAREER_OPS_ROOT, which is the documented override.
+function defaultProfilePath() {
+  if (process.env.CAREER_OPS_PROFILE) return process.env.CAREER_OPS_PROFILE;
+  return join(resolveCareerOpsRoot(import.meta.url).dataRoot, 'config/profile.yml');
+}
 
 function cleanKeywords(value) {
   const arr = Array.isArray(value) ? value : [];
@@ -62,7 +71,7 @@ export function profileTargetKeywords(profile) {
  * @param {string} [profilePath]
  * @returns {string[]}
  */
-export function resolveProfileKeywords(profilePath = DEFAULT_PROFILE_PATH) {
+export function resolveProfileKeywords(profilePath = defaultProfilePath()) {
   if (!existsSync(profilePath)) return [];
   try {
     const profile = yaml.load(readFileSync(profilePath, 'utf-8')) || {};

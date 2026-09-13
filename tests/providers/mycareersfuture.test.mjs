@@ -205,12 +205,21 @@ try {
     const withTmpCwd = async (setup, run) => {
       const tmp = mkdtempSync(join(tmpdir(), 'career-ops-mycareersfuture-fallback-'));
       const cwdBefore = process.cwd();
+      // CAREER_OPS_ROOT, not just cwd: _profile-keywords.mjs resolves
+      // config/profile.yml from the ACTIVE PROFILE's data root (it used to read
+      // it cwd-relative, which is the bug that made `./profile <name>` fall back
+      // to another profile's target_roles). cwd stays pinned too, so a path that
+      // quietly goes back to following the shell is still caught elsewhere.
+      const rootBefore = process.env.CAREER_OPS_ROOT;
       try {
         setup(tmp);
         process.chdir(tmp);
+        process.env.CAREER_OPS_ROOT = tmp;
         return await run();
       } finally {
         process.chdir(cwdBefore);
+        if (rootBefore === undefined) delete process.env.CAREER_OPS_ROOT;
+        else process.env.CAREER_OPS_ROOT = rootBefore;
       }
     };
 
