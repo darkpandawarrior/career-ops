@@ -2377,11 +2377,11 @@ export function sortOffersByPostedAtDesc(offers) {
   });
 }
 
-export async function appendToPipeline(offers) {
+export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } = {}) {
   if (offers.length === 0) return;
   offers = sortOffersByPostedAtDesc(offers);
 
-  await withPipelineLock(PIPELINE_PATH, async () => {
+  await withPipelineLock(pipelinePath, async () => {
     // Auto-create with standard skeleton if missing (fresh-install guard).
     let text = existsSync(pipelinePath)
       ? readFileSync(pipelinePath, 'utf-8')

@@ -30,7 +30,7 @@ import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { promisify } from 'util';
 import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, NODE, toBashPath } from './tests/helpers.mjs';
-import { collectMjsFiles } from './lib/mjs-files.mjs';
+import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -4009,12 +4009,19 @@ console.log('\n75. JD-archive validator wiring + read-only boundary (#2789)');
 try {
   const jdArchiveSrc = readFile('check-jd-archive.mjs');
 
-  const updaterSrc = readFile('update-system.mjs');
-  const jdArchiveSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
-  if (jdArchiveSysBlock.includes("'check-jd-archive.mjs'")) {
-    pass('check-jd-archive.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
-  } else {
-    fail('check-jd-archive.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
+  // Upstream also asserts check-jd-archive.mjs is listed in update-system.mjs's
+  // SYSTEM_PATHS, so its updater ships the file. This fork has no updater — it
+  // syncs from upstream explicitly — so there is no SYSTEM_PATHS to be in, and
+  // reading update-system.mjs here threw ENOENT and took the whole block (and
+  // the test run after it) down with it.
+  if (fileExists('update-system.mjs')) {
+    const updaterSrc = readFile('update-system.mjs');
+    const jdArchiveSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+    if (jdArchiveSysBlock.includes("'check-jd-archive.mjs'")) {
+      pass('check-jd-archive.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+    } else {
+      fail('check-jd-archive.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
+    }
   }
 
   const pkg = JSON.parse(readFile('package.json'));
