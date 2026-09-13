@@ -48,7 +48,10 @@ const PROFILE_FILE = join(CAREER_OPS_DATA, 'config/profile.yml');
 // errors rethrow, matching readTextIfExists. Identical to the guard in
 // analyze-patterns.mjs so both sites behave the same.
 function withinReports(candidate) {
-  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  // reports/ is USER data, so containment is measured from the data root. Measuring it
+  // from the engine root rejected every report whenever the two roots differ (any profile
+  // run) — the same defect analyze-patterns.mjs carried.
+  const repoRelative = relative(CAREER_OPS_DATA, candidate).split(sep).join('/');
   if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
   let realRoot;
   try {

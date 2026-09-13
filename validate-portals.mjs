@@ -92,7 +92,7 @@ function validateParser(parser, path, errors) {
   }
 }
 
-async function loadProviderIds() {
+export async function loadProviderIds() {
   const ids = new Set();
   if (existsSync(PROVIDERS_DIR)) {
     const files = readdirSync(PROVIDERS_DIR)

@@ -55,16 +55,26 @@ function stamp() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
 }
 
+const DEFAULT_INBOX_REL = 'data/agent-inbox.md';
+
 function ensureGitignored() {
   // The inbox is personal data. On installs whose .gitignore predates this
   // feature, make sure the default path is ignored so a first `add` can't
   // accidentally commit it. Only manages the default, non-overridden path.
-  if (process.env.CAREER_OPS_INBOX || PATH !== 'data/agent-inbox.md') return;
+  //
+  // FORK: PATH resolves through the ACTIVE PROFILE's data root, so it is
+  // ABSOLUTE here. Upstream's default is the relative string, and its guard
+  // `PATH !== 'data/agent-inbox.md'` was therefore always true — this self-heal
+  // never ran once, and the rule it exists to write was never written. Compare
+  // the data-root-relative path instead, and edit the .gitignore belonging to
+  // that root rather than whatever directory the command happened to run from.
+  if (process.env.CAREER_OPS_INBOX || PATH !== join(CAREER_OPS_DATA, DEFAULT_INBOX_REL)) return;
+  const gitignorePath = join(CAREER_OPS_DATA, '.gitignore');
   try {
-    if (!existsSync('.gitignore')) return; // not a git checkout we should touch
-    const text = readFileSync('.gitignore', 'utf8');
-    if (text.split('\n').some((l) => l.trim() === PATH)) return; // already ignored
-    writeFileSync('.gitignore', text.replace(/\s*$/, '') + `\n${PATH}\n`);
+    if (!existsSync(gitignorePath)) return; // not a git checkout we should touch
+    const text = readFileSync(gitignorePath, 'utf8');
+    if (text.split('\n').some((l) => l.trim() === DEFAULT_INBOX_REL)) return; // already ignored
+    writeFileSync(gitignorePath, text.replace(/\s*$/, '') + `\n${DEFAULT_INBOX_REL}\n`);
   } catch { /* best effort — never block queuing on this */ }
 }
 

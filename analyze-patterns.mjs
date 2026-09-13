@@ -23,7 +23,9 @@ import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.m
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+// Fork: reports/ is USER DATA, so containment is measured from the data root,
+// never the engine root — they differ under ./profile <name>.
+const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
   ? join(CAREER_OPS_DATA, 'data/applications.md')
   : join(CAREER_OPS_DATA, 'applications.md');
@@ -863,7 +865,7 @@ function parseTracker() {
 // errors rethrow, matching readTextIfExists. Identical to the guard in
 // upskill.mjs so both sites behave the same.
 function withinReports(candidate) {
-  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  const repoRelative = relative(CAREER_OPS_DATA, candidate).split(sep).join('/');
   if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
   let realRoot;
   try {

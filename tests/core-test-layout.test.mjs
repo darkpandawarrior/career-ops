@@ -10,18 +10,37 @@
 // lib/context-budget.test.mjs sat there with the #2234 guard that every
 // modes/_shared.md heading is classified in SECTION_PRIORITY, so a
 // scoring-critical section cannot silently become compressible. That guard
-// had never run in CI. The sibling check for web/'s own discovery glob is
-// tests/web-test-layout.test.mjs; this is the core half, kept in tests/
-// rather than inline in test-all.mjs so `--only` can reach it.
+// had never run in CI. This is the core half, kept in tests/ rather than
+// inline in test-all.mjs so `--only` can reach it.
 import { pass, fail, ROOT } from './helpers.mjs';
 import { collectMjsFiles } from '../lib/mjs-files.mjs';
-import { relative, sep } from 'path';
+import { relative, sep, dirname, join } from 'path';
+import { readFileSync } from 'fs';
 
 console.log('\ncore test layout — every suite lives where a runner can find it');
 
-// The two trees a runner actually discovers: test-all.mjs's discoverTests()
-// over tests/, and web/'s own `npm test` glob over web/tests/.
+// Trees a runner discovers recursively: test-all.mjs's discoverTests() over
+// tests/, plus web/tests/ upstream-style if it ever comes back.
 const DISCOVERED_ROOTS = ['tests/', 'web/tests/'];
+
+// This fork colocates web node:test suites next to their sources instead of
+// under web/tests/ (fork-adaptations rule 'web-tests-colocated'). They are
+// discovered by web/package.json's `test:engine` script, whose globs are
+// one-level-deep — so read the real globs rather than trusting a prefix: a
+// suite dropped in a directory the script does not list is still invisible.
+const engineScript =
+  JSON.parse(readFileSync(join(ROOT, 'web', 'package.json'), 'utf8')).scripts?.['test:engine'] ?? '';
+const DISCOVERED_DIRS = [
+  ...new Set(
+    engineScript
+      .split(/\s+/)
+      .filter((tok) => tok.endsWith('*.test.mjs'))
+      .map((tok) => `web/${dirname(tok)}/`),
+  ),
+];
+if (engineScript && DISCOVERED_DIRS.length === 0) {
+  fail('web/package.json test:engine matched no *.test.mjs globs: this guard can no longer see web suites');
+}
 
 // collectMjsFiles() skips node_modules, output/, data/ and any nested checkout
 // (a linked worktree marks itself with a `.git` FILE, #3499), so a developer
@@ -35,12 +54,17 @@ if (suites.length === 0) {
   // passing here would report health while checking nothing.
   fail('collectMjsFiles() found no *.test.mjs at all: the walk is broken, not the repo');
 } else {
-  const orphans = suites.filter((rel) => !DISCOVERED_ROOTS.some((dir) => rel.startsWith(dir)));
+  const where = [...DISCOVERED_ROOTS, ...DISCOVERED_DIRS].join(' or ');
+  const orphans = suites.filter(
+    (rel) =>
+      !DISCOVERED_ROOTS.some((dir) => rel.startsWith(dir)) &&
+      !DISCOVERED_DIRS.includes(`${dirname(rel)}/`),
+  );
   if (orphans.length === 0) {
-    pass(`all ${suites.length} *.test.mjs files live under ${DISCOVERED_ROOTS.join(' or ')}`);
+    pass(`all ${suites.length} *.test.mjs files live under ${where}`);
   } else {
     for (const rel of orphans) {
-      fail(`${rel} is a *.test.mjs outside ${DISCOVERED_ROOTS.join(' and ')}: no runner discovers it, move it under tests/`);
+      fail(`${rel} is a *.test.mjs outside ${where}: no runner discovers it, move it under tests/ (or add its directory to web/package.json test:engine)`);
     }
   }
 }

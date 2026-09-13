@@ -19,11 +19,12 @@
  * touches real user data.
  */
 
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
+import { acquirePipelineLock } from './pipeline-lock.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -148,8 +149,18 @@ console.log('6. first add on the default path self-heals .gitignore (idempotent)
 {
   const repo = tmp('inbox-repo-');
   writeFileSync(join(repo, '.gitignore'), 'node_modules\noutput/*\n');
+  // FORK: upstream's default inbox path is the relative string
+  // 'data/agent-inbox.md', so an unset CAREER_OPS_INBOX plus cwd=repo was
+  // enough to sandbox this block. Here the two-roots rule resolves the inbox
+  // from the ACTIVE PROFILE's data root, which ignores cwd — so the same call
+  // wrote 'queue a scan' straight into the maintainer's live
+  // data/agent-inbox.md. CAREER_OPS_ROOT is the documented override for that
+  // root (path-resolver.mjs), and pinning it to the throwaway repo is what
+  // makes this suite honour its own "never touches real user data" contract.
   const addOnce = () => execFileSync(NODE, [CLI, 'add', 'queue a scan'], {
-    cwd: repo, env: { ...process.env, CAREER_OPS_INBOX: '' }, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: repo,
+    env: { ...process.env, CAREER_OPS_INBOX: '', CAREER_OPS_ROOT: repo },
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
   addOnce(); addOnce();
   const gi = readFileSync(join(repo, '.gitignore'), 'utf8');

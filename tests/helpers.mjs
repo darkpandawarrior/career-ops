@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execSync, execFileSync } from 'child_process';
-import { cpSync, existsSync, mkdirSync, rmSync as _rmSync, symlinkSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync as _rmSync, symlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { isNestedCheckout } from '../lib/mjs-files.mjs';

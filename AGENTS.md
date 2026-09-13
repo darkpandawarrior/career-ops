@@ -126,6 +126,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `data/follow-ups.md` | Follow-up history tracker |
 | `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
 | `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner — walks full public ATS aggregator datasets (Greenhouse/Lever/Ashby/Workday) filtered by `portals.yml` title/location filters; respects `data/blacklist.md` (`--include-blacklisted` to bypass); checkpoints every 500 companies, `--resume` continues an interrupted sweep. Complements `scan.mjs`'s company-first model |
+| `audit-portals.mjs` | Content audit of `portals.yml` — the companion to `verify-portals.mjs`, which answers "does this board answer?" but never "*whose* postings are these?". Fetches each enabled board through the same `providers/` modules `scan.mjs` uses and reports provider + posting count + sample titles/locations per entry, verdicts worst-first: `no-provider` (enabled but nothing claims it, so `scan.mjs` skips it silently — the highest-value check), `error`, `empty`, `small`, `ok`. `--baseline prev.json` compares against an earlier `--json` run and flags boards that lost ≥ 50% of their postings, the shape an ATS migration takes. **It cannot detect a well-formed board belonging to the wrong entity** — a parent company's board is full of real jobs — so it surfaces the evidence a reader needs instead of pretending to a verdict (JSON, `--summary`, `--strict`) |
 | `apify-search.mjs` | Broad, query-driven search across LinkedIn/Indeed/Glassdoor/Wellfound via paid Apify actors. **Off by default — costs real money per run.** Opt in with `node scan.mjs --apify` (runs after the zero-token scan) or `node apify-search.mjs` directly; requires `APIFY_TOKEN` in `.env` and reads `broad_search:` in `config/profile.yml`. Distinct from the generic per-company `apify` provider plugin in `plugins/apify/` (one actor per `portals.yml` entry) — this is a whole-board sweep by role+location. |
 | `process-quality.mjs` | Recruiting-process friction signal at company level (reschedules, silence gaps, contradictory feedback) |
 | `rejection-latency.mjs` | Post-interview response-latency signal — flags companies still in `Interview` state whose silence since the last `data/active-interviews.md` round exceeds a courtesy (30d default, configurable) threshold, with a ready-to-copy `data/blacklist.md` suggestion row; suggestion-only, never writes (JSON or `--summary` table output) |
@@ -134,7 +135,9 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `add-entry.mjs` | Backs `/career-ops add` — fetches a project/paper/role URL into cv.md / article-digest.md |
 | `check-liveness.mjs` | Job posting liveness checker |
 | `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
-| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy) + a unified Risk Summary joining the company-risk signals, plus a `## Machine Summary` YAML block for downstream scripts. Header includes `**Legitimacy:** {tier}`. |
+| `fetch-jd.mjs` | JD text from a known ATS API (Greenhouse/Lever/Ashby/Workday — `liveness-api.mjs`'s `JD_TEXT_API_ATS`), no browser needed. Prints the JD on stdout and exits 0 on a hit; exits 1 with empty stdout otherwise, so the caller's existing browser/WebFetch fallback is the next step. Backed by `browser-extract.mjs`'s `fetchJdViaKnownApi()`, the same dispatch its `jd` mode uses |
+| `reports/` | Evaluation reports (format: `{###}-{company-slug}-{YYYY-MM-DD}.md`). Blocks A-F + G (Posting Legitimacy) + a unified Risk Summary joining the company-risk signals, plus a `## Machine Summary` YAML block for downstream scripts. Header includes `**Legitimacy:** {tier}`. **REQUIRED:** a `## Job Description (archived verbatim)` section with the JD's verbatim text, or an equivalent `jds/` capture (#2789). |
+| `check-jd-archive.mjs` | Validates every `reports/*.md` has an archived JD — an embedded `## Job Description` section with substantive content, or a matching `jds/` capture resolved by report number via `jd-capture.mjs`; flags `missing-jd-archive`; read-only (JSON or `--summary` table output) |
 | `modes/titles.md` | `titles` mode — suggests adjacent job titles `portals.yml` isn't scanning for yet |
 | `modes/offer-prep.md` | `offer-prep` mode — reads a received offer letter/contract clause-by-clause against what was promised, before signing or negotiating |
 | `modes/interview-redflag.md` | `interview-redflag` mode — scores interviewer-side red-flag signals from session transcripts (None/Caution/Warning) |
@@ -383,29 +386,37 @@ When spawning headless workers for batch processing, use the appropriate command
 - JDs in `jds/` (referenced as `local:jds/{file}` in pipeline.md)
 - Batch in `batch/` (gitignored except scripts and prompt)
 - Report numbering: sequential 3-digit zero-padded, max existing + 1
+
+**JD archival is REQUIRED, not optional (#2789).** A report's `**URL:**` header is a live pointer, not an archive — it rots once a posting closes. Every report `oferta`/`pdf` writes MUST carry the JD's verbatim text in a `## Job Description (archived verbatim)` section (the primary mechanism — the report is the one artifact guaranteed to get written and tracked); a `jds/` capture named with `archive-posting.mjs --report=N` is an acceptable alternative for a very long JD or a standalone `jd-skill-gap.mjs` run outside a full evaluation. `check-jd-archive.mjs` validates every `reports/*.md` has one or the other and is wired into `test-all.mjs`.
+
 - **RULE: After each batch of evaluations, run `node merge-tracker.mjs`** to merge tracker additions and avoid duplications.
 - **RULE: NEVER create new entries in applications.md if company+role already exists.** Update the existing entry.
 
 ### TSV Format for Tracker Additions
 
-Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slug}.tsv`. Single line, 9 tab-separated columns:
+One TSV file per evaluation at `batch/tracker-additions/{num}-{company-slug}.tsv`: a **header row of column labels**, then exactly one data row.
 
 ```
-{num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}
+num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
+{num}\t{date}\t{company}\t{role}\t{status}\t{score}/5\t{pdf_emoji}\t[{num}](reports/{num}-{slug}-{date}.md)\t{note}\t{url}
 ```
 
-**Column order (IMPORTANT -- status BEFORE score):**
-1. `num` -- sequential number (integer)
-2. `date` -- YYYY-MM-DD
-3. `company` -- short company name
-4. `role` -- job title
-5. `status` -- canonical status (e.g., `Evaluated`)
-6. `score` -- format `X.X/5` (e.g., `4.2/5`)
-7. `pdf` -- `✅` or `❌`
-8. `report` -- markdown link, always written **root-relative**: `[num](reports/...)`
-9. `notes` -- one-line summary
+**Always write the header (#3517).** With it, `merge-tracker.mjs` resolves every field by NAME through the same alias table as the tracker itself (`tracker-aliases.json`), so **column order carries no meaning** — write the fields in whatever order you like, as long as the labels sit above the values. Field meanings: `num` (integer) · `date` (YYYY-MM-DD) · `company` · `role` · `status` (canonical) · `score` (`X.X/5`) · `pdf` (`✅`/`❌`) · `report` (markdown link, always **root-relative**: `[num](reports/...)`) · `notes` (one line) · optional `via`, `location`, `url`.
 
-**Optional extra fields (appended after `notes`):** at most one `via=Firm` tagged field (the agency/recruiter, when the tracker has a Via column — see `modes/tracker.md`) and/or one untagged location value. `merge-tracker.mjs` drops a `via=` value with a warning if the tracker has no Via column yet (`node merge-tracker.mjs --migrate-via` adds it).
+**Header rules** — each violation skips that file loudly rather than merging a shifted row:
+
+- Required labels: `num`, `date`, `company`, `role`, `score`, `status`, `pdf`, `report`. Optional: `notes`, `via`, `location`, `url`. Unrecognized labels are ignored with a warning.
+- Exactly one data row per file (one addition per file is what the merge loop assumes).
+- No label twice.
+- The value under `score` must still read as a score (`X.X/5`, or a sentinel `N/A` / `—` / `-`). This is corroboration, not disambiguation: values written in one order under labels written in another is the transposition bug wearing a header, so it is refused.
+
+**Headerless (legacy, still accepted):** 9 positional fields in the order `num date company role status score pdf report notes`, plus optional trailing fields. Note the transposition: `applications.md` shows **score before status**, the headerless TSV writes **status before score**, and `merge-tracker.mjs` reconciles them by identifying the score cell by content (`looksLikeScoreCell`, #1427). That has an undecidable case — `—` is both a score sentinel (#1799) and a status meaning Discarded (`normalize-statuses.mjs`), so a discarded, never-scored row carries `—` in both cells and is refused rather than guessed at. The header form has no such case, which is why it is the form to emit.
+
+**Backfilled entries with no evaluation (#1799):** a row added retroactively without an evaluation must carry one of the recognized score sentinels — `N/A`, `—` (em dash), or `-` (hyphen) — never blank, never another placeholder. This holds for headed rows too: the sentinel is the tracker's own "no score" convention, not merely an aid to the headerless column-swap guard (`looksLikeScoreCell` in `tracker-parse.mjs`, #1427). In a headerless row an unrecognized placeholder makes score-vs-status ambiguous and the row is skipped with a warning.
+
+**Optional Via field (#1596):** with a header, `via` is an ordinary column carrying the agency name (`Hays`). Headerless, applications through an agency/recruiter append a **tagged** extra field `via={Agency}` (e.g. `via=Hays`) after notes — never positional; the tag is mandatory. A single untagged extra keeps its legacy meaning (location). `merge-tracker.mjs` drops a `via=` value with a warning if the tracker has no Via column yet (`node merge-tracker.mjs --migrate-via` adds it), and rejects ambiguous extras loudly. See `modes/tracker.md`.
+
+**Optional posting URL — the deterministic dedup key:** label it `url` in the header, or (headerless) append it as a trailing field. `merge-tracker.mjs` matches on it FIRST (normalized: tracking params stripped, host lowercased, fragment and trailing slash dropped), and only falls back to the report-number / entry-number / fuzzy company+role tiers for rows that have no URL. A confirmed URL mismatch on both sides is proof the rows are NOT duplicates, the same way a req-number mismatch is (#1524). Detected by its `http(s)://` prefix, so it is order-independent with the optional location field. Additive and backward-compatible: 9-column headerless TSVs and trackers with no `URL` header column behave exactly as before. Backfill existing rows from their reports with `node merge-tracker.mjs --backfill-urls`.
 
 **Note:** In applications.md, score comes BEFORE status. The merge script handles this column swap automatically.
 
@@ -423,6 +434,7 @@ Write one TSV file per evaluation to `batch/tracker-additions/{num}-{company-slu
 6. Normalize statuses: `node normalize-statuses.mjs`
 7. Dedup: `node dedup-tracker.mjs`
 8. **Before marking a generated CV/cover letter ready to submit**, run `node verify-cv-facts.mjs <file>` (no invented metrics) and `node verify-application-match.mjs <file> --company "..." --role "..."` (right company/role actually mentioned, no leaked `{{TEMPLATE}}` tokens or placeholder text). Both exit 1 on failure — fix the draft before it goes in the queue for the user to submit.
+9. **Portal coverage is a separate health axis from portal reachability.** `node verify-portals.mjs` proves each board answers; `node audit-portals.mjs` audits each board's content, since a well-formed board can still belong to the wrong entity and no heuristic catches that — see its own "HONEST LIMIT" note. The offline half of the audit — *which enabled entries does no provider claim?* — is pure config matching, so it runs inside `verify-pipeline.mjs` (check 15) at zero network cost; the live half stays a separate command because it needs a fetch per board. Run the audit after adding companies and periodically thereafter — an entry can rot into uselessness in two ways that reachability checks call healthy: no provider claims its `careers_url` (so `scan.mjs` skips it on every run while it reads as coverage), or it points at a real board belonging to the wrong entity (a parent company, a regional subsidiary, a same-named unrelated tenant). Keep a `--json` snapshot around and pass it as `--baseline` next time to catch ATS migrations, which show up as a board collapsing toward zero rather than 404ing.
 
 ### Canonical States (applications.md)
 

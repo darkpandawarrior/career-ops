@@ -60,7 +60,7 @@
  *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS        stale-lock recovery threshold
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
@@ -68,6 +68,14 @@ import { resolveCareerOpsRoot, resolveTrackerPath as sharedResolveTrackerPath } 
 import { isMainModule } from './lib/is-main-module.mjs';
 import { acquireTrackerLock, canonicalizeTrackerPath, renameSyncWithRetry } from './tracker-utils.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
+// Fourth copy of the directory-lock protocol in this repo. The classifiers,
+// the recovery judgment and the wait policy come from pipeline-lock.mjs so a
+// Windows-contention finding lands in one place instead of four (#2777/#2984);
+// a private second copy is how lock behaviour drifts in silence.
+import {
+  isMkdirContention, rmLockArtifactSync, createLockWaitPolicy,
+  sameLockDirectory, lockRecoveryVerdict, RECOVER_STALE,
+} from './pipeline-lock.mjs';
 import {
   resolveCadenceConfig,
   normalizeStatus,

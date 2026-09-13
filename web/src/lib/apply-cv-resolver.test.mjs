@@ -80,7 +80,10 @@ async function withFixture(files, fn) {
   const prev = process.env.CAREER_OPS_ROOT;
   process.env.CAREER_OPS_ROOT = root;
   try {
-    return await fn(outputDir);
+    // This fork's resolveTailoredCv takes the caller's resolved profile root as its FIRST
+    // argument (upstream calls careerOpsRoot() internally). Hand the fixture root to the test
+    // so it exercises the same path the routes do via requestRoot().
+    return await fn(outputDir, root);
   } finally {
     if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = prev;
@@ -88,26 +91,26 @@ async function withFixture(files, fn) {
 }
 
 test('resolveTailoredCv: a multi-word company does NOT match a file whose first token happens to be a DIFFERENT, unrelated company (no loose first-token fallback)', async () => {
-  await withFixture([['cv-jane-doe-meta-recruiter-2026-01-01.pdf']], async () => {
+  await withFixture([['cv-jane-doe-meta-recruiter-2026-01-01.pdf']], async (outputDir, root) => {
     // "Meta Platforms" -> slug "meta-platforms". The fixture file was
     // tailored for a company slugged plainly "meta" — a real "first
     // token" fallback would wrongly attach it to a "Meta Platforms"
     // application.
-    const result = await resolveTailoredCv('Meta Platforms');
+    const result = await resolveTailoredCv(root, 'Meta Platforms');
     assert.equal(result, null);
   });
 });
 
 test('resolveTailoredCv: "Meta" does not resolve a file for "Metabase" (token-boundary match)', async () => {
-  await withFixture([['cv-jane-doe-metabase-engineer-2026-01-01.pdf']], async () => {
-    const result = await resolveTailoredCv('Meta');
+  await withFixture([['cv-jane-doe-metabase-engineer-2026-01-01.pdf']], async (outputDir, root) => {
+    const result = await resolveTailoredCv(root, 'Meta');
     assert.equal(result, null);
   });
 });
 
 test('resolveTailoredCv: a real cv-<slug>-*.pdf matches its company', async () => {
-  await withFixture([['cv-jane-doe-acme-engineer-2026-01-01.pdf']], async (outputDir) => {
-    const result = await resolveTailoredCv('Acme');
+  await withFixture([['cv-jane-doe-acme-engineer-2026-01-01.pdf']], async (outputDir, root) => {
+    const result = await resolveTailoredCv(root, 'Acme');
     assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
   });
 });
@@ -118,8 +121,8 @@ test('resolveTailoredCv: newest match wins when multiple CVs exist for the same 
       ['cv-jane-doe-acme-engineer-2026-01-01.pdf', -60000],
       ['cv-jane-doe-acme-engineer-2026-02-01.pdf', 0],
     ],
-    async (outputDir) => {
-      const result = await resolveTailoredCv('Acme');
+    async (outputDir, root) => {
+      const result = await resolveTailoredCv(root, 'Acme');
       assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-02-01.pdf'));
     }
   );
@@ -131,8 +134,8 @@ test('resolveTailoredCv: a cover-*.pdf is never returned, even if newer than the
       ['cv-jane-doe-acme-engineer-2026-01-01.pdf', -60000],
       ['cover-jane-doe-acme-2026-03-01.pdf', 0],
     ],
-    async (outputDir) => {
-      const result = await resolveTailoredCv('Acme');
+    async (outputDir, root) => {
+      const result = await resolveTailoredCv(root, 'Acme');
       assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
     }
   );

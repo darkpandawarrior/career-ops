@@ -86,7 +86,6 @@ import { acquireTrackerLock, canonicalizeTrackerPath, rebuildRow } from './track
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { seedFollowup, SeedError } from './followup-seed.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = process.env.CAREER_OPS_TRACKER
@@ -94,7 +93,10 @@ const APPS_FILE = process.env.CAREER_OPS_TRACKER
   : existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
     ? join(CAREER_OPS_DATA, 'data/applications.md')
     : join(CAREER_OPS_DATA, 'applications.md');
-const STATES_FILE = join(CAREER_OPS_DATA, 'templates/states.yml');
+// templates/states.yml is SYSTEM LAYER: it ships with the code, so it resolves from the
+// ENGINE root. Binding it to the data root made every run with CAREER_OPS_ROOT set (the
+// web dashboard, any ./profile <name>) die with ENOENT before it could read a state.
+const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 
 const EXIT_OK = 0;
 const EXIT_USAGE = 1;
@@ -688,6 +690,15 @@ let followupSeeded = null;
 if (statusChanged && newStatus === 'Applied') {
   try {
     const { seedFollowup } = await import('./followup-seed.mjs');
+    // This fork's followup-seed.mjs resolves both paths itself (env first, then
+    // the ACTIVE PROFILE's data root) and takes no trackerPath/followupsPath
+    // overrides — so the options below reach nothing on their own. The tracker
+    // already arrives through CAREER_OPS_TRACKER; the follow-ups file does not,
+    // and its default is the profile root's data/follow-ups.md. Pointing
+    // CAREER_OPS_FOLLOWUPS at the tracker's own directory is what keeps the
+    // status and the pin in the same place. An explicit env value still wins;
+    // the options stay for the day followup-seed.mjs accepts them.
+    process.env.CAREER_OPS_FOLLOWUPS ||= join(dirname(APPS_FILE), 'follow-ups.md');
     // followupsPath is derived from the tracker's own directory, not left to
     // followup-seed's default. Its default is the REPO's data/follow-ups.md,
     // so with CAREER_OPS_TRACKER pointing elsewhere — tests, and any install

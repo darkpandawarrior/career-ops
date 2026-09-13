@@ -338,7 +338,7 @@ function normalizeSectionTitle(text) {
 }
 
 function sectionKey(text) {
-  const normalized = normalizeSectionTitle(text);
+  const normalized = foldDiacritics(normalizeSectionTitle(text));
   return SECTION_ALIASES.get(normalized) ?? normalized;
 }
 
@@ -1785,4 +1785,4 @@ if (isMain) {
   });
 }
 
-export { normalizeTextForATS };
+export { normalizeTextForATS, sectionKey };
