@@ -266,7 +266,11 @@ const scripts = [
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   // Bare run: no portals.yml in the repo, so it must exit 0 gracefully (and hit
   // no network). The probe logic itself is unit-tested below with a mock.
-  { name: 'verify-portals.mjs', expectExit: 0 },
+  // The one LIVE-NETWORK entry in this registry: it probes every portals.yml board.
+  // Measured at 16-17s locally against the 30s default, which is not headroom — it
+  // timed out once in five runs here, and an intermittently red gate is one people
+  // learn to re-run instead of read. The budget is the flake, not the script.
+  { name: 'verify-portals.mjs', expectExit: 0, timeoutMs: 120_000 },
   // fix-slugs.mjs has no --self-test flag (unlike its siblings above) — its
   // own testable surface is verify-portals.mjs's probe/suggestion logic,
   // which is network-dependent. Same graceful-on-no-portals.yml smoke check
