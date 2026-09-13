@@ -898,6 +898,10 @@ async function main() {
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
     let errors = 0;
+    // Per-source count of boards skipped as known-dead. The fork's skippedDead is
+    // the RUN-wide total; the checkpoint and the per-source summary below both need
+    // the count for THIS source, which is what upstream's deadBoardsSkipped is.
+    let deadBoardsSkipped = 0;
     const truncated = [];
     let consecutiveResolverFailures = 0;
     let resolverOutage = false;
@@ -917,6 +921,7 @@ async function main() {
       // silently skipping or re-scanning boards on --resume.
       if (shouldSkip(deadBoards.get(boardKey(name, entry.name)), sweepStart)) {
         skippedDead++;
+        deadBoardsSkipped++;
         return;
       }
       try {

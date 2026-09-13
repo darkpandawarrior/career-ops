@@ -84,6 +84,51 @@ const CALL_SITES = [
     args: [],
     probe: 'none',
   },
+  {
+    source: 'web/src/app/api/cadence/route.ts',
+    script: 'followup-cadence.mjs',
+    args: ['--json'],
+    probe: 'run',
+  },
+  {
+    // No --json: the script emits JSON by default and REJECTS the flag.
+    // Exit 1 is its "not enough data to analyse yet" contract, and it still
+    // prints the JSON that says so — which is exactly what the route renders.
+    source: 'web/src/app/api/patterns/route.ts',
+    script: 'analyze-patterns.mjs',
+    args: [],
+    probe: 'run',
+    okExit: [0, 1],
+    emitsJson: true,
+  },
+  {
+    // fetch-jd.mjs REQUIRES a url positional and implements no --help, so it
+    // exits 2 on any argv that omits one — there is no way to run it without
+    // putting this suite on the network. The --json literal below is still
+    // covered by the flag-drift check further down.
+    source: 'web/src/app/api/explore/fetch-jd/route.ts',
+    script: 'fetch-jd.mjs',
+    args: ['--json'],
+    probe: 'none',
+  },
+  {
+    // Takes a posting URL and no flags; same no-network reasoning as fetch-jd.
+    source: 'web/src/app/api/liveness/route.ts',
+    script: 'check-liveness.mjs',
+    args: [],
+    probe: 'flags-only',
+  },
+  {
+    // A DISPATCHER, not a call site: it spawns whichever script its OPS table
+    // names, so no single (script, argv) pair describes it. The flags listed are
+    // the union the source carries, and they belong to different scripts —
+    // running them together would be meaningless, hence probe 'none'. The OPS
+    // table itself is covered by the assertion below instead.
+    source: 'web/src/app/api/ops/run/route.ts',
+    script: null,
+    args: ['--verify', '--summary'],
+    probe: 'none',
+  },
 ];
 
 const sandbox = mkdtempSync(join(tmpdir(), 'co-web-argv-'));
@@ -127,7 +172,13 @@ try {
       fail(`${label} — did not run (${result.error?.message || `killed by ${result.signal}`})`);
       continue;
     }
-    if (result.status !== 0) {
+    // Most scripts must exit 0. A few have a DOCUMENTED non-zero contract that the
+    // route still consumes (analyze-patterns exits 1 on "not enough data" while
+    // printing a perfectly good JSON payload saying so), so a site may widen it.
+    // Kept as an explicit per-site allowlist rather than a blanket relaxation:
+    // exit 1 still fails for every script that has not declared it.
+    const okExit = site.okExit || [0];
+    if (!okExit.includes(result.status)) {
       // The flag rejection is the failure this file exists to catch, so name it.
       const why = /unrecognized flag/.test(result.stderr || '')
         ? `${site.script} rejects a flag ${site.source} passes — ${result.stderr.trim()}`
@@ -135,12 +186,12 @@ try {
       fail(`${label} — ${why}`);
       continue;
     }
-    if (site.probe === 'run' && argv.includes('--json')) {
+    if (site.probe === 'run' && (argv.includes('--json') || site.emitsJson)) {
       try {
         JSON.parse(result.stdout);
-        pass(`${label} — exit 0, stdout parses as JSON (${site.source})`);
+        pass(`${label} — exit ${result.status}, stdout parses as JSON (${site.source})`);
       } catch (e) {
-        fail(`${label} — exit 0 but stdout is not JSON: ${e.message}`);
+        fail(`${label} — exit ${result.status} but stdout is not JSON: ${e.message}`);
       }
     } else {
       pass(`${label} — exit 0 (${site.source})`);

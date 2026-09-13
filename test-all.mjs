@@ -261,7 +261,6 @@ const scripts = [
   // dead-boards.test.mjs was worse than duplicated: it was at the root and
   // never registered here, so nothing ran it at all. All of them now live in
   // tests/ and are auto-discovered — one discovery mechanism, one copy.
-  { name: 'lib/context-budget.test.mjs', expectExit: 0 },
   // tracker-columns coverage lives at tests/tracker-columns.test.mjs
   // (auto-discovered) since the header-aware parsing port.
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },

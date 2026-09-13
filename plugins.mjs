@@ -97,7 +97,7 @@ function buildSnapshot() {
 }
 
 async function cmdList() {
-  const cfg = await loadPluginConfig(CAREER_OPS);
+  const cfg = await loadPluginConfig(CAREER_OPS_DATA);
   const overridden = resolveSuccessorIds(CAREER_OPS); // ids where an installed successor is active
   const manifests = discoverPlugins(pluginRoots(CAREER_OPS), overridden);
   if (manifests.length === 0) {
@@ -128,7 +128,7 @@ async function cmdRun(args) {
   const id = positional[0];
   if (!id) { console.error('Usage: node plugins.mjs run <id> [hook] [args…] [--dry-run]'); process.exit(1); }
 
-  const cfg = await loadPluginConfig(CAREER_OPS);
+  const cfg = await loadPluginConfig(CAREER_OPS_DATA);
   const manifest = discoverPlugins(pluginRoots(CAREER_OPS), resolveSuccessorIds(CAREER_OPS)).find(m => m.id === id);
   if (!manifest) { console.error(`Unknown plugin "${id}". Run \`node plugins.mjs list\`.`); process.exit(1); }
 
