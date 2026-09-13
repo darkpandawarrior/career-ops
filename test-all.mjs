@@ -62,8 +62,18 @@ function discoverTests(dir) {
   const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...discoverTests(full));
-    else if (entry.name.endsWith('.test.mjs')) out.push(full);
+    if (entry.isDirectory()) {
+      // A worktree under tests/ is a second checkout of this repository, and
+      // this walker does not merely read what it finds — it hands the files to
+      // the runner. Without this guard a stale checkout's suites execute
+      // against the current tree and the run prints "safe to push/merge" for
+      // them (#3762). `git worktree add` accepts any path, so nothing but this
+      // check keeps one out. Tested on children only: TESTS_DIR is never itself
+      // a checkout root, and the root exemption in `collectMjsFiles` exists for
+      // a case that cannot arise here.
+      if (isNestedCheckout(full)) continue;
+      out.push(...discoverTests(full));
+    } else if (entry.name.endsWith('.test.mjs')) out.push(full);
   }
   return out;
 }
@@ -210,6 +220,7 @@ const scripts = [
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   // career-ops 1.30.0 sync: /calibrate (#3315) ships an inline self-test.
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
+  { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
   // career-ops 1.19.0 scripts with inline self-tests (ported).
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
@@ -229,6 +240,7 @@ const scripts = [
   // career-ops v1.24.0 sync: new standalone tools with inline self-tests.
   { name: 'company-funded.mjs --self-test', expectExit: 0 },
   { name: 'invite-match.mjs --self-test', expectExit: 0 },
+  { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
   // security sync (#2368): untrusted-external-content directive coverage guard.
   { name: 'validate-untrusted-content-coverage.mjs --self-test', expectExit: 0 },
@@ -3939,6 +3951,187 @@ try {
   }
 } catch (e) {
   fail(`Headless evaluator prompt-cache wiring test crashed: ${e.message}`);
+}
+
+console.log('\n74. gmail: isCleanUrl() drops page assets');
+try {
+  const { isCleanUrl } = await import(pathToFileURL(join(ROOT, 'plugins', 'gmail', '_helpers.mjs')).href);
+
+  // The bug: job-alert emails embed a company logo per job. These reached the
+  // pipeline as untitled "job leads" because they are https, carry no tracker
+  // keyword, and sit on the board's own domain.
+  const assets = [
+    'https://80000hours.org/wp-content/uploads/2023/11/acme-160x160.jpeg',
+    'https://example.com/logo.svg?v=2',              // cache-buster after the extension
+    'https://example.com/hero.PNG',                  // extension case is not significant
+    'https://cdn.example.com/anything',              // asset subdomain, no extension
+    'https://images.example.com/x',
+    'https://fonts.googleapis.com/css2?family=Inter', // webfont CSS has no extension
+    'https://example.com/wp-includes/js/x',
+  ];
+  const bad = assets.filter(isCleanUrl);
+  if (bad.length === 0) pass('isCleanUrl() rejects logos, webfonts and asset hosts');
+  else fail(`isCleanUrl() let ${bad.length} asset URL(s) through: ${bad.join(', ')}`);
+
+  // Regression guard: real postings must survive. "gh_src=js" and "/static-site/"
+  // are the shapes most likely to trip a naive asset filter.
+  const postings = [
+    'https://boards.greenhouse.io/acme/jobs/4384681009?gh_src=js',
+    'https://jobs.ashbyhq.com/acme/abc-123',
+    'https://jobs.lever.co/acme/b71cd010-d3cf-446c-80fa',
+    'https://careers.example.com/static-site-engineer',
+    'https://example.com/jobs/senior-media-buyer',
+  ];
+  const lost = postings.filter(u => !isCleanUrl(u));
+  if (lost.length === 0) pass('isCleanUrl() still accepts real job postings');
+  else fail(`isCleanUrl() wrongly rejected: ${lost.join(', ')}`);
+
+  // Pre-existing behaviour must not regress.
+  if (!isCleanUrl('http://example.com/jobs/1') && !isCleanUrl('https://example.com/click/track')
+      && !isCleanUrl('not a url')) {
+    pass('isCleanUrl() keeps rejecting http, trackers and malformed input');
+  } else {
+    fail('isCleanUrl() regressed on http / tracker / malformed input');
+  }
+} catch (e) {
+  fail(`gmail isCleanUrl tests crashed: ${e.message}`);
+}
+
+// check-jd-archive.mjs's own --self-test (invoked above via the CLI-check
+// table) covers the finding logic on synthetic fixtures. This section pins
+// the wiring: the script ships, updates, is documented, the mode files state
+// the archival step as required (not conditional), and the checker stays
+// strictly read-only — it reports missing archives; it must never be able to
+// "fix" one itself by writing a report or a jds/ file.
+
+console.log('\n75. JD-archive validator wiring + read-only boundary (#2789)');
+
+try {
+  const jdArchiveSrc = readFile('check-jd-archive.mjs');
+
+  const updaterSrc = readFile('update-system.mjs');
+  const jdArchiveSysBlock = (updaterSrc.match(/SYSTEM_PATHS\s*=\s*\[([\s\S]*?)\]/) || [, ''])[1];
+  if (jdArchiveSysBlock.includes("'check-jd-archive.mjs'")) {
+    pass('check-jd-archive.mjs is in update-system.mjs SYSTEM_PATHS (shipped + updatable)');
+  } else {
+    fail('check-jd-archive.mjs is NOT in SYSTEM_PATHS — updates would never deliver it');
+  }
+
+  const pkg = JSON.parse(readFile('package.json'));
+  if (pkg.scripts && pkg.scripts['jd-archive'] === 'node check-jd-archive.mjs') {
+    pass('package.json exposes npm run jd-archive');
+  } else {
+    fail('package.json missing the jd-archive script entry');
+  }
+
+  const scriptsDoc = readFile('docs/SCRIPTS.md');
+  if (scriptsDoc.includes('## check-jd-archive') && scriptsDoc.includes('missing-jd-archive')) {
+    pass('docs/SCRIPTS.md documents check-jd-archive (section + finding type)');
+  } else {
+    fail('docs/SCRIPTS.md missing the check-jd-archive section');
+  }
+
+  const agentsDoc = readFile('AGENTS.md');
+  if (agentsDoc.includes('`check-jd-archive.mjs`')) {
+    pass('AGENTS.md Main Files table lists check-jd-archive.mjs');
+  } else {
+    fail('AGENTS.md Main Files table missing check-jd-archive.mjs');
+  }
+  if (/REQUIRED.*Job Description \(archived verbatim\)|Job Description \(archived verbatim\).*REQUIRED/.test(agentsDoc)) {
+    pass('AGENTS.md states the JD-archive section as required, not conditional');
+  } else {
+    fail('AGENTS.md does not state the JD-archive section as required');
+  }
+
+  const ofertaDoc = readFile('modes/oferta.md');
+  if (ofertaDoc.includes('## Job Description (archived verbatim)')) {
+    pass('modes/oferta.md report template carries a Job Description (archived verbatim) section');
+  } else {
+    fail('modes/oferta.md report template missing the Job Description (archived verbatim) section');
+  }
+  if (/JD archival \(required, #2789\)/.test(ofertaDoc)) {
+    pass('modes/oferta.md states JD archival as required (matches the Machine Summary "required" phrasing style)');
+  } else {
+    fail('modes/oferta.md does not state JD archival as a required step');
+  }
+
+  const pdfDoc = readFile('modes/pdf.md');
+  if (!/write the JD to a scratch file[\s\S]{0,20}if it isn't already one/.test(pdfDoc)) {
+    pass('modes/pdf.md no longer phrases JD archival as conditional ("if it isn\'t already one")');
+  } else {
+    fail('modes/pdf.md still phrases JD archival as conditional, not required');
+  }
+  if (pdfDoc.includes('JD archival (required, #2789)')) {
+    pass('modes/pdf.md states JD archival as a required step');
+  } else {
+    fail('modes/pdf.md does not state JD archival as a required step');
+  }
+
+  // Read-only import boundary: the ONLY fs capabilities check-jd-archive.mjs
+  // may hold for scanning reports/jds are readFileSync/readdirSync/existsSync.
+  // It also imports mkdtempSync/mkdirSync/writeFileSync/rmSync — but ONLY for
+  // building its own self-test fixtures in a temp dir, never for reports/ or
+  // jds/. The boundary check below allows the self-test-fixture write APIs by
+  // name but asserts they never appear outside the self-test function body.
+  const SELF_TEST_ONLY_FS = new Set(['mkdtempSync', 'mkdirSync', 'writeFileSync', 'rmSync']);
+  const READ_ONLY_FS = new Set(['readFileSync', 'readdirSync', 'existsSync']);
+  const fsImportMatch = jdArchiveSrc.match(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?fs['"]/);
+  const fsNames = fsImportMatch ? fsImportMatch[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+  const unexpected = fsNames.filter(n => !READ_ONLY_FS.has(n) && !SELF_TEST_ONLY_FS.has(n));
+  if (fsNames.length > 0 && unexpected.length === 0) {
+    pass('check-jd-archive.mjs fs imports are limited to read-only scanning APIs plus self-test-fixture builders');
+  } else {
+    fail(`check-jd-archive.mjs fs import boundary violated: ${unexpected.join(', ') || 'no fs import matched'}`);
+  }
+
+  // The self-test-only write APIs must never be called from checkJdArchive,
+  // hasEmbeddedJdArchive, or parseReportFilename — only from runSelfTest.
+  // Extracting that function's body needs brace-counting, not a greedy
+  // regex: `[\s\S]*` backtracks to the LAST `\n}` in the whole file (e.g. the
+  // CLI-invocation block at the end), so `.replace(selfTestBody, '')` could
+  // strip out everything from runSelfTest onward — including real code after
+  // it — and a stray write call there would never get scanned, silently
+  // passing the very boundary check this is meant to enforce (CodeRabbit,
+  // PR #2791). Walk brace depth from the opening `{` instead, so nested
+  // blocks/arrow functions inside runSelfTest don't end the match early
+  // either.
+  const runSelfTestStart = jdArchiveSrc.indexOf('function runSelfTest()');
+  let selfTestBody = '';
+  if (runSelfTestStart !== -1) {
+    const openBrace = jdArchiveSrc.indexOf('{', runSelfTestStart);
+    let depth = 0;
+    let i = openBrace;
+    for (; i < jdArchiveSrc.length; i += 1) {
+      if (jdArchiveSrc[i] === '{') depth += 1;
+      else if (jdArchiveSrc[i] === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    selfTestBody = jdArchiveSrc.slice(openBrace, i + 1);
+  }
+  const outsideSelfTest = jdArchiveSrc
+    .replace(selfTestBody, '')
+    .split('\n')
+    .filter(line => [...SELF_TEST_ONLY_FS].some(fn => line.includes(`${fn}(`)) && !/^\s*import\b/.test(line));
+  if (outsideSelfTest.length === 0) {
+    pass('check-jd-archive.mjs never calls a write-capable fs API outside its own self-test fixtures');
+  } else {
+    fail(`check-jd-archive.mjs calls a write-capable fs API outside runSelfTest: ${outsideSelfTest.join(' | ')}`);
+  }
+
+  if (!/from\s*['"](?:node:)?fs\/promises['"]/.test(jdArchiveSrc)) {
+    pass('check-jd-archive.mjs does not import fs/promises');
+  } else {
+    fail('check-jd-archive.mjs imports fs/promises — write-capable API surface');
+  }
+  if (!/\brequire\s*\(/.test(jdArchiveSrc)) {
+    pass('check-jd-archive.mjs has no require() escape hatch');
+  } else {
+    fail('check-jd-archive.mjs uses require() — bypasses the import whitelist');
+  }
+} catch (e) {
+  fail(`jd-archive wiring check: ${e.message}`);
 }
 
 await runDiscovered();
