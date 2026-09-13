@@ -3,7 +3,7 @@
 // apart from the harness imports and one level of dedent.
 
 import { pass, fail, warn, run, lastRunFailure, ROOT, NODE } from './helpers.mjs';
-import { join } from 'path';
+import { join, sep } from 'path';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { pathToFileURL } from 'url';
 
@@ -62,7 +62,14 @@ if (!existsSync(webLib)) {
     // next, and this section previously covered 4 of the 6 files present.
     let webUnits = [];
     try {
-      webUnits = readdirSync(join(ROOT, 'web', 'src', 'lib'))
+      // RECURSIVE on purpose. This read the top level only, so the 14 suites under
+      // core/, onboarding/, apply/, search/, scoring/, beta/ and home/ were gated by
+      // NOTHING: web's own `test:engine` script globs all eight directories, and
+      // nothing invokes test:engine. That is how a core/ suite sat broken and unrun
+      // since the v1.29.0 sync, and how an onboarding/ suite kept a failing
+      // assertion nobody saw.
+      webUnits = readdirSync(join(ROOT, 'web', 'src', 'lib'), { recursive: true })
+        .map((f) => String(f).split(sep).join('/'))
         .filter((f) => f.endsWith('.test.mjs'))
         .sort()
         .map((f) => `web/src/lib/${f}`);

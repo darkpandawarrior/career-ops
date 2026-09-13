@@ -27,12 +27,18 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { canonicalize, extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const CV_PATH = 'cv.md';
+// User Layer: resolved from the ACTIVE PROFILE's data root, not the cwd. A bare
+// relative default reads whatever directory the command was run from, so this file
+// and its siblings could name different copies and both report success.
+const { dataRoot: JSG_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const CV_PATH = process.env.CAREER_OPS_CV || join(JSG_DATA_ROOT, 'cv.md');
 
 // ── JD skill extraction (regex, no LLM) ─────────────────────────────
 //

@@ -15,11 +15,17 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const STORY_BANK_PATH = 'interview-prep/story-bank.md';
+// User Layer: resolved from the ACTIVE PROFILE's data root, not the cwd. A bare
+// relative default reads whatever directory the command was run from, so this file
+// and its siblings could name different copies and both report success.
+const { dataRoot: MS_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const STORY_BANK_PATH = join(MS_DATA_ROOT, 'interview-prep/story-bank.md');
 
 const args       = process.argv.slice(2);
 const LIST_MODE  = args.includes('--list');
