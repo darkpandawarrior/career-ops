@@ -23,7 +23,11 @@ import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 // multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const PROVIDERS_DIR = join(CAREER_OPS, 'providers');
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+// Anchored to the ACTIVE PROFILE's data root, not the cwd. A bare relative default
+// resolves against wherever the command happened to be run from, so this script and
+// scan.mjs (which anchors PORTALS_PATH) could name different files while both
+// reporting success. An explicit --file stays cwd-relative: the user typed it.
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS_DATA, 'portals.yml');
 
 function add(list, path, message) {
   list.push({ path, message });

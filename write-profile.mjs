@@ -33,8 +33,13 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+const { dataRoot: WP_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+// config/profile.yml is User Layer. This file calls itself the canonical, merge-safe
+// writer for it, and resolved it from the cwd — so the canonical writer wrote to
+// whichever directory it happened to be invoked from.
+const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(WP_DATA_ROOT, 'config/profile.yml');
 const EXAMPLE_PATH = 'config/profile.example.yml';
 
 function parseArgs(argv) {

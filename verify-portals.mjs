@@ -41,6 +41,8 @@ import { existsSync, readFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
+import { join } from 'path';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
@@ -48,7 +50,12 @@ import { asciiFold } from './lib/ascii-fold.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+const { dataRoot: VP_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+// Anchored to the ACTIVE PROFILE's data root, not the cwd. A bare relative default
+// resolves against wherever the command happened to be run from, so this script and
+// scan.mjs (which anchors PORTALS_PATH) could name different files while both
+// reporting success. An explicit --file stays cwd-relative: the user typed it.
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(VP_DATA_ROOT, 'portals.yml');
 
 // The core providers/ directory — the SAME plugins the scanner loads. Resolved
 // from this file's location so it's independent of the caller's cwd.

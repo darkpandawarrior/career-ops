@@ -21,6 +21,7 @@
  */
 
 import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'fs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { checkLivenessViaApi, isAtsPosting } from './liveness-api.mjs';
@@ -131,7 +132,12 @@ if (MARK && dead.length > 0) {
     if (!/\|\s*Dead\b/i.test(marked)) marked += ` | Dead (sweep ${today()})`;
     return marked;
   });
-  writeFileSync(PIPELINE_PATH, out.join('\n'));
+  // ponytail: atomic replace, not a lock. The torn/truncated write is gone; a LOST
+  // UPDATE is not — the read above happens before a multi-minute network pass, so a
+  // scan committing in between is overwritten. Holding the pipeline lock across that
+  // pass would block every scanner for its duration, which is worse. Upgrade path:
+  // re-read under the lock at commit time and re-apply the marks by URL, not by index.
+  writeFileAtomic(PIPELINE_PATH, out.join('\n'));
   console.log(`✅ Marked ${dead.length} confirmed-dead item(s) - [x] (backup: data/pipeline.md.bak)`);
 } else if (MARK) {
   console.log('No confirmed-dead items to mark.');

@@ -22,6 +22,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, realpathSync, statSync } from 'fs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeReportLink } from './tracker-links.mjs';
@@ -311,5 +312,5 @@ if (DRY_RUN) {
 
 const backupPath = `${PIPELINE_FILE}.pre-reconcile.bak-${Date.now()}`;
 copyFileSync(PIPELINE_FILE, backupPath);
-writeFileSync(PIPELINE_FILE, newContent);
+writeFileAtomic(PIPELINE_FILE, newContent);
 console.log(`✅ pipeline.md updated (backup: ${backupPath})`);
