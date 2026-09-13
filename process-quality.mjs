@@ -36,6 +36,7 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { join } from 'path';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
+import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
 
 // Multi-profile support: the data root comes from the shared resolver, not this
 // script's own directory, so CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the
@@ -152,11 +153,9 @@ export function extractFriction(row) {
   return { hasFriction: true, reason: (match[1] || '').trim() };
 }
 
-// A cell carrying no letter and no digit is a PLACEHOLDER, not a value: `?` for
-// an undisclosed employer (#1596), and the tracker's `—`/`-` no-data sentinels.
-function isPlaceholder(value) {
-  return !/[\p{L}\p{N}]/u.test(value);
-}
+// Local alias so the call sites below read unchanged; the definition moved to
+// lib/placeholder-cell.mjs, which was one of two identical copies.
+const isPlaceholder = isPlaceholderCompany;
 
 // --- Core aggregation ---
 //

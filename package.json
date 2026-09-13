@@ -1,6 +1,6 @@
 {
   "name": "hiresignal",
-  "version": "1.31.0",
+  "version": "1.32.0",
   "description": "HireSignal: a local-first AI career dashboard for resume onboarding, job discovery, and fit scoring",
   "private": true,
   "scripts": {
@@ -47,6 +47,10 @@
     "digest": "node weekly-digest.mjs",
     "company:funded": "node company-funded.mjs",
     "freshness": "node check-table-freshness.mjs",
+    "jd-archive": "node check-jd-archive.mjs",
+    "rejection-latency": "node rejection-latency.mjs",
+    "invite-match": "node invite-match.mjs",
+    "paste-reply": "node paste-reply.mjs",
     "gemini:eval": "node gemini-eval.mjs",
     "ollama:eval": "node ollama-eval.mjs",
     "openai:eval": "node openai-eval.mjs",
@@ -54,7 +58,7 @@
     "archive": "node archive-posting.mjs",
     "prepare:application": "node prepare-application.mjs",
     "application:init": "node application-artifacts.mjs --init",
-    "trust:test": "node test-trust-validator.mjs",
+    "trust:test": "node tests/trust-validator.test.mjs",
     "audit:private-data": "node private-data-audit.mjs",
     "postinstall": "npx playwright install chromium --with-deps || echo 'Playwright optional — only needed for browser-based portal scanning. Run: npx playwright install chromium'",
     "test:cv-visual": "playwright test --config=playwright.cv.config.mjs",

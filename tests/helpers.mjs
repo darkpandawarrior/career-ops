@@ -5,6 +5,7 @@ import { execSync, execFileSync } from 'child_process';
 import { cpSync, existsSync, mkdirSync, rmSync as _rmSync, symlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { isNestedCheckout } from '../lib/mjs-files.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -224,6 +225,77 @@ export function lastRunFailure() {
 }
 
 /**
+ * Today as `YYYY-MM-DD` in UTC — the form the scripts under test emit from
+ * their own `today()`.
+ *
+ * @param {Date} [at=new Date()] - Instant to render; injectable for tests.
+ * @returns {string}
+ */
+export function utcDay(at = new Date()) {
+  return at.toISOString().split('T')[0];
+}
+
+/**
+ * Every UTC day an operation bracketed by `before` and `after` could have
+ * observed, inclusive: one when it stayed inside a day, two when it crossed
+ * midnight, and each intervening day for anything longer.
+ *
+ * Returning only the two boundaries would be enough for a run() call left on
+ * its default timeout, but that timeout is caller-overridable, and a child
+ * spanning two midnights can report a day that sits between them. Filling the
+ * range keeps the result a property of the inputs rather than of a timeout
+ * somebody may change later.
+ *
+ * The bounds are ordered before use, so a clock stepped backwards mid-call
+ * (NTP correction on a CI runner) still yields the covering range instead of
+ * an empty one. Either bound unparseable yields [] — including when both are
+ * the same unparseable string, so the answer never depends on which branch a
+ * bad input happens to take.
+ *
+ * @param {string} before - utcDay() read before the operation.
+ * @param {string} after - utcDay() read after it.
+ * @returns {string[]} Ascending, inclusive of both bounds; [] if either is unparseable.
+ */
+export function daysSpanned(before, after) {
+  const start = Date.parse(`${before}T00:00:00Z`);
+  const end = Date.parse(`${after}T00:00:00Z`);
+  if (Number.isNaN(start) || Number.isNaN(end)) return [];
+  if (start === end) return [before];
+  const [lo, hi] = start < end ? [start, end] : [end, start];
+  const days = [];
+  for (let t = lo; t <= hi; t += 86_400_000) {
+    days.push(utcDay(new Date(t)));
+  }
+  return days;
+}
+
+/**
+ * run(), plus the UTC day(s) the child could have seen on its own clock.
+ *
+ * A test that captures the day once and compares it to a date the child
+ * computed for itself is reading the clock twice, and a UTC midnight between
+ * those two reads makes them disagree — turning an otherwise-green run red on
+ * whichever runner happens to straddle the boundary (#3816: macOS crossed
+ * midnight four seconds into test-all §12, while ubuntu and windows reached
+ * the same section after the rollover and passed).
+ *
+ * Bracketing the call removes the race without weakening the assertion: the
+ * child ran somewhere inside [before, after], so its own day is one of the
+ * returned days, and the caller still checks the date is current rather than
+ * merely date-shaped.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} [args=[]]
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {{out: string|null, days: string[]}}
+ */
+export function runAcrossUtcDay(cmd, args = [], opts = {}) {
+  const before = utcDay();
+  const out = run(cmd, args, opts);
+  return { out, days: daysSpanned(before, utcDay()) };
+}
+
+/**
  * The last failure rendered for interpolation into a failure message, or an
  * empty string when nothing has failed, so a caller can append it
  * unconditionally without changing its message on the success path.
@@ -277,6 +349,88 @@ export function formatRunFailure(maxChars = 2000) {
  * @returns {boolean} True when the file exists.
  */
 export function fileExists(path) { return existsSync(join(ROOT, path)); }
+
+/**
+ * Recursively collect files under `dir` whose basename matches `match`.
+ *
+ * Deterministic by construction: entries are sorted lexicographically at every
+ * level, so the result is identical on every run and every OS — the same
+ * property test-all.mjs's own `tests/` discovery relies on (#1440).
+ *
+ * A missing `dir` yields `[]` rather than throwing, so the caller reports its
+ * own contract failure (e.g. "discovery is empty") instead of the run dying
+ * mid-traversal with an ENOENT that says nothing about what was expected.
+ *
+ * @param {string} dir - Absolute directory to walk.
+ * @param {RegExp} match - Tested against each entry's basename.
+ * @param {Set<string>} [skipDirs] - Directory names never descended into.
+ * @returns {string[]} Absolute paths, parents before children.
+ */
+export function walkFiles(dir, match, skipDirs = new Set()) {
+  if (!existsSync(dir)) return [];
+  const out = [];
+  const entries = readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      // A linked worktree carries a `.git` FILE, so a caller's `skipDirs` set —
+      // which matches by NAME — never fires on one, and the walk descends into a
+      // whole second checkout of this repository (#3499, #3762). The caller's
+      // own set stays authoritative for everything else.
+      if (isNestedCheckout(full)) continue;
+      if (!skipDirs.has(entry.name)) out.push(...walkFiles(full, match, skipDirs));
+    } else if (match.test(entry.name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/**
+ * Make one of the repo's own dependencies resolvable from a sandbox Node cannot
+ * reach `ROOT/node_modules` from.
+ *
+ * The PDF sandboxes are created under `ROOT/output` and run a copy of
+ * generate-pdf.mjs, whose siblings theme-style.mjs and tracker-utils.mjs both
+ * `import * as yaml from 'js-yaml'`. That specifier resolves by walking parent
+ * directories up into `ROOT/node_modules`, and the walk starts from the
+ * importer's REALPATH, because --preserve-symlinks is off by default. On a
+ * checkout whose `output/` is symlinked out of the repo -- the layout people
+ * adopt as the manual workaround for #524 -- the walk begins outside the repo,
+ * never reaches `ROOT/node_modules`, and every spawned script dies with
+ * ERR_MODULE_NOT_FOUND before parsing a single argument. The suite then reports
+ * 20 behaviour regressions in assertions that never ran (#3165).
+ *
+ * Relocating those sandboxes to `tmpdir()` does NOT fix this: tmpdir is outside
+ * the repo too. They work today only because `ROOT/output` happens to be
+ * physically inside it, which is the assumption worth removing rather than
+ * relocating. Linking the package into the sandbox's own `node_modules` --
+ * beside the `playwright` stub each sandbox already writes there -- makes the
+ * sandbox self-sufficient wherever it physically lives.
+ *
+ * @param {string} sandboxDir - Sandbox root; its `node_modules/` is created if absent.
+ * @param {string} pkgName - Package directory name under `ROOT/node_modules`.
+ * @returns {string} Path to the package as seen from inside the sandbox.
+ */
+export function linkRepoPackage(sandboxDir, pkgName) {
+  const source = join(ROOT, 'node_modules', pkgName);
+  const dest = join(sandboxDir, 'node_modules', pkgName);
+  if (existsSync(dest)) return dest;
+  if (!existsSync(source)) {
+    throw new Error(`linkRepoPackage: ${pkgName} is not installed at ${source} -- run npm install`);
+  }
+  mkdirSync(dirname(dest), { recursive: true });
+  try {
+    // 'junction' is ignored on POSIX, and on Windows it is the one link type
+    // granted without Developer Mode or elevation -- the privilege whose absence
+    // aborted a whole suite in #2828. The copy below is the last resort.
+    symlinkSync(source, dest, 'junction');
+  } catch {
+    cpSync(source, dest, { recursive: true });
+  }
+  return dest;
+}
 
 let bashCache = null;
 let bashSourceCache = null;
@@ -427,42 +581,6 @@ export async function captureConsoleErrors(fn) {
   }
 }
 
-/**
- * Make one of the repo's own dependencies resolvable from a sandbox Node cannot
- * reach `ROOT/node_modules` from.
- *
- * A script copied into an isolated sandbox and spawned there resolves a bare
- * import specifier (`import * as yaml from 'js-yaml'`) by walking up from its
- * own REALPATH into a `node_modules` directory. On a checkout whose sandbox
- * root is physically outside the repo — or reached through a symlink — that
- * walk never finds `ROOT/node_modules`, and the spawned script dies with
- * ERR_MODULE_NOT_FOUND before it can parse a single argument (#3165). Linking
- * the package into the sandbox's own `node_modules` — beside the `playwright`
- * stub a sandbox typically writes there — makes the sandbox self-sufficient
- * wherever it physically lives.
- *
- * @param {string} sandboxDir - Sandbox root; its `node_modules/` is created if absent.
- * @param {string} pkgName - Package directory name under `ROOT/node_modules`.
- * @returns {string} Path to the package as seen from inside the sandbox.
- */
-export function linkRepoPackage(sandboxDir, pkgName) {
-  const source = join(ROOT, 'node_modules', pkgName);
-  const dest = join(sandboxDir, 'node_modules', pkgName);
-  if (existsSync(dest)) return dest;
-  if (!existsSync(source)) {
-    throw new Error(`linkRepoPackage: ${pkgName} is not installed at ${source} -- run npm install`);
-  }
-  mkdirSync(dirname(dest), { recursive: true });
-  try {
-    // 'junction' is ignored on POSIX, and on Windows it is the one link type
-    // granted without Developer Mode or elevation. The copy below is the last
-    // resort.
-    symlinkSync(source, dest, 'junction');
-  } catch {
-    cpSync(source, dest, { recursive: true });
-  }
-  return dest;
-}
 
 /**
  * Build a git environment nothing ambient can reach into.
@@ -507,4 +625,64 @@ export function hermeticGitEnv(gitConfigPath, base = process.env) {
   delete env.GIT_CONFIG_PARAMETERS;
   delete env.GIT_CONFIG;
   return env;
+}
+
+/**
+ * Can a directory write-deny actually stop THIS process from creating a file?
+ *
+ * Two suites arrange a write failure by making the tracker's directory
+ * unwritable and asserting the structured error that follows. An elevated
+ * Windows shell is not bound by that ACE: the temp-file write lands, the CLI
+ * exits 0, and the assertion reports `code=0 json=undefined`, which reads like
+ * the CLI is broken rather than like a setup step that could not be arranged
+ * (#3423). That is the same "permissions do not apply to me" case those suites
+ * already skip for root on POSIX, so it takes the same loud skip.
+ *
+ * Measured, never inferred: this performs the very operation those tests depend
+ * on - apply the deny, then create a file with the same fs API - instead of
+ * asking a proxy whether the shell is elevated. A proxy is the wrong tool here.
+ * A restricted token still lists the Administrators SID in `whoami /groups`
+ * (present for deny only), and inside one elevated token PowerShell's
+ * Set-Content is refused while Node's writeFileSync succeeds, so "is elevated"
+ * and "can still write" are genuinely different questions.
+ *
+ * Fails toward RUNNING the assertion: if the probe cannot be arranged at all
+ * (no icacls, a non-zero exit, anything thrown) it answers true so the caller
+ * still executes its check. A skip on an inconclusive probe would quietly turn
+ * "the failure could not be arranged" into "the failure handling is fine",
+ * which is the blind spot those assertions exist to catch.
+ *
+ * Lives here rather than in each suite because the two copies of this setup
+ * have already drifted once: `tests/mark-pdf-ready.test.mjs` says it mirrors
+ * `set-status-tests.mjs`, and it mirrored this bug along with the arrangement.
+ *
+ * @returns {boolean} true when the deny binds, or when it could not be evaluated.
+ */
+export function directoryDenyBinds() {
+  let probeDir = null;
+  try {
+    probeDir = mkdtempSync(join(tmpdir(), 'co-denyprobe-'));
+    execFileSync('icacls', [probeDir, '/deny', '*S-1-1-0:(WD,AD)'], { stdio: 'ignore' });
+    try {
+      writeFileSync(join(probeDir, 'canary.tmp'), 'x');
+      return false;
+    } catch {
+      return true;
+    }
+  } catch {
+    return true;
+  } finally {
+    if (probeDir) {
+      // Cleanup must not escape this function. A throw from `finally` replaces
+      // the value the try block already computed, so a failed rmSync would turn
+      // a decided probe into an exception and take both callers down with it -
+      // the opposite of the fail-toward-running-the-assertion contract above.
+      // Windows makes that reachable: rmSync can answer EPERM for a while after
+      // a child exits (the reason the wrapper retries at all), and this
+      // directory carries a deny ACE. A leaked temp directory is the cheaper
+      // failure.
+      try { execFileSync('icacls', [probeDir, '/remove:d', '*S-1-1-0'], { stdio: 'ignore' }); } catch {}
+      try { rmSync(probeDir, { recursive: true, force: true }); } catch {}
+    }
+  }
 }

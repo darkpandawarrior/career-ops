@@ -259,6 +259,185 @@ function isAlreadySeeded(content, appNum) {
   return hasFollowupTableRow(content, appNum);
 }
 
+// --- Locking (mirrors merge-tracker.mjs's tracker lock, scoped to follow-ups) --
+
+function pathIsInside(childPath, parentDir) {
+  const relativePath = relative(parentDir, childPath);
+  return relativePath === '' || (relativePath !== '..' && !relativePath.startsWith(`..${sep}`) && !isAbsolute(relativePath));
+}
+
+function resolveFollowupsLockDir(envValue, lockKey) {
+  const tmpRoot = realpathSync(tmpdir());
+  const fallback = join(tmpRoot, `${FOLLOWUPS_LOCK_PREFIX}${lockKey}.lock`);
+  if (!envValue || !isAbsolute(envValue)) return fallback;
+
+  const candidate = resolve(envValue);
+  const parentDir = dirname(candidate);
+  const canonicalParent = existsSync(parentDir) ? realpathSync(parentDir) : resolve(parentDir);
+  if (!pathIsInside(canonicalParent, tmpRoot)) return fallback;
+  if (!basename(candidate).startsWith(FOLLOWUPS_LOCK_PREFIX)) return fallback;
+  return candidate;
+}
+
+function resolveLockDir(explicitLockDir, followupsPath) {
+  if (explicitLockDir) return explicitLockDir;
+  const lockKey = createHash('sha256').update(followupsPath).digest('hex').slice(0, 16);
+  return resolveFollowupsLockDir(process.env.CAREER_OPS_FOLLOWUPS_LOCK, lockKey);
+}
+
+function sleep(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
+function readLockOwner(lockDir) {
+  try {
+    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+// The recovery judgment comes from pipeline-lock rather than a fourth copy of
+// it, for the reason stated at the import: a finding lands once. This file's
+// copy had drifted twice over — it still answered a bare boolean, so "the
+// directory was gone when I looked" reached the caller as a licence to DELETE
+// whatever is at that path now, and it predated #2984, so an unreadable owner
+// stamp fell through to the age rule and could condemn a live lock.
+
+/**
+ * Acquire an exclusive filesystem lock covering the read-check-append
+ * critical section for data/follow-ups.md. Mirrors merge-tracker.mjs's
+ * tracker lock: atomic `mkdirSync`, an `owner.json` with pid/timestamp,
+ * pid-alive detection, stale-lock recovery, and retry/backoff.
+ *
+ * @param {string} lockDir
+ * @param {string} followupsPath - Recorded in owner.json for diagnostics.
+ * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options] - `staleMs` is floored at OWNERLESS_GRACE_MS.
+ * @returns {Promise<{release: Function}>}
+ */
+async function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const retryMs = options.retryMs ?? 75;
+  const staleMs = options.staleMs ?? 10 * 60_000;
+  const recoverGuardDir = `${lockDir}.recover`;
+  const token = randomUUID();
+
+  // Jitter and the progress rule come from pipeline-lock rather than a fourth
+  // hand-rolled wait loop. This file slept a FIXED retryMs and bounded the loop
+  // on plain elapsed time, so it carried both defects #2506 and #2835 removed
+  // from the definition: waiters woke in lockstep and re-raced, and a caller
+  // waiting on a healthy lock being handed round briskly was killed anyway.
+  //
+  // There is no separate maxWaitMs knob here, so no hardDeadline is passed and
+  // the policy applies its own ceiling. Writing one out here would put a fourth
+  // copy of that bound in the tree, and a copy that drifts changes retry timing
+  // silently — nothing fails, so nothing reports it (#3895).
+  const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
+    timeoutMs, retryMs, deadline: Date.now() + timeoutMs,
+  });
+  for (;;) {
+    if (holderStillWedged() || ceilingReached()) break;
+    try {
+      mkdirSync(lockDir);
+      writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
+        pid: process.pid,
+        token,
+        startedAt: new Date().toISOString(),
+        followups: followupsPath,
+      }, null, 2));
+
+      let released = false;
+      return {
+        release() {
+          if (released) return;
+          released = true;
+          // The token says the stamp is ours. It does NOT say the directory
+          // still is: between reading the stamp and the rm, a reclaimer can
+          // delete this lock and a new holder can create one at the same path,
+          // and the rm then lands on theirs. pipeline-lock, portal-health-lock
+          // and tracker-utils all bracket the rm with a stat either side and
+          // compare identity; this file was the one that did not, so it is the
+          // one that could free someone else's critical section.
+          let before;
+          try {
+            before = statSync(lockDir);
+          } catch {
+            return; // already gone
+          }
+          const owner = readLockOwner(lockDir);
+          if (owner?.token !== token) return; // reclaimed by someone else
+          let after;
+          try {
+            after = statSync(lockDir);
+          } catch {
+            return;
+          }
+          if (!sameLockDirectory(before, after)) return; // swapped underneath us
+          // Best-effort: ownership is verified, so a contended rm (Windows
+          // EPERM/EBUSY while another process stats it) must not kill a caller
+          // whose work already succeeded. The orphan ages out via lockRecoveryVerdict.
+          rmLockArtifactSync(lockDir);
+        },
+      };
+    } catch (err) {
+      // Not just EEXIST: Windows reports a directory that is mid-create or
+      // mid-remove by another process as EPERM/EACCES. That is contention, not
+      // failure — treating it as fatal kills a concurrent writer and loses its
+      // write (#2777, measured on windows-latest).
+      if (!isMkdirContention(err)) throw err;
+      noteWaiting();
+
+      let hasRecoverGuard = false;
+      try {
+        mkdirSync(recoverGuardDir);
+        hasRecoverGuard = true;
+      } catch (guardErr) {
+        if (!isMkdirContention(guardErr)) throw guardErr;
+        // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means
+        // the guard is mid-flight right now, and reasoning about the age of a
+        // directory we cannot stat reliably would evict a live guard.
+        if (guardErr.code !== 'EEXIST') {
+          await sleep(backoffMs());
+          continue;
+        }
+        // A process killed between creating the guard and its cleanup leaves
+        // the guard behind forever, permanently disabling stale-lock recovery
+        // for every future writer. The guard normally lives for milliseconds,
+        // so an old one is judged stale by the same age rule as a
+        // metadata-free lock and removed; the next loop iteration can then
+        // take the guard and run recovery. Removing it unconditionally would
+        // instead let two writers recover the same lock at once, which is
+        // exactly what the guard exists to prevent.
+        // STALE only: a guard already gone needs no eviction, and evicting on
+        // that answer deletes the guard another caller has just taken.
+        if (lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
+          rmLockArtifactSync(recoverGuardDir);
+        }
+      }
+
+      if (hasRecoverGuard) {
+        try {
+          // STALE only. VANISHED means the lock was absent when we looked, and
+          // by the time this line runs another acquirer may have won the mkdir
+          // and be partway through writing owner.json — deleting on that answer
+          // destroys a live lock and kills its winner with ENOENT.
+          if (lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE) {
+            if (rmLockArtifactSync(lockDir)) continue;
+            // rm hit contention: another process is touching the stale lock at
+            // this instant — back off instead of treating the collision as fatal.
+          }
+        } finally {
+          rmLockArtifactSync(recoverGuardDir);
+        }
+      }
+
+      await sleep(backoffMs());
+    }
+  }
+
+  throw new SeedError('LOCK_TIMEOUT', `Timed out waiting for follow-ups lock at ${lockDir}`);
+}
+
 // --- Atomic write (mirrors writeFileAtomic in tracker.mjs / merge-tracker.mjs) --
 
 function writeFileAtomic(filePath, content) {
@@ -314,6 +493,11 @@ export async function withFollowupsLock(followupsPath, options, fn) {
  * @param {object} [options]
  * @param {string} [options.date] - Explicit apply date (YYYY-MM-DD), already validated.
  * @param {boolean} [options.force] - Bypass idempotency guard and the Applied-status guard.
+ * @param {boolean} [options.assumeApplied] - Relax the Applied-status guard ONLY, keeping
+ *   idempotency intact. For a caller that is about to make the row Applied and wants a
+ *   truthful preview of what will happen: `force` would answer that question by also
+ *   suppressing `already-seeded`, so the preview would promise a pin the real run then
+ *   declines to write. This says "treat the status as Applied", not "write regardless".
  * @param {boolean} [options.dryRun] - Compute and report, but write nothing (no lock taken).
  * @param {string} [options.lockDir]
  * @param {number} [options.lockTimeoutMs]
@@ -342,7 +526,7 @@ export async function seedFollowup(appNum, options = {}) {
   }
 
   const normalized = normalizeStatus(row.status);
-  if (normalized !== 'applied' && !options.force) {
+  if (normalized !== 'applied' && !options.force && !options.assumeApplied) {
     throw new SeedError('NOT_APPLIED', `Application #${appNum} is not Applied (status: "${row.status.trim()}"); use --force to seed anyway`);
   }
 

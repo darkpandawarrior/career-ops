@@ -58,23 +58,19 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { normalizeCompanyName, companySimilarity } from './invite-match.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-
-// Fork adaptation (rule 5): tracker DATA resolves through dataRoot, not the script directory —
-// upstream reads it relative to the script, which is the wrong tracker under multi-profile.
-// STATES_FILE and gitBlameTimestamp's cwd below stay on engineRoot on purpose: templates/states.yml
-// is an engine asset and git needs the repo root, neither of which moves per profile.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const DEFAULT_APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
-  ? join(CAREER_OPS_DATA, 'data/applications.md')
-  : join(CAREER_OPS_DATA, 'applications.md');
-const DEFAULT_INTERVIEWS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/active-interviews.md'))
-  ? join(CAREER_OPS_DATA, 'data/active-interviews.md')
-  : join(CAREER_OPS_DATA, 'active-interviews.md');
+// Fork adaptation (rule 5): tracker DATA resolves through dataRoot, not the script directory.
+// CAREER_OPS stays the ENGINE root on purpose: templates/states.yml is an engine asset and
+// git blame needs the repo root, neither of which moves per profile.
+const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const DEFAULT_APPS_FILE = resolveTrackerPath(DATA_ROOT);
+const DEFAULT_INTERVIEWS_FILE = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
+  ? join(DATA_ROOT, 'data/active-interviews.md')
+  : join(DATA_ROOT, 'active-interviews.md');
 
 // --- CLI args ---
 const args = process.argv.slice(2);

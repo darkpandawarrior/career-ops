@@ -1,3 +1,19 @@
+// @ts-check
+/**
+ * tests/trust-validator.test.mjs — Comprehensive test suite for trust validation.
+ * Run: node test-all.mjs --only trust-validator
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
+ *
+ * Tests cover:
+ *   - buildTrustValidator: disabled/enabled, config merging
+ *   - validateUrl: valid, malformed, non-http protocols
+ *   - matchesDomainList: exact, subdomain, no-match
+ *   - companyMatchesHostname: slug, word-level, edge cases
+ *   - Score calculation, clamping, and classification
+ *   - Integration: multiple flags stacking
+ */
 // tests/trust-validator.test.mjs — providers/_trust-validator.mjs, end to end.
 //
 // Lived at the repo root as test-trust-validator.mjs, where discovery does not

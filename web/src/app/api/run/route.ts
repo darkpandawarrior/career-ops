@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCli } from "@/lib/clis";
-import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, hasNewCompletedReport, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { readMemory, findReportFile, readLanguageConfig } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
@@ -240,8 +240,16 @@ export async function POST(req: Request) {
       // generate-pdf.mjs mid-render. 600s agent / ~200s render is ample —
       // a Chromium PDF render normally takes low tens of seconds even with a
       // cold Playwright launch.
-      const killMs = kind === "pdf" ? 600_000 : 285_000;
+      // 285_000 here killed real evaluations mid-run and then misreported the
+      // SIGTERM as "didn't save a report", blaming the CLI for a limit we
+      // imposed (#3124). killMsForKind keeps pdf's render headroom and gives a
+      // plain evaluate 780s, ~20s under maxDuration for a graceful shutdown.
+      const killMs = killMsForKind(kind);
+      // Set by the killer so the close handler can tell "we timed it out" apart
+      // from "the CLI exited on its own" — different failures, different message.
+      let killedByTimeout = false;
       killer = setTimeout(() => {
+        killedByTimeout = true;
         try { child.kill("SIGTERM"); } catch { /* ignore */ }
       }, killMs);
       // Declared before send() so send() can clear it the moment it sees the
@@ -474,6 +482,14 @@ export async function POST(req: Request) {
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit,
         // real output, AND (for evaluations) a report actually written. Anything else
         // is surfaced — an errored run must never be banked as a confident score.
+        // A run WE stopped at our own time limit is not a CLI that failed: saying
+        // "didn't save a report" sends the user to re-check a CLI that was working
+        // (#3124). code is null here (killed by signal), which the gates below would
+        // otherwise read as a generic non-clean exit.
+        if (killedByTimeout) {
+          send({ type: "error", msg: timeoutMessage(killMs, kind) });
+          return close();
+        }
         const baseErr = noOutputError();
         if (baseErr) {
           send({ type: "error", msg: baseErr });

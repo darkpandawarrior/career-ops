@@ -11,6 +11,7 @@
 
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { isNestedCheckout } from '../lib/mjs-files.mjs';
 import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\nmojibake-canary — double-encoded UTF-8 detection in templates/ and modes/');
@@ -216,6 +217,11 @@ function walkAndCheck(dir, relativePath = '') {
       // text at all. Both tripped this canary on every run — a canary that
       // always fires is a canary nobody reads.
       if (SKIP_DIRS.has(entry.name)) continue;
+      // A checkout placed under templates/ or modes/ is another tree's content,
+      // and mojibake in it is not this repository's defect to report (#3762).
+      // Unlikely there — but "unlikely" is the assumption that let a worktree
+      // under tests/ run its own suites as ours.
+      if (isNestedCheckout(fullPath)) continue;
       walkAndCheck(fullPath, entryRelativePath);
     } else if (entry.isFile()) {
       filesScanned++;
