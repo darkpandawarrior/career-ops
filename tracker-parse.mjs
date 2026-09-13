@@ -52,7 +52,12 @@ export const SCORE_CELL_RE = /^\d+(?:\.\d+)?\/5$/;
 /** @param {string} v @returns {boolean} whether the cell reads as a score. */
 export function looksLikeScoreCell(v) {
   const t = String(v ?? '').replace(/\*\*/g, '').trim();
-  return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP';
+  // '—' and '-' are score SENTINELS (#1799): a discarded, never-scored row carries one.
+  // Upstream has had them since before the v1.32.0 boundary; this fork never absorbed that,
+  // so resolveScoreStatus saw neither cell as a score and refused to order the pair — the
+  // row simply failed to ingest. The genuinely undecidable case (BOTH cells '—') still
+  // returns null there, which is why widening this is safe.
+  return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP' || t === '—' || t === '-';
 }
 
 /**

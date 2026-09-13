@@ -60,12 +60,37 @@ function absoluteRootFor(entryRoot: string): string {
     : path.resolve(careerOpsRoot(), entryRoot);
 }
 
-/** Parse profiles.yml. Returns [] when absent or malformed (single-profile mode). */
+/**
+ * Parse profiles.yml. Returns [] when ABSENT — that is single-profile mode and a
+ * perfectly normal state.
+ *
+ * A file that EXISTS but cannot be read or parsed is NOT that state, and used to
+ * be indistinguishable from it: both returned []. requestRoot() then fell through
+ * to careerOpsRoot(), so one YAML typo silently served the DEFAULT profile's
+ * tracker to a session that had explicitly selected another profile — plausible
+ * output, wrong person's data, nothing in the UI to say so. `registryBroken`
+ * keeps the two apart so requestRoot() can refuse instead of guessing.
+ */
+let registryBroken: string | null = null;
+
+/** Why profiles.yml could not be read this process, or null if it is fine/absent. */
+export function registryFault(): string | null {
+  return registryBroken;
+}
+
 export function readRegistry(): ProfileEntry[] {
   let raw: string;
   try {
     raw = fs.readFileSync(registryPath(), "utf8");
-  } catch {
+    registryBroken = null;
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err?.code === "ENOENT") {
+      registryBroken = null; // absent is the documented single-profile signal
+      return [];
+    }
+    registryBroken = `cannot read ${registryPath()}: ${err?.message ?? String(e)}`;
+    console.error(`[profile-registry] ${registryBroken}`);
     return [];
   }
   try {
@@ -79,7 +104,9 @@ export function readRegistry(): ProfileEntry[] {
         root: p.root as string,
         color: typeof p.color === "string" ? (p.color as string) : undefined,
       }));
-  } catch {
+  } catch (e) {
+    registryBroken = `cannot parse ${registryPath()}: ${(e as Error)?.message ?? String(e)}`;
+    console.error(`[profile-registry] ${registryBroken}`);
     return [];
   }
 }
@@ -134,7 +161,18 @@ export async function requestSlug(): Promise<string | null> {
  */
 export async function requestRoot(): Promise<string> {
   const slug = await requestSlug();
-  return resolveProfileRoot(slug) ?? careerOpsRoot();
+  const root = resolveProfileRoot(slug);
+  if (root) return root;
+  // A slug was explicitly selected but did not resolve, AND the registry is
+  // broken rather than absent: falling back to careerOpsRoot() here would serve
+  // the DEFAULT profile's data under another profile's name. Refuse instead —
+  // an error the user can see beats the wrong person's tracker.
+  if (slug && registryFault()) {
+    throw new Error(
+      `profile "${slug}" selected, but the profile registry is unusable — ${registryFault()}`,
+    );
+  }
+  return careerOpsRoot();
 }
 
 /**

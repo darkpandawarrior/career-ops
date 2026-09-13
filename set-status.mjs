@@ -75,14 +75,22 @@
  *     the note column.
  */
 
-import { readFileSync, existsSync, writeFileSync, renameSync, rmSync, copyFileSync, appendFileSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, copyFileSync, appendFileSync } from 'fs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { join, dirname, basename, resolve } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { randomUUID } from 'crypto';
-import { load as yamlLoad } from 'js-yaml';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { acquireTrackerLock, canonicalizeTrackerPath, rebuildRow } from './tracker-utils.mjs';
+// normalizeCompany/cell/loadCanonicalStates/resolveCanonicalState/writeFileAtomic were
+// PRIVATE COPIES here. Every one was the weaker half of the pair: cell() let invisible
+// control characters through into a tracker row (#3892) while the shared one strips them,
+// normalizeCompany stripped to [a-z0-9] so any non-Latin company name collapsed to the
+// SAME empty key, resolveCanonicalState missed the shared input folding, and
+// writeFileAtomic used a bare rename with no retry. set-status is the main tracker WRITE
+// path, so each of those landed in the user's own applications.md.
+import {
+  acquireTrackerLock, canonicalizeTrackerPath, rebuildRow,
+  normalizeCompany, cell, loadCanonicalStates, resolveCanonicalState, writeFileAtomic,
+} from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -258,85 +266,10 @@ function failUsage(message) {
 // currently only exports rebuildRow — keeping these local avoids widening a
 // shared module's contract for a single new caller) ──────────────────────
 
-/**
- * Normalize company names for same-company lookups.
- * Mirrors merge-tracker.mjs's normalizeCompany so a row one script would
- * match is never missed by another.
- *
- * @param {string} name
- * @returns {string}
- */
-function normalizeCompany(name) {
-  return String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
 
-/**
- * Neutralize characters that would corrupt the applications.md table.
- * Mirrors merge-tracker.mjs's cell() helper.
- *
- * @param {*} v
- * @returns {string}
- */
-function cell(v) {
-  return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' / ').trim();
-}
 
-/**
- * Load the canonical tracker states from templates/states.yml.
- *
- * @param {string} statesPath
- * @returns {{id:string,label:string,aliases:string[]}[]}
- */
-function loadCanonicalStates(statesPath) {
-  const doc = yamlLoad(readFileSync(statesPath, 'utf-8'));
-  if (!doc || !Array.isArray(doc.states)) {
-    throw new Error(`Malformed states file at ${statesPath}: expected a top-level "states" list`);
-  }
-  return doc.states.map(s => ({
-    id: String(s.id ?? ''),
-    label: String(s.label ?? ''),
-    aliases: Array.isArray(s.aliases) ? s.aliases.map(String) : [],
-  }));
-}
 
-/**
- * Resolve user input to a canonical state label, strictly (unknown input
- * returns null rather than defaulting, unlike merge-tracker's lenient batch
- * normalization).
- *
- * @param {string} input
- * @param {{id:string,label:string,aliases:string[]}[]} states
- * @returns {string|null}
- */
-function resolveCanonicalState(input, states) {
-  const clean = String(input ?? '').replace(/\*\*/g, '').trim().toLowerCase();
-  if (!clean) return null;
-  for (const s of states) {
-    if (s.label.toLowerCase() === clean) return s.label;
-    if (s.id.toLowerCase() === clean) return s.label;
-    if (s.aliases.some(a => a.toLowerCase() === clean)) return s.label;
-  }
-  return null;
-}
 
-/**
- * Replace a tracker file atomically using a same-directory temporary file.
- * Mirrors merge-tracker.mjs's writeFileAtomic.
- *
- * @param {string} path
- * @param {string} content
- * @returns {void}
- */
-function writeFileAtomic(path, content) {
-  const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
-  try {
-    writeFileSync(tmpPath, content);
-    renameSync(tmpPath, path);
-  } catch (err) {
-    rmSync(tmpPath, { force: true });
-    throw err;
-  }
-}
 
 // ── state validation (before anything touches the tracker) ──────
 
