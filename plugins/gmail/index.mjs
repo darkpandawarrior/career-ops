@@ -14,6 +14,8 @@
 // Run:  node plugins.mjs run gmail
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { resolveCareerOpsRoot } from '../../path-resolver.mjs';
 import {
   extractUrls, isCleanUrl, isAuthenticEmail, parseRoleAtCompany,
   getMessageBody, companyFromUrl,
@@ -21,7 +23,14 @@ import {
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
-const STATE_PATH = 'data/gmail-state.json'; // the plugin's own processed-id cursor
+// The plugin's own processed-id cursor. User Layer, so it follows the ACTIVE
+// PROFILE's data root — it was cwd-relative, which meant running from anywhere but
+// the data root read an EMPTY cursor and re-processed mail already seen (and wrote a
+// stray data/ tree wherever the command ran). Resolved at call time so CAREER_OPS_ROOT
+// is honoured, not frozen at import.
+function statePath() {
+  return join(resolveCareerOpsRoot(import.meta.url).dataRoot, 'data/gmail-state.json');
+}
 
 /** Exchange the long-lived refresh token for a short-lived access token. */
 async function getAccessToken({ clientId, clientSecret, refreshToken }, fetchFn = globalThis.fetch) {
@@ -44,6 +53,7 @@ async function getAccessToken({ clientId, clientSecret, refreshToken }, fetchFn 
 }
 
 function loadProcessedIds() {
+  const STATE_PATH = statePath();
   if (!existsSync(STATE_PATH)) return new Set();
   try {
     const state = JSON.parse(readFileSync(STATE_PATH, 'utf-8'));
@@ -55,8 +65,11 @@ function loadProcessedIds() {
 
 function saveProcessedIds(ids) {
   try {
-    mkdirSync('data', { recursive: true });
-    writeFileSync(STATE_PATH, JSON.stringify({ processed_message_ids: [...ids] }, null, 2), 'utf-8');
+    const file = statePath();
+    // dirname(file), not a bare 'data': the bare form created a stray data/ under
+    // whatever cwd the run had and then wrote nowhere near it.
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ processed_message_ids: [...ids] }, null, 2), 'utf-8');
   } catch (err) {
     console.warn(`gmail: could not persist processed-id state — ${err.message}`);
   }
