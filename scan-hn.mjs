@@ -16,19 +16,16 @@ try {
 import { readFileSync, existsSync } from 'fs';
 import * as yaml from 'js-yaml';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { appendToPipeline, appendToScanHistory, loadSeenUrls } from './scan.mjs';
+import { appendToPipeline, appendToScanHistory, loadSeenUrls, PORTALS_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 // Import the deterministic provider
 import hnProvider from './providers/hackernews.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 
 // ── Configuration ────────────────────────────────────────────────────
-// dataRoot, matching scan.mjs's own CAREER_OPS_DATA resolution — portals.yml
-// belongs to the ACTIVE profile under the multi-profile setup.
-const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || `${CAREER_OPS_DATA}/portals.yml`;
+// Imported from scan.mjs so it honors CAREER_OPS_PORTALS and the data root (#3510).
 
 function loadKeywords() {
   const defaultKeywords = ["Software Engineer"];
@@ -119,8 +116,15 @@ async function main() {
   if (newOffers.length > 0) {
     await appendToPipeline(newOffers);
     await appendToScanHistory(newOffers, localToday(), 'added');
-    console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
   }
+
+  // Printed on every run, including the zero-match one. This scanner used to
+  // end in silence when nothing matched, which reads identically to a run that
+  // died at the fetch — the summary is what tells those apart (#3560).
+  printScanSummaryHeader('HN Scan', localToday());
+  console.log(`Postings fetched:   ${rawJobs.length}`);
+  console.log(`New offers:         ${newOffers.length}`);
+  if (newOffers.length > 0) console.log(`\n🎉 Success: ${newOffers.length} offers added.`);
 }
 
 if (isMainModule(import.meta.url)) {

@@ -3,11 +3,15 @@
 /**
  * verify-portals.mjs — portal health check for portals.yml.
  *
- * When a company is added to portals.yml, its ATS slug (the path segment in
+ * When an entry is added to portals.yml, its ATS slug (the path segment in
  * `careers_url`, e.g. `jobs.lever.co/<slug>`) is easy to guess wrong — and a
- * wrong slug 404s silently on every future scan, so the company never appears
- * in results and the mistake is invisible. This script probes each company's
- * board and reports which resolve, in two tiers:
+ * wrong slug 404s silently on every future scan, so the entry never appears in
+ * results and the mistake is invisible. This script probes each entry and
+ * reports which resolve, in two tiers (see verifyCompanies() below):
+ *   1. Greenhouse / Ashby / Lever — the URL carries a parseable slug, hit
+ *      directly; `--add` also cross-probes candidate slugs derived from a name.
+ *   2. Every other host (Workday, SmartRecruiters, the aggregator feeds …) —
+ *      routed through the same provider plugins the scanner uses.
  *
  *   1. Greenhouse / Ashby / Lever slugs are probed directly (one JSON request
  *      each), with cross-probe suggestions when a slug 404s.
@@ -23,7 +27,7 @@
  * unresolved (404/wrong) slug so a quiet board isn't mistaken for a typo.
  *
  * Usage:
- *   node verify-portals.mjs                 # sweep tracked_companies in portals.yml
+ *   node verify-portals.mjs                 # sweep tracked_companies + job_boards in portals.yml
  *   node verify-portals.mjs --add cursor    # probe slug variants for one name
  *   node verify-portals.mjs --strict        # exit non-zero if any slug is unresolved
  *   node verify-portals.mjs --file <path>   # use a specific portals file
@@ -383,12 +387,12 @@ function boundedProbeCtx(base) {
 }
 
 /**
- * Probe one non-ATS company through the provider plugin the scanner would use.
+ * Probe one non-ATS entry through the provider plugin the scanner would use.
  *
- * @param {object} entry - tracked_companies entry.
- * @param {object} provider - a provider module ({ id, detect?, fetch }).
- * @param {object} baseCtx - http ctx from makeHttpCtx().
- * @returns {Promise<{provider,status,jobCount?,partial?,httpStatus?,reason?}>}
+ * @param {object} entry - portals.yml entry (tracked_companies or job_boards).
+ * @param {import('./providers/_types.js').Provider} provider
+ * @param {import('./providers/_types.js').Context} baseCtx
+ * @returns {Promise<{provider,status,jobCount?,partial?,httpStatus?,errorKind?,reason?}>}
  *   status is 'live' (postings found), 'empty' (endpoint OK, no postings), or
  *   'missing' (the board 404s/errors — the company would silently drop from
  *   every scan). `partial` marks a live board whose exact count the one-page
@@ -409,7 +413,7 @@ export async function probeProvider(entry, provider, baseCtx) {
 }
 
 /**
- * Verify each enabled tracked company's board is reachable.
+ * Verify each enabled portals.yml entry's board is reachable.
  *
  * Two tiers, cheapest first:
  *   1. Greenhouse/Ashby/Lever slugs are probed directly (one JSON request each).
@@ -417,14 +421,14 @@ export async function probeProvider(entry, provider, baseCtx) {
  *      uses (Workday, SuccessFactors, SmartRecruiters, Avature, …), bounded to
  *      the first page. This catches broken non-ATS boards that used to be
  *      reported as an un-actionable "skipped".
- * A company reaches `skipped` only when no provider claims it. Probing is
+ * An entry reaches `skipped` only when no provider claims it. Probing is
  * sequential to stay gentle on rate limits.
  *
- * @param {Array<object>} companies - tracked_companies entries.
+ * @param {Array<object>} companies - portals.yml entries (tracked_companies and/or job_boards).
  * @param {{fetchJson?: Function, providers?: Map, httpCtx?: object}} [deps]
  *   `providers`/`httpCtx` enable tier 2; omit them (as the ATS unit tests do) to
  *   get tier-1-only behavior where non-ATS entries stay `skipped`.
- * @returns {Promise<Array<object>>} One result row per company.
+ * @returns {Promise<Array<object>>} One result row per entry.
  */
 export async function verifyCompanies(companies, { fetchJson = defaultFetchJson, fetchText = defaultFetchText, providers = null, httpCtx = null } = {}) {
   const list = Array.isArray(companies) ? companies : [];
@@ -470,7 +474,7 @@ export async function verifyCompanies(companies, { fetchJson = defaultFetchJson,
 }
 
 /**
- * Read a portals file and verify its tracked companies' slugs.
+ * Read a portals file and verify its tracked_companies and job_boards slugs.
  *
  * @param {string} filePath - Path to a portals.yml.
  * @param {{fetchJson?: Function, providers?: Map, httpCtx?: object}} [deps]
@@ -479,10 +483,15 @@ export async function verifyCompanies(companies, { fetchJson = defaultFetchJson,
  */
 export async function verifyPortalsFile(filePath, { fetchJson = defaultFetchJson, providers = null, httpCtx = null } = {}) {
   if (!existsSync(filePath)) return { found: false, results: [] };
-  const raw = readFileSync(filePath, 'utf-8');
-  const config = raw.trim() ? yaml.load(raw) : undefined;
-  const companies = Array.isArray(config?.tracked_companies) ? config.tracked_companies : [];
-  const results = await verifyCompanies(companies, { fetchJson, providers, httpCtx });
+  const config = yaml.load(readFileSync(filePath, 'utf-8'));
+  // tracked_companies and job_boards carry the same entry shape and both feed the
+  // scanner, so sweep both — a job board going dark is exactly as worth surfacing
+  // as a company board 404ing.
+  const entries = [
+    ...(Array.isArray(config?.tracked_companies) ? config.tracked_companies : []),
+    ...(Array.isArray(config?.job_boards) ? config.job_boards : []),
+  ];
+  const results = await verifyCompanies(entries, { fetchJson, providers, httpCtx });
   return { found: true, results };
 }
 
