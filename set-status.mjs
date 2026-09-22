@@ -75,18 +75,25 @@
  *     the note column.
  */
 
-import { readFileSync, existsSync, writeFileSync, renameSync, rmSync, copyFileSync, appendFileSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync, copyFileSync, appendFileSync } from 'fs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { join, dirname, basename, resolve } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { randomUUID } from 'crypto';
-import { load as yamlLoad } from 'js-yaml';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { acquireTrackerLock, canonicalizeTrackerPath, rebuildRow } from './tracker-utils.mjs';
+// normalizeCompany/cell/loadCanonicalStates/resolveCanonicalState/writeFileAtomic were
+// PRIVATE COPIES here. Every one was the weaker half of the pair: cell() let invisible
+// control characters through into a tracker row (#3892) while the shared one strips them,
+// normalizeCompany stripped to [a-z0-9] so any non-Latin company name collapsed to the
+// SAME empty key, resolveCanonicalState missed the shared input folding, and
+// writeFileAtomic used a bare rename with no retry. set-status is the main tracker WRITE
+// path, so each of those landed in the user's own applications.md.
+import {
+  acquireTrackerLock, canonicalizeTrackerPath, rebuildRow,
+  normalizeCompany, cell, loadCanonicalStates, resolveCanonicalState, writeFileAtomic,
+} from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { lockDirFor } from './tracker-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
-import { seedFollowup, SeedError } from './followup-seed.mjs';
 
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const APPS_FILE = process.env.CAREER_OPS_TRACKER
@@ -94,7 +101,10 @@ const APPS_FILE = process.env.CAREER_OPS_TRACKER
   : existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
     ? join(CAREER_OPS_DATA, 'data/applications.md')
     : join(CAREER_OPS_DATA, 'applications.md');
-const STATES_FILE = join(CAREER_OPS_DATA, 'templates/states.yml');
+// templates/states.yml is SYSTEM LAYER: it ships with the code, so it resolves from the
+// ENGINE root. Binding it to the data root made every run with CAREER_OPS_ROOT set (the
+// web dashboard, any ./profile <name>) die with ENOENT before it could read a state.
+const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
 
 const EXIT_OK = 0;
 const EXIT_USAGE = 1;
@@ -256,85 +266,10 @@ function failUsage(message) {
 // currently only exports rebuildRow — keeping these local avoids widening a
 // shared module's contract for a single new caller) ──────────────────────
 
-/**
- * Normalize company names for same-company lookups.
- * Mirrors merge-tracker.mjs's normalizeCompany so a row one script would
- * match is never missed by another.
- *
- * @param {string} name
- * @returns {string}
- */
-function normalizeCompany(name) {
-  return String(name ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
 
-/**
- * Neutralize characters that would corrupt the applications.md table.
- * Mirrors merge-tracker.mjs's cell() helper.
- *
- * @param {*} v
- * @returns {string}
- */
-function cell(v) {
-  return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\s*\|\s*/g, ' / ').trim();
-}
 
-/**
- * Load the canonical tracker states from templates/states.yml.
- *
- * @param {string} statesPath
- * @returns {{id:string,label:string,aliases:string[]}[]}
- */
-function loadCanonicalStates(statesPath) {
-  const doc = yamlLoad(readFileSync(statesPath, 'utf-8'));
-  if (!doc || !Array.isArray(doc.states)) {
-    throw new Error(`Malformed states file at ${statesPath}: expected a top-level "states" list`);
-  }
-  return doc.states.map(s => ({
-    id: String(s.id ?? ''),
-    label: String(s.label ?? ''),
-    aliases: Array.isArray(s.aliases) ? s.aliases.map(String) : [],
-  }));
-}
 
-/**
- * Resolve user input to a canonical state label, strictly (unknown input
- * returns null rather than defaulting, unlike merge-tracker's lenient batch
- * normalization).
- *
- * @param {string} input
- * @param {{id:string,label:string,aliases:string[]}[]} states
- * @returns {string|null}
- */
-function resolveCanonicalState(input, states) {
-  const clean = String(input ?? '').replace(/\*\*/g, '').trim().toLowerCase();
-  if (!clean) return null;
-  for (const s of states) {
-    if (s.label.toLowerCase() === clean) return s.label;
-    if (s.id.toLowerCase() === clean) return s.label;
-    if (s.aliases.some(a => a.toLowerCase() === clean)) return s.label;
-  }
-  return null;
-}
 
-/**
- * Replace a tracker file atomically using a same-directory temporary file.
- * Mirrors merge-tracker.mjs's writeFileAtomic.
- *
- * @param {string} path
- * @param {string} content
- * @returns {void}
- */
-function writeFileAtomic(path, content) {
-  const tmpPath = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
-  try {
-    writeFileSync(tmpPath, content);
-    renameSync(tmpPath, path);
-  } catch (err) {
-    rmSync(tmpPath, { force: true });
-    throw err;
-  }
-}
 
 // ── state validation (before anything touches the tracker) ──────
 
@@ -661,25 +596,82 @@ if (statusChanged && !flags.dryRun) {
   }
 }
 
-// ── report ───────────────────────────────────────────────────────
-
-// #1430: seed data/follow-ups.md automatically on an actual transition INTO
-// Applied — an idempotent re-run of an already-Applied row must not seed a
-// duplicate (seedFollowup is itself idempotent, but skip the call entirely
-// so a dry-run or a no-op re-run never even attempts it). Never fatal: the
-// status change itself already succeeded and must not be undone by a
-// follow-up-seeding failure.
-let followupSeeded = false;
-let followupSeedError = null;
-if (statusChanged && newStatus === 'Applied' && !flags.dryRun) {
+// ── follow-up seeding (#1430) ────────────────────────────────────
+//
+// The transition into Applied is where the first follow-up gets scheduled.
+// set-status.mjs used to only ANNOUNCE that — `followupSeedCandidate: true` —
+// and nothing consumed the flag: the only callers of followup-seed.mjs were
+// modes/apply.md and modes/followup.md, both agent instructions. So recording
+// an application from the web UI, or from this CLI directly, wrote the tracker
+// and the ledger correctly and scheduled nothing, silently (#3459).
+//
+// Seeding HERE rather than in each caller is what makes that one fix instead of
+// three: #2901 converged /api/status onto this script, so the web path inherits
+// it, and so does every future caller that delegates here rather than editing
+// the table.
+//
+// AFTER the tracker lock is released, deliberately. seedFollowup() re-reads the
+// tracker to resolve the applied date, and it must read the row this run just
+// wrote. It takes its own followups lock, never the tracker lock, so there is
+// no lock ordering to get wrong.
+//
+// A seeding failure NEVER fails the status change. The write has already
+// committed and the caller's exit code is about that write — same policy, and
+// the same wording, as the status-log append above. It is also idempotent
+// (`already-seeded` → seeded:false), so a re-run cannot stack duplicate pins.
+let followupSeeded = null;
+if (statusChanged && newStatus === 'Applied') {
   try {
-    const seedResult = await seedFollowup(target.num);
-    followupSeeded = !!seedResult.seeded;
+    const { seedFollowup } = await import('./followup-seed.mjs');
+    // This fork's followup-seed.mjs resolves both paths itself (env first, then
+    // the ACTIVE PROFILE's data root) and takes no trackerPath/followupsPath
+    // overrides — so the options below reach nothing on their own. The tracker
+    // already arrives through CAREER_OPS_TRACKER; the follow-ups file does not,
+    // and its default is the profile root's data/follow-ups.md. Pointing
+    // CAREER_OPS_FOLLOWUPS at the tracker's own directory is what keeps the
+    // status and the pin in the same place. An explicit env value still wins;
+    // the options stay for the day followup-seed.mjs accepts them.
+    process.env.CAREER_OPS_FOLLOWUPS ||= join(dirname(APPS_FILE), 'follow-ups.md');
+    // followupsPath is derived from the tracker's own directory, not left to
+    // followup-seed's default. Its default is the REPO's data/follow-ups.md,
+    // so with CAREER_OPS_TRACKER pointing elsewhere — tests, and any install
+    // whose data lives outside the checkout — the status would be written to
+    // one tracker and the follow-up seeded next to a different one. The
+    // status-log append above derives its path the same way.
+    const seed = await seedFollowup(target.num, {
+      trackerPath: APPS_FILE,
+      followupsPath: join(dirname(APPS_FILE), 'follow-ups.md'),
+      // --on is the day the transition REALLY happened, and for a transition
+      // into Applied that day is the day the application was sent. Nothing
+      // else carries it here: the tracker's date column is the evaluation
+      // date and this script never rewrites it, so without passing it on,
+      // seedFollowup falls back to that column or to today. Backdating a
+      // week-old application would then schedule its first follow-up a week
+      // late — from the wrong anchor, silently.
+      date: flags.on,
+      dryRun: flags.dryRun,
+      // assumeApplied on a DRY RUN only, and deliberately not `force`.
+      // seedFollowup refuses a row that is not Applied, and on a dry run the
+      // tracker was not written — so the row it re-reads still holds the old
+      // status and the preview would report a failure for the one thing the
+      // real run is about to do. `force` would fix that by ALSO suppressing
+      // the already-seeded check, which is the opposite of a preview: a row
+      // that already has a pin would be promised a new one here and refused
+      // on the real run. assumeApplied relaxes the status guard only. In a
+      // real run the row IS Applied by this point and neither is needed.
+      ...(flags.dryRun ? { assumeApplied: true } : {}),
+    });
+    followupSeeded = { seeded: seed.seeded, nextDate: seed.nextDate ?? null, ...(seed.reason ? { reason: seed.reason } : {}) };
+    if (!flags.json && seed.seeded) {
+      console.log(`📅 Follow-up ${flags.dryRun ? 'would be seeded' : 'seeded'} for #${target.num}: next ${seed.nextDate}`);
+    }
   } catch (err) {
-    followupSeedError = err instanceof SeedError ? `${err.code}: ${err.message}` : err.message;
-    console.error(`⚠ follow-up seed failed (status change itself succeeded): ${followupSeedError}`);
+    followupSeeded = { seeded: false, reason: 'error', error: err.message };
+    console.error(`⚠ follow-up seeding failed (status change itself succeeded): ${err.message}`);
   }
 }
+
+// ── report ───────────────────────────────────────────────────────
 
 const result = {
   changed,
@@ -693,8 +685,11 @@ const result = {
   // Fire the #1430 hook only on an actual transition INTO Applied — an
   // idempotent re-run of an already-Applied row must not invite a consumer
   // to seed a duplicate follow-up.
+  // followupSeedCandidate is kept for any consumer already reading it; the
+  // seeding it used to merely advertise now actually happens, and its outcome
+  // travels beside it.
   ...(statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
-  ...(statusChanged && newStatus === 'Applied' && !flags.dryRun ? { followupSeeded, ...(followupSeedError ? { followupSeedError } : {}) } : {}),
+  ...(followupSeeded ? { followupSeeded } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   tracker: APPS_FILE,
 };
@@ -704,12 +699,11 @@ if (flags.json) {
 } else {
   const verb = flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
-  if (statusChanged && !flags.dryRun && newStatus === 'Applied') {
-    if (followupSeedError) {
-      console.error(`ℹ️  Follow-up seed failed — run manually: node followup-seed.mjs ${target.num}`);
-    } else if (followupSeeded) {
-      console.error('ℹ️  Follow-up seeded in data/follow-ups.md.');
-    }
+  // Only when seeding did NOT happen. The advisory predates the seeding above
+  // and asked the user to do by hand what now runs for them; leaving it
+  // unconditional would read as a contradiction right under "Follow-up seeded".
+  if (statusChanged && !flags.dryRun && newStatus === 'Applied' && !followupSeeded?.seeded) {
+    console.error('ℹ️  Status is Applied — consider seeding follow-ups in data/follow-ups.md (#1430: node followup-cadence.mjs)');
   }
 }
 process.exit(EXIT_OK);

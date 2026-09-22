@@ -20,9 +20,16 @@ export async function GET() {
   const stdout = await new Promise<string>((resolve) => {
     execFile(
       "node",
-      [script, "--json"],
+      // analyze-patterns.mjs EMITS JSON by default and rejects --json as an
+      // unrecognized flag, so passing it made the script exit non-zero. execFile
+      // maps that to err, the handler below resolves "", and the Patterns page
+      // silently rendered as "unavailable" instead of showing an error.
+      [script],
       { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, timeout: 45_000, maxBuffer: 8 * 1024 * 1024 },
-      (err, out) => resolve(err ? "" : out || ""),
+      // Take stdout even on a non-zero exit: analyze-patterns exits 1 for
+      // "not enough data yet" and still prints the JSON that explains it.
+      // Discarding it rendered the page as "unavailable" instead.
+      (_err, out) => resolve(out || ""),
     );
   });
   // The script may print human text before the JSON block — grab the last {...}.

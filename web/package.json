@@ -1,6 +1,6 @@
 {
   "name": "@career-ops/web",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "engines": {
@@ -14,7 +14,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:engine": "node --test src/lib/*.test.mjs src/lib/onboarding/*.test.mjs src/lib/search/*.test.mjs src/lib/scoring/*.test.mjs src/lib/apply/*.test.mjs src/lib/beta/*.test.mjs src/lib/home/*.test.mjs"
+    "test:engine": "node --test src/lib/*.test.mjs src/lib/core/*.test.mjs src/lib/onboarding/*.test.mjs src/lib/search/*.test.mjs src/lib/scoring/*.test.mjs src/lib/apply/*.test.mjs src/lib/beta/*.test.mjs src/lib/home/*.test.mjs"
   },
   "dependencies": {
     "@paper-design/shaders-react": "^0.0.80",

@@ -1,5 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { checkRequest, parseAllowedHosts } from "@/lib/origin-guard.mjs";
+import { checkRequest, parseAllowedHosts, parseAllowedOrigins } from "@/lib/origin-guard.mjs";
+
+// Opt in to extra *origins* with CAREER_OPS_ALLOWED_ORIGINS (comma/space
+// separated); unset means none. A browser extension calls from a
+// chrome-extension:// origin, which Fetch Metadata always reports as
+// "cross-site", so every one of its requests is refused otherwise.
 
 /**
  * Multi-profile context propagation.
@@ -42,6 +47,7 @@ export function proxy(req: NextRequest) {
       origin: req.headers.get("origin"),
       host: req.headers.get("host"),
       allowedHosts: parseAllowedHosts(process.env.CAREER_OPS_WEB_ALLOWED_HOSTS),
+      allowedOrigins: parseAllowedOrigins(process.env.CAREER_OPS_ALLOWED_ORIGINS),
     });
     if (!decision.ok) {
       return NextResponse.json({ error: decision.reason }, { status: decision.status });

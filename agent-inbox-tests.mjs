@@ -9,6 +9,8 @@
  *   3. `list` shows pending only; `list --all` shows resolved items too.
  *   4. `resolve N` ticks the N-th *pending* item and appends a one-line result,
  *      so `list` then `resolve N` line up.
+ *   4b. resolve holds the same lock as add for its full read/modify/write, so a
+ *       request accepted concurrently cannot be overwritten by a stale view.
  *   5. An empty `add` fails loudly (exit 1) rather than queuing a blank line.
  *   6. On the default path, a first `add` self-heals .gitignore (idempotent) so
  *      the personal queue isn't accidentally tracked.
@@ -17,11 +19,12 @@
  * touches real user data.
  */
 
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
+import { acquirePipelineLock } from './pipeline-lock.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const NODE = process.execPath;
@@ -101,6 +104,38 @@ console.log('4. resolve ticks the N-th pending item + appends a one-line result'
 }
 
 // ---------------------------------------------------------------------------
+console.log('4b. resolve waits for the queue lock before rewriting');
+{
+  const dir = tmp('inbox-resolve-lock-');
+  const inbox = join(dir, 'agent-inbox.md');
+  writeFileSync(inbox, '# Agent Inbox\n\n- [ ] 2026-01-01 00:00 — alpha\n- [ ] 2026-01-01 00:01 — beta\n');
+  const held = await acquirePipelineLock(inbox, { timeoutMs: 10_000 });
+  const child = spawn(NODE, [CLI, 'resolve', '1', '--result', 'done alpha'], {
+    cwd: ROOT, env: { ...process.env, CAREER_OPS_INBOX: inbox }, stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const closed = new Promise((res) => child.on('close', (code) => res(code)));
+  const whileHeld = await Promise.race([
+    closed.then(() => 'closed'),
+    // A fresh Node process starts in tens of milliseconds on the hosted
+    // runners. Half a second keeps the negative control decisive without
+    // making the suite inherit the lock's 30-second production timeout.
+    new Promise((res) => setTimeout(() => res('waiting'), 500)),
+  ]);
+  check('resolve stays blocked while another writer owns the queue lock', whileHeld === 'waiting', `state=${whileHeld}`);
+  held.release();
+  const exit = await closed;
+  check('resolve exits cleanly after the lock is released', exit === 0, `exit=${exit}, stderr=${stderr.trim()}`);
+  const md = readFileSync(inbox, 'utf8');
+  check('the selected item is resolved from the locked snapshot', /^- \[x\].*alpha.*→ result: done alpha/m.test(md), md);
+  check('the sibling pending item survives the rewrite', /^- \[ \].*beta/m.test(md), md);
+  check('resolve reports the selected item after committing', /Resolved #1: .*alpha/.test(stdout), stdout.trim());
+}
+
+// ---------------------------------------------------------------------------
 console.log('5. empty add fails (exit 1), does not queue a blank line');
 {
   const inbox = join(tmp('inbox-'), 'agent-inbox.md');
@@ -114,8 +149,18 @@ console.log('6. first add on the default path self-heals .gitignore (idempotent)
 {
   const repo = tmp('inbox-repo-');
   writeFileSync(join(repo, '.gitignore'), 'node_modules\noutput/*\n');
+  // FORK: upstream's default inbox path is the relative string
+  // 'data/agent-inbox.md', so an unset CAREER_OPS_INBOX plus cwd=repo was
+  // enough to sandbox this block. Here the two-roots rule resolves the inbox
+  // from the ACTIVE PROFILE's data root, which ignores cwd — so the same call
+  // wrote 'queue a scan' straight into the maintainer's live
+  // data/agent-inbox.md. CAREER_OPS_ROOT is the documented override for that
+  // root (path-resolver.mjs), and pinning it to the throwaway repo is what
+  // makes this suite honour its own "never touches real user data" contract.
   const addOnce = () => execFileSync(NODE, [CLI, 'add', 'queue a scan'], {
-    cwd: repo, env: { ...process.env, CAREER_OPS_INBOX: '' }, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: repo,
+    env: { ...process.env, CAREER_OPS_INBOX: '', CAREER_OPS_ROOT: repo },
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
   addOnce(); addOnce();
   const gi = readFileSync(join(repo, '.gitignore'), 'utf8');

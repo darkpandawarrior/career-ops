@@ -29,6 +29,7 @@ import { join, sep } from 'path';
 import { USER_PATHS } from './user-layer-paths.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { isUnderNestedCheckout } from './lib/mjs-files.mjs';
 
 // modes/ and AGENTS.md are ENGINE-layer content (they ship with the checkout,
 // not per-profile), so they resolve from engineRoot and never dataRoot —
@@ -249,10 +250,15 @@ if (isMainModule(import.meta.url)) {
     problems.push(`modes/_shared.md does not reference "${MARKER}"`);
   }
 
+  // globSync expands the whole subtree in one call, so a nested checkout is
+  // filtered out of the result rather than skipped during a descent: a worktree
+  // under modes/ turned 174 candidate files into 459, all of them somebody
+  // else's, and this validator would have graded them as ours (#3762).
   const candidates = [
     ...globSync('modes/**/*.md', { cwd: CAREER_OPS }),
     ...globSync('batch/*.md', { cwd: CAREER_OPS }),
-  ].map((p) => p.split(sep).join('/'));
+  ].map((p) => p.split(sep).join('/'))
+    .filter((rel) => !isUnderNestedCheckout(CAREER_OPS, rel));
 
   const required = deriveIngestingModes(candidates, (rel) => readFileSync(join(CAREER_OPS, rel), 'utf-8'));
 

@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { scoreTone, scoreNum, legitimacyTone, parseReport } from "@/lib/format";
-import { cleanHeading, splitSections } from "@/lib/report-sections.mjs";
+import { cleanHeading, isVerdictHeading, splitSections } from "@/lib/report-sections.mjs";
 import { StatusSelect } from "@/components/status-select";
 import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
@@ -16,12 +16,15 @@ import { PageShell } from "@/components/ui/page-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 
-// Progressive disclosure of the report body. Our reports (modes/oferta.md)
-// write "## A) Role Summary" / "## Block A — Role Summary" through G/H, plus
-// an unlettered "## Verdict", "## Machine Summary" (YAML) and "## Keywords
-// extracted" tail. A reader deciding "should I apply?" needs Verdict + Role
-// Summary + Match; the rest is depth-on-demand. Native <details> only — no
-// client JS, still a server component.
+// Progressive disclosure of the report. The core writes prose blocks
+// "## A) Role Summary", "## B) Match with CV", then
+// the remaining lettered blocks + machine artifacts (Machine Summary YAML,
+// Application Answers, submit log). A mainstream user deciding "should I
+// apply?" needs the verdict + fit; the rest is depth-on-demand. We lead with
+// the verdict as a callout, keep A/B expanded, collapse the other lettered
+// blocks as content, and drop machine artifacts to a dimmer "Technical" tier —
+// and strip the bare "F)" author-letters from headings (native <details>, no
+// client JS — this stays a server component).
 //
 // Splitting and heading cleanup live in lib/report-sections.mjs so the
 // author-letter range has one definition shared with the rest of the app —
@@ -148,8 +151,19 @@ export function ReportView({
                 </article>
               );
             }
-
-            const verdict = sections.find((s) => isVerdict(s.heading));
+            // A verdict block leads as a highlighted callout with no competing
+            // heading — it's THE answer. A/B stay expanded (fit detail); the rest
+            // collapse as content (with a 1-line preview); machine artifacts drop
+            // to a dimmer "Technical" tier so the CLI-DNA is present-but-clearly-
+            // secondary.
+            //
+            // Identified by the heading, never by the letter: reading "whatever is
+            // lettered F" as the verdict rendered the Interview Plan table into a
+            // callout built for one sentence — in the canonical mode and in all
+            // eighteen localized modes alike (#3416). No mode writes a Verdict
+            // block today, so today there is
+            // simply no callout and every block renders below.
+            const verdict = sections.find((s) => isVerdictHeading(s.heading));
             const rest = sections.filter((s) => s !== verdict);
             const machine = rest.filter((s) => isMachine(s.heading));
             const mainSections = rest.filter((s) => !isMachine(s.heading));

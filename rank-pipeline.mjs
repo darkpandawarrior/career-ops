@@ -30,6 +30,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 import { execFileSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -331,7 +332,7 @@ async function main(args) {
       const current = readFileSync(PIPELINE_PATH, 'utf-8');
       const result = applyAnnotations(current, annotations);
       written = result.written;
-      if (written) writeFileSync(PIPELINE_PATH, result.text);
+      if (written) writeFileAtomic(PIPELINE_PATH, result.text);
     });
   }
 

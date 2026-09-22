@@ -12,7 +12,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { owedAppNumbers } from './owed-actions.mjs';
 import { join, dirname, relative, sep } from 'path';
 import * as yaml from 'js-yaml';
@@ -22,12 +22,13 @@ import { localToday } from './lib/local-today.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const APPS_FILE = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
-  ? join(CAREER_OPS_DATA, 'data/applications.md')
-  : join(CAREER_OPS_DATA, 'applications.md');
-const FOLLOWUPS_FILE = join(CAREER_OPS_DATA, 'data/follow-ups.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS_DATA, 'config/profile.yml');
+// Fork rule 5: follow-up DATA belongs to the ACTIVE profile's data root; templates/states.yml
+// is System Layer and stays on the engine root (#3500). Upstream resolves both from the
+// script directory, which under multi-profile reads another profile's tracker.
+const { engineRoot: CODEBASE_ROOT, dataRoot: CAREER_OPS } = resolveCareerOpsRoot(import.meta.url);
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+const FOLLOWUPS_FILE = join(CAREER_OPS, 'data/follow-ups.md');
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS, 'config/profile.yml');
 
 
 // --- CLI args ---
@@ -121,16 +122,19 @@ function statusAliasMap() {
   if (aliasMapCache) return aliasMapCache;
   const map = new Map();
   try {
-    for (const st of loadCanonicalStates(join(CAREER_OPS, 'templates', 'states.yml'))) {
+    for (const st of loadCanonicalStates(join(CODEBASE_ROOT, 'templates', 'states.yml'))) {
       const id = st.id.toLowerCase();
       map.set(foldStatusInput(id), id);
       if (st.label) map.set(foldStatusInput(st.label), id);
       for (const a of st.aliases) map.set(foldStatusInput(a), id);
     }
-  } catch {
+  } catch (err) {
     // A missing/malformed states.yml is a broken install. Degrade to
     // identity-normalization rather than resurrecting a hardcoded table: a
     // fallback copy is the same copy in disguise and drifts the same way.
+    // Report it, though — degrading silently is what hid #3500, and here it
+    // costs every localized status its place in the funnel.
+    console.error(`[followup-cadence] cannot read canonical states from templates/states.yml: ${err.message}`);
     return (aliasMapCache = new Map());
   }
   return (aliasMapCache = map);
@@ -1002,12 +1006,20 @@ function printSummary(result) {
 
 // ── CLI flags + help ────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--summary', '--overdue-only', '--applied-days', '--help', '-h'];
+// --json is the DEFAULT output form, not a mode switch: it names what the
+// script already does with no flag at all. It is listed here because callers
+// pass it explicitly — web/src/app/api/followups/route.ts and
+// web/src/app/api/followups/cadence/route.ts both spawn `[script, '--json']`
+// — and validateFlags() rejects any flag not on this list, so omitting it
+// made both routes exit 1 and read as "no follow-ups" (#3196 added the
+// validation without the flag the web already passed).
+const KNOWN_FLAGS = ['--summary', '--json', '--overdue-only', '--applied-days', '--help', '-h'];
 const VALUE_FLAGS = ['--applied-days'];
 
 const USAGE = `Usage:
   node followup-cadence.mjs                    # full JSON analysis to stdout
-  node followup-cadence.mjs --summary          # human-readable dashboard
+  node followup-cadence.mjs --json             # same as above, JSON is the default
+  node followup-cadence.mjs --summary          # human-readable dashboard (wins over --json)
   node followup-cadence.mjs --overdue-only     # only show overdue/urgent entries
   node followup-cadence.mjs --applied-days 10  # override applied_first cadence (days)
   node followup-cadence.mjs --help|-h          # print this usage block and exit`;
@@ -1032,6 +1044,8 @@ if (isMainModule(import.meta.url)) {
 
   const result = analyze();
 
+  // --summary wins when both are given: it is the flag that asks for something
+  // other than the default, so it is the one carrying an intention.
   if (summaryMode) {
     printSummary(result);
   } else {

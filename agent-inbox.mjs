@@ -55,16 +55,26 @@ function stamp() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
 }
 
+const DEFAULT_INBOX_REL = 'data/agent-inbox.md';
+
 function ensureGitignored() {
   // The inbox is personal data. On installs whose .gitignore predates this
   // feature, make sure the default path is ignored so a first `add` can't
   // accidentally commit it. Only manages the default, non-overridden path.
-  if (process.env.CAREER_OPS_INBOX || PATH !== 'data/agent-inbox.md') return;
+  //
+  // FORK: PATH resolves through the ACTIVE PROFILE's data root, so it is
+  // ABSOLUTE here. Upstream's default is the relative string, and its guard
+  // `PATH !== 'data/agent-inbox.md'` was therefore always true — this self-heal
+  // never ran once, and the rule it exists to write was never written. Compare
+  // the data-root-relative path instead, and edit the .gitignore belonging to
+  // that root rather than whatever directory the command happened to run from.
+  if (process.env.CAREER_OPS_INBOX || PATH !== join(CAREER_OPS_DATA, DEFAULT_INBOX_REL)) return;
+  const gitignorePath = join(CAREER_OPS_DATA, '.gitignore');
   try {
-    if (!existsSync('.gitignore')) return; // not a git checkout we should touch
-    const text = readFileSync('.gitignore', 'utf8');
-    if (text.split('\n').some((l) => l.trim() === PATH)) return; // already ignored
-    writeFileSync('.gitignore', text.replace(/\s*$/, '') + `\n${PATH}\n`);
+    if (!existsSync(gitignorePath)) return; // not a git checkout we should touch
+    const text = readFileSync(gitignorePath, 'utf8');
+    if (text.split('\n').some((l) => l.trim() === DEFAULT_INBOX_REL)) return; // already ignored
+    writeFileSync(gitignorePath, text.replace(/\s*$/, '') + `\n${DEFAULT_INBOX_REL}\n`);
   } catch { /* best effort — never block queuing on this */ }
 }
 
@@ -208,20 +218,30 @@ function list() {
   });
 }
 
-function resolve() {
+async function resolve() {
   const n = Number(process.argv[3]);
   if (!Number.isInteger(n) || n < 1) fail('resolve needs a 1-based item number (see `list`)');
-  // Number against the pending view, so `list` then `resolve N` line up.
-  const pending = parseItems().filter((it) => !it.done);
-  const target = pending[n - 1];
-  if (!target) fail(`no pending item #${n} (${pending.length} pending)`);
-  const result = oneLine(opt('result'));
-  const lines = readFileSync(PATH, 'utf8').split('\n');
-  let updated = lines[target.line].replace('[ ]', '[x]');
-  if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
-  lines[target.line] = updated;
-  writeFileSync(PATH, lines.join('\n'));
-  process.stdout.write(`Resolved #${n}: ${target.text}\n`);
+  const outcome = await withPipelineLock(PATH, () => {
+    // The pending snapshot, line lookup, and rewrite are one transaction. An
+    // add between the old read and write was acknowledged, then overwritten by
+    // this stale snapshot even though add itself correctly held this same lock.
+    // Number inside the critical section too, so the selected item and the
+    // rewritten line always come from one locked view.
+    const pending = parseItems().filter((it) => !it.done);
+    const target = pending[n - 1];
+    if (!target) return { error: `no pending item #${n} (${pending.length} pending)` };
+    const result = oneLine(opt('result'));
+    const lines = readFileSync(PATH, 'utf8').split('\n');
+    let updated = lines[target.line].replace('[ ]', '[x]');
+    if (result && !/→ result:/.test(updated)) updated += ` → result: ${result}`;
+    lines[target.line] = updated;
+    writeFileSync(PATH, lines.join('\n'));
+    return { target };
+  }, { timeoutMs: 30_000 });
+  // Fail only after withPipelineLock has released. process.exit() inside the
+  // callback would bypass the lock's finally block and strand the directory.
+  if (outcome.error) fail(outcome.error);
+  process.stdout.write(`Resolved #${n}: ${outcome.target.text}\n`);
 }
 
 function fail(msg) {
@@ -232,7 +252,7 @@ function fail(msg) {
 const cmd = process.argv[2];
 if (cmd === 'add') await add();
 else if (cmd === 'list') list();
-else if (cmd === 'resolve') resolve();
+else if (cmd === 'resolve') await resolve();
 else {
   process.stdout.write(
     'Usage:\n' +

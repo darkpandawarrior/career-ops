@@ -5,6 +5,11 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { resolveCareerOpsRoot } from '../path-resolver.mjs';
+
+// User Layer: config/profile.yml belongs to the ACTIVE PROFILE's data root, not the cwd.
+const { dataRoot: EAT_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -214,7 +219,7 @@ export function normalizeProfile(raw = {}, cvData = {}) {
  */
 export function loadProfile(customProfilePath = null, customCvPath = null) {
   let profileRaw = null;
-  const profileSource = customProfilePath || process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+  const profileSource = customProfilePath || process.env.CAREER_OPS_PROFILE || join(EAT_DATA_ROOT, 'config/profile.yml');
 
   if (customProfilePath) {
     if (!existsSync(customProfilePath)) {

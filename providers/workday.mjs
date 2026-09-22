@@ -155,8 +155,39 @@ export function trueTotalFromFacets(facets) {
  *
  * Exported for the test suite.
  */
-export function chooseSplitFacet(facets, { exclude = [] } = {}) {
+function normalizedHintValues(values) {
+  return (Array.isArray(values) ? values : [])
+    .filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => value.trim().toLowerCase());
+}
+
+function facetLooksLikeLocation(facet) {
+  const identity = `${facet?.facetParameter || ''} ${facet?.descriptor || ''}`.toLowerCase();
+  return /location|country|region|state|province|city|remote|geography|geo/.test(identity);
+}
+
+function locationValueScore(value, hints) {
+  const text = String(value?.descriptor || '').trim().toLowerCase();
+  if (!text) return -1;
+  const alwaysAllow = normalizedHintValues(hints?.always_allow);
+  const allow = normalizedHintValues([...(hints?.allow || []), ...(hints?.positive || [])]);
+  const block = normalizedHintValues([...(hints?.block || []), ...(hints?.block_hard || [])]);
+  if (block.some((term) => text.includes(term)) && !alwaysAllow.some((term) => text.includes(term))) return -1;
+  if (alwaysAllow.some((term) => text.includes(term))) return 3;
+  if (allow.some((term) => text.includes(term))) return 2;
+  return 0;
+}
+
+/**
+ * Pick a facet to split a clamped board on, preferring user-configured
+ * locations when the caller supplies location_filter hints. A matching
+ * location value may be the only useful slice (for example, Toronto among
+ * dozens of US cities), so the location-aware path may return one value while
+ * the generic fallback retains the historical two-value partition rule.
+ */
+export function chooseSplitFacet(facets, { exclude = [], locationHints } = {}) {
   const skip = new Set(exclude);
+  const candidates = [];
   let best = null;
   for (const facet of Array.isArray(facets) ? facets : []) {
     const facetParameter = facet?.facetParameter;
@@ -165,12 +196,32 @@ export function chooseSplitFacet(facets, { exclude = [] } = {}) {
       (v) => typeof v?.id === 'string' && v.id && Number.isInteger(v?.count) && v.count >= 0,
     );
     if (values.length < 2) continue;
+    candidates.push({ facet, values });
     const largest = Math.max(...values.map((v) => v.count));
     // Tie-break on value count: a finer partition leaves less to re-split.
     if (best === null || largest < best.largest || (largest === best.largest && values.length > best.values.length)) {
       best = { facetParameter, values, largest };
     }
   }
+
+  if (locationHints && typeof locationHints === 'object') {
+    const locationCandidates = candidates
+      .filter(({ facet }) => facetLooksLikeLocation(facet))
+      .map(({ facet, values }) => ({
+        facetParameter: facet.facetParameter,
+        values: values
+          .map((value) => ({ value, score: locationValueScore(value, locationHints) }))
+          .filter(({ score }) => score > 0)
+          .sort((a, b) => b.score - a.score || b.value.count - a.value.count)
+          .map(({ value }) => value),
+      }))
+      .filter(({ values }) => values.length > 0);
+    if (locationCandidates.length > 0) {
+      locationCandidates.sort((a, b) => b.values.length - a.values.length);
+      return locationCandidates[0];
+    }
+  }
+
   return best ? { facetParameter: best.facetParameter, values: best.values } : null;
 }
 
@@ -196,25 +247,48 @@ export function pageIsPastWindow(pageJobs, sinceMs) {
   return Math.min(...dated) < sinceMs - EARLY_STOP_MARGIN_MS;
 }
 
+// A careers page: `https://{tenant}.{instance}.myworkdayjobs.com[/{locale}]/{site}`.
+const CAREERS_RE = /^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/;
+// The CXS endpoint itself: `https://{host}.{instance}.myworkdayjobs.com/wday/cxs/{tenant}/{site}[/jobs|/job/...]`.
+// This is the *resolved* form, not a careers page — it already carries the
+// tenant and site in its path. It also passes CAREERS_RE (same host shape),
+// where `([^/?#]+)` captures the literal `wday` as the site and yields a
+// nonexistent `/wday/cxs/{tenant}/wday/jobs` endpoint: a live board silently
+// reports zero jobs and then reads as unreachable (#3498). Matched first so a
+// hand-verified CXS `api:` is honored as written instead of corrupting the entry.
+const CXS_RE = /^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/wday\/cxs\/([\w-]+)\/([^/?#]+)(?:\/jobs)?(?:[/?#]|$)/;
+
+function makeEndpoint(origin, tenant, site) {
+  return {
+    api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
+    // externalPath is relative to the site, not the host root — without the
+    // site segment the URL 404s.
+    jobBase: `${origin}/${site}`,
+    origin,
+  };
+}
+
 function resolveEndpoint(entry) {
   // Try api: first, then careers_url (mirrors greenhouse/ashby), returning the
   // first that matches the Workday tenant pattern. This lets a branded page
   // (e.g. https://www.ptc.com/en/careers) stay as careers_url while the Workday
   // tenant URL is pinned via api: — and, because we fall through on a non-match,
   // a non-Workday api: value doesn't shadow a valid careers_url.
+  //
+  // Either candidate may be given in either form; whichever matches resolves to
+  // the same endpoint, so adding a correct api: never changes what careers_url
+  // alone would have produced.
   for (const url of [entry.api, entry.careers_url]) {
     if (typeof url !== 'string' || !url) continue;
-    const m = url.match(/^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
+    const cxs = url.match(CXS_RE);
+    if (cxs) {
+      const [, host, instance, tenant, site] = cxs;
+      return makeEndpoint(`https://${host}.${instance}.myworkdayjobs.com`, tenant, site);
+    }
+    const m = url.match(CAREERS_RE);
     if (!m) continue;
     const [, tenant, instance, site] = m;
-    const origin = `https://${tenant}.${instance}.myworkdayjobs.com`;
-    return {
-      api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
-      // externalPath is relative to the site, not the host root — without the
-      // site segment the URL 404s.
-      jobBase: `${origin}/${site}`,
-      origin,
-    };
+    return makeEndpoint(`https://${tenant}.${instance}.myworkdayjobs.com`, tenant, site);
   }
   return null;
 }
@@ -529,8 +603,42 @@ export default {
         if (!result.clamped) return;
 
         if (depth >= MAX_SPLIT_DEPTH) { splitIncomplete = true; return; }
-        const facet = chooseSplitFacet(result.facets, { exclude: excluded });
+        const facet = chooseSplitFacet(result.facets, {
+          exclude: excluded,
+          locationHints: ctx?.locationHints,
+        });
         if (!facet) { splitIncomplete = true; return; }
+
+        // The clamp is detected against the LARGEST facet sum, but the split
+        // runs on whichever facet partitions most finely. Postings outside the
+        // chosen facet's values are never requested by any slice, so a facet
+        // that covers materially less than the board can finish every slice
+        // cleanly and still leave the board short — reported recovered, which
+        // is the failure this path exists to avoid.
+        //
+        // Materiality matters here, and the bar comes from the response. Real
+        // facets disagree by a point or two (a posting missing a facet value is
+        // absent from that facet's counts), so the chosen facet sits just under
+        // the max on essentially every board — DSG: trueTotal 8367, chosen
+        // jobFamily 8366. A bare `chosen < trueTotal` would tag every one of
+        // them, the tag-that-says-nothing case 'cap' already had to avoid above.
+        // The spread across the OTHER counted facets measures that ordinary
+        // disagreement (77 on DSG, 2 on cvshealth); a gap wider than it is real
+        // undercoverage. The chosen facet is excluded from the spread because a
+        // badly under-covering facet is itself the minimum, and leaving it in
+        // would inflate the bar to exactly the gap it should be judged against.
+        const chosenCoverage = facet.values.reduce((sum, v) => sum + v.count, 0);
+        const trueTotal = trueTotalFromFacets(result.facets);
+        if (trueTotal !== null) {
+          const others = [];
+          for (const f of Array.isArray(result.facets) ? result.facets : []) {
+            if (f?.facetParameter === facet.facetParameter) continue;
+            const coverage = facetCoverage(f);
+            if (coverage !== null) others.push(coverage);
+          }
+          const spread = others.length > 0 ? Math.max(...others) - Math.min(...others) : 0;
+          if (trueTotal - chosenCoverage > spread) splitIncomplete = true;
+        }
 
         for (const value of facet.values) {
           if (slicesSpent >= MAX_SPLIT_SLICES) { splitIncomplete = true; break; }

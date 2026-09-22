@@ -14,20 +14,13 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { openTrackerTransaction, rebuildRow, resolvePdfIndexPath, resolveTrackerPath } from './tracker-utils.mjs';
-// Upstream keeps openTrackerTransaction in tracker-utils.mjs; this fork's lock
-// primitives live in tracker-lock.mjs (same split as acquireTrackerLock).
+import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
-
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const APPS_FILE = resolveTrackerPath(CAREER_OPS_DATA);
+const DATA_ROOT = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 // Derived from the TRACKER, not from this script's location, so a redirected
 // CAREER_OPS_TRACKER moves the whole workspace together (#2471).
 const PDF_MANIFEST = resolvePdfIndexPath(APPS_FILE);

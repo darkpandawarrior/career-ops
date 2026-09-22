@@ -27,6 +27,7 @@
  */
 
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, appendFileSync } from 'fs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
@@ -195,7 +196,12 @@ if (archiveIdx === -1) {
   ];
 }
 
-writeFileSync(PIPELINE_PATH, out.join('\n'));
+// ponytail: atomic replace, not a lock. The torn/truncated write is gone; a LOST
+// UPDATE is not — the read above happens before a multi-minute network pass, so a
+// scan committing in between is overwritten. Holding the pipeline lock across that
+// pass would block every scanner for its duration, which is worse. Upgrade path:
+// re-read under the lock at commit time and re-apply the marks by URL, not by index.
+writeFileAtomic(PIPELINE_PATH, out.join('\n'));
 
 // Append skipped_offtopic rows to scan-history.tsv (the durable audit log).
 mkdirSync(dirname(SCAN_HISTORY_PATH), { recursive: true });

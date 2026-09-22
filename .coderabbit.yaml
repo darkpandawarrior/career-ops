@@ -5,6 +5,7 @@ reviews:
   profile: chill
   request_changes_workflow: false
   high_level_summary: true
+  high_level_summary_instructions: "Explain what changes from the user's point of view (what they can do, what breaks). Name which system files are touched: AGENTS.md, modes/, update-system.mjs, DATA_CONTRACT.md, providers/, .github/."
   poem: false
   review_status: true
   collapse_walkthrough: true

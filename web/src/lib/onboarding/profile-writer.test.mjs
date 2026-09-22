@@ -14,7 +14,7 @@ import {
   rollbackProfileReplacement,
   validateGeneratedFiles,
 } from '../onboarding/profile-writer.mjs';
-import { validatePortalsConfig } from '../../../../validate-portals.mjs';
+import { validatePortalsConfig, loadProviderIds } from '../../../../validate-portals.mjs';
 
 const DRAFT_ID = '12345678-1234-4234-8234-123456789012';
 
@@ -43,7 +43,9 @@ test('generates valid career-ops user files from a reviewed draft', async () => 
   ]);
   assert.match(files['cv.md'], /^# Alex Morgan/m);
   assert.match(files['modes/_profile.md'], /Senior Backend Engineer/);
-  const portalsValidation = await validatePortalsConfig(yaml.load(files['portals.yml']));
+  const portalsValidation = await validatePortalsConfig(yaml.load(files['portals.yml']), {
+    providerIds: await loadProviderIds(),
+  });
   assert.deepEqual(portalsValidation.errors, []);
 });
 

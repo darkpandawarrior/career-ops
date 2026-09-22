@@ -41,13 +41,14 @@ import {
 import { dirname, extname, join, relative, resolve, sep } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { isNestedCheckout } from './lib/mjs-files.mjs';
 
 // dataRoot, not engineRoot: documents/ and data/intake-state.json belong to the
 // ACTIVE profile, which is a different directory than this script's own under
 // the multi-profile setup (see path-resolver.mjs).
-const { dataRoot: ROOT } = resolveCareerOpsRoot(import.meta.url);
-const DOCS_DIR = process.env.CAREER_OPS_DOCUMENTS_DIR || join(ROOT, 'documents');
-const STATE_FILE = process.env.CAREER_OPS_INTAKE_STATE || join(ROOT, 'data', 'intake-state.json');
+const { engineRoot: ROOT, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const DOCS_DIR = process.env.CAREER_OPS_DOCUMENTS_DIR || join(DATA_ROOT, 'documents');
+const STATE_FILE = process.env.CAREER_OPS_INTAKE_STATE || join(DATA_ROOT, 'data', 'intake-state.json');
 
 // The four intake folders from the issue spec. Files directly under
 // documents/ are picked up too — the folders are guidance, not a gate.
@@ -204,7 +205,7 @@ function listSourceFiles() {
     realDirs.add(real);
     for (const entry of readDir(dir)) {
       if (entry.name.startsWith('.')) continue;
-      if (entry.isDirectory()) claimRealDirs(join(dir, entry.name));
+      if (entry.isDirectory() && !isNestedCheckout(join(dir, entry.name))) claimRealDirs(join(dir, entry.name));
     }
   };
   claimRealDirs(DOCS_DIR);
@@ -243,6 +244,10 @@ function listSourceFiles() {
           try { target = realpathSync(abs); } catch { continue; }
           if (realDirs.has(target)) continue;
         }
+        // A repository someone cloned into documents/ is not a document they
+        // dropped in: every source file in it would be offered as intake
+        // material for the profile (#3762).
+        if (isNestedCheckout(abs)) continue;
         walk(abs);
       } else if (isFile) out.push(abs);
     }

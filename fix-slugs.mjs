@@ -4,13 +4,17 @@
  * fix-slugs.mjs — write verify-portals.mjs's suggested ATS slug fixes back
  * into portals.yml.
  *
- * verify-portals.mjs already probes every tracked company's ATS slug and, for
- * a failing Greenhouse/Ashby/Lever entry, cross-probes slug variants across
- * all three ATSes and attaches `suggested: { ats, slug }` when one resolves
- * (see discoverAlternates() in verify-portals.mjs). That tool is read-only —
- * this script is the write side: it reuses the SAME probe/suggestion logic
- * (no re-implementation, no HTML scraping, no hardcoded company list) and
- * patches the matching `tracked_companies` entry in portals.yml.
+ * verify-portals.mjs already probes every tracked company's ATS slug. Its
+ * "tier 1" fast path is hardcoded to the three ATSes whose board URL carries a
+ * parseable slug — Greenhouse, Ashby, Lever — and for a failing entry it
+ * cross-probes slug variants across those three, attaching
+ * `suggested: { ats, slug }` when one resolves (see discoverAlternates() in
+ * verify-portals.mjs). Any other host is a provider-plugin (tier 2) entry and
+ * never gets a `suggested`, so this script only ever rewrites Greenhouse / Ashby
+ * / Lever slugs. That tool is read-only — this is the write side: it reuses the
+ * SAME probe/suggestion logic (no re-implementation, no HTML scraping, no
+ * hardcoded company list) and patches the matching `tracked_companies` entry in
+ * portals.yml.
  *
  * Only entries verify-portals classifies as `missing` AND carries a
  * `suggested` alternate for are touched. Live/empty entries and genuinely
@@ -31,13 +35,19 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
+import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 import { verifyPortalsFile } from './verify-portals.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
+const { dataRoot: FS_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+// Anchored to the ACTIVE PROFILE's data root, not the cwd. A bare relative default
+// resolves against wherever the command happened to be run from, so this script and
+// scan.mjs (which anchors PORTALS_PATH) could name different files while both
+// reporting success. An explicit --file stays cwd-relative: the user typed it.
+const DEFAULT_PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(FS_DATA_ROOT, 'portals.yml');
 
 const KNOWN_FLAGS = ['--apply', '--dry-run', '--file', '--fix', '--help', '-h'];
 const VALUE_FLAGS = ['--file'];
