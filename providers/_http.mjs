@@ -2,7 +2,11 @@
 // Files prefixed with _ are never loaded as providers by scan.mjs.
 
 import './_dns-cache.mjs'; // memoize dns.lookup process-wide (see that file)
-import { DEFAULT_USER_AGENT, BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT } from '../user-agent.mjs';
+import {
+  DEFAULT_USER_AGENT,
+  BROWSER_LIKE_USER_AGENT,
+  MACOS_BROWSER_LIKE_USER_AGENT,
+} from '../user-agent.mjs';
 import { providerFetchContext } from './_ip-guard.mjs';
 
 export { BROWSER_LIKE_USER_AGENT, MACOS_BROWSER_LIKE_USER_AGENT };
@@ -27,9 +31,22 @@ async function fetchInContext(url, { timeoutMs = DEFAULT_TIMEOUT_MS, headers = {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // Defaults go through Headers so a caller's override wins whatever its
+    // capitalization. An object spread only replaces an identical key: a caller's
+    // 'User-Agent' sat beside the default 'user-agent', and fetch JOINED the two
+    // into one comma-separated value instead of replacing it.
+    const requestHeaders = new Headers(headers);
+    if (!requestHeaders.has('user-agent')) requestHeaders.set('user-agent', DEFAULT_USER_AGENT);
+    // accept-encoding is pinned to the codecs undici decodes correctly.
+    // Left unset, Node negotiates zstd, and amazon.jobs' zstd response comes
+    // back TRUNCATED AT 1024 BYTES with a 200 status — so the failure surfaces
+    // as an unrelated-looking "Unterminated string in JSON at position 1024"
+    // rather than a transport error. curl on the same URL returns the full
+    // ~900KB. Callers can still override via `headers`.
+    if (!requestHeaders.has('accept-encoding')) requestHeaders.set('accept-encoding', 'gzip, deflate, br');
     const res = await fetch(url, {
       method,
-      headers: { 'user-agent': DEFAULT_USER_AGENT, ...headers },
+      headers: requestHeaders,
       body,
       redirect,
       signal: controller.signal,
@@ -325,7 +342,9 @@ export function makeHttpCtx() {
 }
 
 // ── Fork-only: not present upstream ─────────────────────────────────
-// Imported by providers/consider.mjs, joinup.mjs and getro.mjs. Re-applied
+// Imported by providers/consider.mjs and joinup.mjs. (This said "and getro.mjs"
+// until 2026-09-23; getro.mjs imports other symbols from here but defines its own
+// local toEpochMs, so it was never an importer of this one.) Re-applied
 // after every sync that takes upstream's _http.mjs wholesale — see the
 // standing-adaptations list in the sync notes.
 
