@@ -33,16 +33,18 @@ beforeEach(() => {
 });
 
 describe("KNOWN registry", () => {
-  it("lists the eight agnostic CLIs with stable ids", () => {
+  it("lists the agnostic CLIs with stable ids", () => {
     expect(KNOWN.map((c) => c.id)).toEqual([
       "claude",
       "codex",
       "gemini",
       "opencode",
+      "pi",
       "copilot",
       "qwen",
       "antigravity",
       "grok",
+      "hermes",
     ]);
   });
 
@@ -64,6 +66,9 @@ describe("KNOWN registry", () => {
         // The prompt is piped to child.stdin instead (see api/cv/ingest and
         // api/portfolio/generate) — argv never carries it for this CLI.
         expect(argv).not.toContain("do the thing");
+      } else if (c.id === "hermes") {
+        // Hermes ends on --no-restore-cwd; the prompt rides after -q.
+        expect(argv[argv.indexOf("-q") + 1]).toBe("do the thing");
       } else {
         expect(argv[argv.length - 1]).toBe("do the thing");
       }

@@ -1,20 +1,18 @@
 // The follow-ups lock exists to stop a LOST UPDATE, so the test has to produce one.
 //
 // data/follow-ups.md is read-modify-written from two directions: the web's
-// log/override routes (via core/followups-lock.ts, which reuses the tracker
-// lock's protocol — see that file's header) and the core's cadence seeder
-// (followup-seed.mjs, which takes the identical lock via tracker-lock.mjs). Each
+// log/override routes and the core's cadence seeder (followup-seed.mjs). Each
 // writer reads the whole file, adds its own line, and writes the whole file
 // back. Unserialized, two overlapping writers each start from the same snapshot
 // and the second's full-file write discards the first's line — no error, a
 // well-formed file, one pin silently gone (the same shape as the tracker, #2900).
 //
-// This exercises the CORE's own withFollowupsLock directly (the same function
-// followup-seed.mjs's CLI path takes), asserting the failure FIRST (unlocked
-// writers lose data) and then that the lock removes it. Without the negative
-// half, a lock that never engaged would pass just as happily.
+// This asserts the failure FIRST (unlocked writers lose data) and then that the
+// core lock removes it. Without the negative half, a lock that never engaged
+// would pass just as happily. Verified red by hand: swap withFollowupsLock for a
+// passthrough and the "both survive" assertion fails.
 //
-// Run:  node --test src/lib/followups-lock.test.mjs
+// Run:  node --test tests/lib/followups-lock.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -88,7 +86,7 @@ test("WITHOUT a lock, two concurrent pin writers lose one update silently", asyn
 test("WITH the core lock, both pins survive", { skip: skipCore }, async () => {
   const { root, file } = makeFollowups();
   const guarded = (appNum, date, pauseMs) =>
-    core.withFollowupsLock(file, { lockTimeoutMs: 5_000, lockRetryMs: 25 }, () => addPin(file, appNum, date, pauseMs));
+    core.withFollowupsLock(file, () => addPin(file, appNum, date, pauseMs), { timeoutMs: 5_000, retryMs: 25 });
   try {
     await Promise.all([guarded(1, "2026-07-10", 60), guarded(2, "2026-07-11", 10)]);
     assert.equal(pinCount(file), 2, "a pin was lost even under the lock");
@@ -104,11 +102,11 @@ test("the lock is released on a throwing path, not just the happy one", { skip: 
   const { root, file } = makeFollowups();
   try {
     await assert.rejects(
-      core.withFollowupsLock(file, { lockTimeoutMs: 5_000, lockRetryMs: 25 }, () => { throw new Error("boom"); }),
+      core.withFollowupsLock(file, () => { throw new Error("boom"); }, { timeoutMs: 5_000, retryMs: 25 }),
       /boom/,
     );
     // If the lock had leaked, this second acquire would time out.
-    await core.withFollowupsLock(file, { lockTimeoutMs: 2_000, lockRetryMs: 25 }, () => addPin(file, 9, "2026-07-12", 0));
+    await core.withFollowupsLock(file, () => addPin(file, 9, "2026-07-12", 0), { timeoutMs: 2_000, retryMs: 25 });
     assert.equal(pinCount(file), 1, "second acquire after a throw should have written");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

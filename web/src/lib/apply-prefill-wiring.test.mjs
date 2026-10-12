@@ -54,9 +54,9 @@ test("the prefill route hands buildAnswerPrompt the applyCvSource result", () =>
 test("the prefill route resolves that cvSource from the CV the fill route attaches", () => {
   assert.match(route, /import\s*\{[^}]*\bresolveSessionCv\b[^}]*\}\s*from\s*"@\/lib\/apply\/cv"/);
   assert.match(route, /import\s*\{[^}]*\bapplyCvSource\b[^}]*\}\s*from\s*"@\/lib\/apply\/cv-source\.mjs"/);
-  assert.match(route, /resolveSessionCv\(\{[^}]*\bcompany\b[^}]*\bapplication\b[^}]*\}\)/);
+  assert.match(route, /resolveSessionCv\(dataRoot,\s*\{[^}]*\bcompany\b[^}]*\bapplication\b[^}]*\}\)/);
 
-  const resolve = route.indexOf("resolveSessionCv(");
+  const resolve = route.indexOf("resolveSessionCv(dataRoot");
   const prompt = route.indexOf("buildAnswerPrompt(");
   assert.notEqual(resolve, -1);
   assert.notEqual(prompt, -1);

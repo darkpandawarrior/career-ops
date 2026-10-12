@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, findApplication, isRegularContainedFile } from "@/lib/career-ops";
+import { findApplication, isRegularContainedFile } from "@/lib/career-ops";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { hasToken, matchesTailoredCover, sortNewestFirst } from "./cv-match.mjs";
 
@@ -34,17 +34,17 @@ const ROLE_SLUG_MAX = 30;
  * is exactly the #2599 defect. Company-only matching remains for the caller
  * that has no tracker row (a manually pasted URL).
  */
-export async function resolveTailoredCover(company?: string, applicationNumber?: string): Promise<string | null> {
+export async function resolveTailoredCover(root: string, company?: string, applicationNumber?: string): Promise<string | null> {
   const n = applicationNumber?.trim();
   // A number that names no row resolves nothing rather than silently widening
   // to the company scan, the same way resolveTailoredCv returns null for a row
   // it cannot join.
-  const app = n ? findApplication(n) : null;
+  const app = n ? findApplication(n, root) : null;
   if (n && !app) return null;
 
   const key = companySlug(app?.company ?? company);
   if (!key) return null;
-  const dir = path.join(careerOpsRoot(), "output");
+  const dir = path.join(root, "output");
 
   let files: string[];
   try {

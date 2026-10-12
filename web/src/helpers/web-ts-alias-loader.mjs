@@ -36,6 +36,9 @@ const WEB_SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", ".
 const HAS_EXT = /\.(m?[jt]sx?|json)$/i;
 
 export async function resolve(specifier, context, nextResolve) {
+  // Next's subpath exports (`next/headers`) are extensionless; plain Node ESM
+  // wants `next/headers.js`. profile-registry.ts imports it.
+  if (/^next\/[\w-]+$/.test(specifier)) return nextResolve(`${specifier}.js`, context);
   if (!specifier.startsWith("@/")) return nextResolve(specifier, context);
   const base = path.join(WEB_SRC, specifier.slice(2));
   // Specifiers that already name an extension (e.g. "@/lib/tracker-table.mjs")

@@ -117,7 +117,7 @@ async function withWorkspace(fn, { html = true, manifest = true, outsideHtml = f
 
 test("the prefill prompt names the very document the fill route attaches", async () => {
   await withWorkspace(async (root) => {
-    const attached = await resolveTailoredCv("Acme Corp");
+    const attached = await resolveTailoredCv(process.env.CAREER_OPS_ROOT, "Acme Corp");
     assert.ok(attached, "fixture is wrong: the fill route found no tailored CV to attach");
 
     const cvSource = applyCvSource(root, attached);
@@ -137,7 +137,7 @@ test("the prefill prompt names the very document the fill route attaches", async
 
 test("with no tailored CV, the prompt still sends the planner to cv.md", async () => {
   await withWorkspace(async () => {
-    const attached = await resolveTailoredCv("Nothing Built Here");
+    const attached = await resolveTailoredCv(process.env.CAREER_OPS_ROOT, "Nothing Built Here");
     assert.equal(attached, null);
 
     const prompt = buildAnswerPrompt({ title: "Nothing Built Here — Staff Engineer", fields: FIELDS, cvSource: null });
@@ -183,7 +183,7 @@ test("resolveSessionCv falls back to the company in the page title", async () =>
   // The paste-a-URL flow arrives with no offer context at all, so the form title
   // is the only key either route has.
   await withWorkspace(async (root) => {
-    assert.equal(await resolveSessionCv({ title: "Staff Engineer @ Acme Corp" }), join(root, PDF_REL));
+    assert.equal(await resolveSessionCv(process.env.CAREER_OPS_ROOT, { title: "Staff Engineer @ Acme Corp" }), join(root, PDF_REL));
   });
 });
 
@@ -191,7 +191,7 @@ test("resolveSessionCv stops at an application number that resolved nothing", as
   // THIS role has no tailored CV. Falling through to the title would attach a
   // sibling role's, which is the failure the number was passed to prevent.
   await withWorkspace(async () => {
-    assert.equal(await resolveSessionCv({ application: "999", title: "Staff Engineer @ Acme Corp" }), null);
+    assert.equal(await resolveSessionCv(process.env.CAREER_OPS_ROOT, { application: "999", title: "Staff Engineer @ Acme Corp" }), null);
   });
 });
 
@@ -229,7 +229,7 @@ test("the sensitive-field carve-out survives the tailored-CV wording", async () 
   // The one line standing between an auto-filler and a fabricated visa or salary
   // answer. It fails silently, so it is pinned on both branches.
   await withWorkspace(async (root) => {
-    const attached = await resolveTailoredCv("Acme Corp");
+    const attached = await resolveTailoredCv(process.env.CAREER_OPS_ROOT, "Acme Corp");
     for (const cvSource of [applyCvSource(root, attached), null]) {
       const prompt = buildAnswerPrompt({ title: "Acme Corp", fields: FIELDS, cvSource });
       for (const category of ["legal", "visa", "work-authorization", "salary", "demographic"]) {

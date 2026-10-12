@@ -153,7 +153,7 @@ describe("assembleDedupContext — inbox + applications integration", () => {
       { url: "", company: "  InboxCorp  ", role: "ignored-here", done: false },
     ]);
     appsByRoot.set(r, [
-      { n: "1", date: "", company: "  AppCorp  ", role: "  Staff Engineer  ", score: "", status: "", pdf: "", report: "", notes: "" },
+      { n: "1", date: "", company: "  AppCorp  ", role: "  Staff Engineer  ", score: "", status: "", pdf: "", report: "", notes: "", location: "", applyLink: "", followUp: "" },
     ]);
     const { lines } = assembleDedupContext(r);
     const companiesLine = lines.find((l) => l.startsWith("Companies already"));
@@ -169,8 +169,8 @@ describe("assembleDedupContext — inbox + applications integration", () => {
   it("skips applications with no company and no role (falsy guards)", () => {
     const r = root();
     appsByRoot.set(r, [
-      { n: "1", date: "", company: "", role: "", score: "", status: "", pdf: "", report: "", notes: "" },
-      { n: "2", date: "", company: "RealCo", role: "", score: "", status: "", pdf: "", report: "", notes: "" },
+      { n: "1", date: "", company: "", role: "", score: "", status: "", pdf: "", report: "", notes: "", location: "", applyLink: "", followUp: "" },
+      { n: "2", date: "", company: "RealCo", role: "", score: "", status: "", pdf: "", report: "", notes: "", location: "", applyLink: "", followUp: "" },
     ]);
     const { lines } = assembleDedupContext(r);
     const companiesLine = lines.find((l) => l.startsWith("Companies already"));
@@ -183,8 +183,8 @@ describe("assembleDedupContext — inbox + applications integration", () => {
   it("dedups companies/roles via Set semantics", () => {
     const r = root();
     appsByRoot.set(r, [
-      { n: "1", date: "", company: "Dup", role: "Same", score: "", status: "", pdf: "", report: "", notes: "" },
-      { n: "2", date: "", company: "Dup", role: "Same", score: "", status: "", pdf: "", report: "", notes: "" },
+      { n: "1", date: "", company: "Dup", role: "Same", score: "", status: "", pdf: "", report: "", notes: "", location: "", applyLink: "", followUp: "" },
+      { n: "2", date: "", company: "Dup", role: "Same", score: "", status: "", pdf: "", report: "", notes: "", location: "", applyLink: "", followUp: "" },
     ]);
     const { lines } = assembleDedupContext(r);
     expect(lines[0]).toBe("Companies already in the user's pipeline/tracker (don't re-propose these): Dup.");
@@ -197,7 +197,7 @@ describe("assembleDedupContext — list caps", () => {
     const r = root();
     const apps: Application[] = [];
     for (let i = 0; i < 200; i++) {
-      apps.push({ n: String(i), date: "", company: `Company${i}`, role: `Role${i}`, score: "", status: "", pdf: "", report: "", notes: "" });
+      apps.push({ n: String(i), date: "", company: `Company${i}`, role: `Role${i}`, score: "", status: "", pdf: "", report: "", notes: "", location: "", applyLink: "", followUp: "" });
     }
     appsByRoot.set(r, apps);
     const { lines } = assembleDedupContext(r);
@@ -241,7 +241,7 @@ describe("assembleDedupContext — lines assembly & empty state", () => {
     const r = root(["url", "https://x.com/a"].join("\n"));
     inboxByRoot.set(r, [{ url: "", company: "C", role: "", done: false }]);
     appsByRoot.set(r, [
-      { n: "1", date: "", company: "", role: "R", score: "", status: "", pdf: "", report: "", notes: "" },
+      { n: "1", date: "", company: "", role: "R", score: "", status: "", pdf: "", report: "", notes: "", location: "", applyLink: "", followUp: "" },
     ]);
     const { lines } = assembleDedupContext(r);
     expect(lines[0].startsWith("Companies already")).toBe(true);

@@ -161,6 +161,7 @@ describe("readCanonicalStates — fallback path", () => {
       "Evaluated",
       "Applied",
       "Responded",
+      "Assessment",
       "Interview",
       "Offer",
       "Hired",
@@ -168,7 +169,7 @@ describe("readCanonicalStates — fallback path", () => {
       "Discarded",
       "SKIP",
     ]);
-    expect(readCanonicalStates().length).toBe(9);
+    expect(readCanonicalStates().length).toBe(10);
   });
 
   it("falls back when the YAML has an empty/absent states list", async () => {
@@ -176,7 +177,7 @@ describe("readCanonicalStates — fallback path", () => {
     currentRoot = dir;
     writeStatesYml(dir, `states: []\n`);
     const { canonicalLabels } = await freshStates();
-    expect(canonicalLabels()).toHaveLength(9); // FALLBACK length
+    expect(canonicalLabels()).toHaveLength(10); // FALLBACK length
   });
 
   it("falls back when every entry is malformed (parsed length 0)", async () => {
@@ -184,7 +185,7 @@ describe("readCanonicalStates — fallback path", () => {
     currentRoot = dir;
     writeStatesYml(dir, `states:\n  - id: x\n  - id: y\n`); // no labels anywhere
     const { canonicalLabels } = await freshStates();
-    expect(canonicalLabels()).toHaveLength(9);
+    expect(canonicalLabels()).toHaveLength(10);
   });
 
   it("falls back when the file is not valid YAML", async () => {
@@ -193,7 +194,7 @@ describe("readCanonicalStates — fallback path", () => {
     fs.mkdirSync(path.join(dir, "templates"), { recursive: true });
     fs.writeFileSync(path.join(dir, "templates", "states.yml"), "::: not: [valid", "utf8");
     const { canonicalLabels } = await freshStates();
-    expect(canonicalLabels()).toHaveLength(9);
+    expect(canonicalLabels()).toHaveLength(10);
   });
 });
 

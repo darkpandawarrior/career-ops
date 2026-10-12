@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
+import { requestRoot } from "@/lib/profile-registry";
 import { resolveTailoredCover } from "@/lib/apply/cover";
 import { companySlug } from "@/lib/company-slug.mjs";
 
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
   // the distinction has to be drawn here to keep the 400.
   if (!application && !companySlug(company)) return new Response("company required", { status: 400 });
 
-  const file = await resolveTailoredCover(company, application);
+  const file = await resolveTailoredCover(await requestRoot(), company, application);
   if (!file) return new Response("no tailored cover letter found for this offer", { status: 404 });
 
   try {

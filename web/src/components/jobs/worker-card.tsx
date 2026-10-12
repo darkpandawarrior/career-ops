@@ -1,9 +1,60 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Check, X, Loader2, AlertTriangle } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
 import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
+import { isFencingNotice } from "@/lib/cli-fencing.mjs";
+
+// Humanize raw agent tool names into what the user actually cares about, so a
+// multi-minute evaluation reads as progress instead of a cryptic tool dump (#8).
+const STEP_LABELS: Record<string, string> = {
+  WebFetch: "Reading the posting",
+  WebSearch: "Searching the web",
+  Read: "Reading your CV & profile",
+  Glob: "Looking through your files",
+  Grep: "Looking through your files",
+  Write: "Writing the report",
+  Edit: "Updating the report",
+  NotebookEdit: "Updating the report",
+  Bash: "Saving to your tracker",
+  TodoWrite: "Planning the steps",
+  Task: "Working",
+};
+const humanizeStep = (label: string): string => STEP_LABELS[label] ?? label;
+
+// The unfenced-runtime notice is emitted as the run's FIRST step, before the CLI
+// produces any output — and this card renders only the newest step, so it would be
+// displaced within a second of the run starting. Scan the whole list instead, and
+// render it in the sticky slot below, the same shape jobErrorHint already uses.
+// Returns the notice ITSELF, not a boolean. There are two shapes — a runtime that
+// cannot be restricted at all, and one only partly restricted — and a card that
+// matched either then printed one hardcoded sentence told a sandboxed Codex run it
+// "ran with its default access", which is false. Rendering what the route emitted
+// keeps one source for the wording and cannot misdescribe a level (#2507).
+function fencingNotice(job: Job): string | undefined {
+  return job.steps.find((s) => isFencingNotice(s.label))?.label;
+}
+
+const fmtElapsed = (ms: number): string => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+const fmtTokens = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+
+// Tick once a second WHILE running so a long evaluation visibly counts up (never
+// looks frozen). Stops re-rendering as soon as the job settles.
+function useElapsed(running: boolean, startedAt: number): number {
+  const [now, setNow] = useState(startedAt);
+  useEffect(() => {
+    if (!running) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [running, startedAt]);
+  return Math.max(0, now - startedAt);
+}
 
 // The ONE worker card — a pure function of a Job. Rendered in three surfaces:
 // the sidebar tray (variant="tray", inside WorkerPills' Link), inline in the
@@ -34,11 +85,16 @@ export function WorkerCard({
   trailing?: React.ReactNode;
 }) {
   const tone = TONE[pillTone(job)];
-  const last = job.steps[job.steps.length - 1]?.label;
+  const running = job.status === "running";
+  const elapsed = useElapsed(running, job.startedAt);
+  const rawLast = job.steps[job.steps.length - 1]?.label;
+  const last = rawLast ? humanizeStep(rawLast) : undefined;
   const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
   const inline = variant === "inline";
   const hasScore = job.result?.score != null;
   const errorHint = jobErrorHint(job);
+  const fencing = fencingNotice(job);
+  const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
 
   return (
     <div className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
@@ -73,12 +129,24 @@ export function WorkerCard({
           <div className={cn("h-full w-full rounded-full", tone.bar)} />
         )}
       </div>
-      {bottom && (
-        <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>{bottom}</div>
+      {(bottom || running) && (
+        <div className={cn("mt-1 truncate text-faint", inline ? "text-xs" : "text-[10px]")}>
+          {running ? `${last ?? "Working"} · ${fmtElapsed(elapsed)}` : bottom}
+        </div>
       )}
       {errorHint && (
         <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           {errorHint.text}
+        </div>
+      )}
+      {fencing && (
+        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+          {fencing}
+        </div>
+      )}
+      {tokens > 0 && (
+        <div className={cn("mt-1 text-faint tabular-nums", inline ? "text-xs" : "text-[10px]")}>
+          {fmtTokens(tokens)} tokens{job.cost?.usd != null ? ` · $${job.cost.usd.toFixed(2)}` : ""}
         </div>
       )}
     </div>

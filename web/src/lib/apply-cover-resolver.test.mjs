@@ -129,7 +129,7 @@ async function withFixture(files, fn, rows) {
 
 test('resolveTailoredCover: resolves the name the writers actually produce, {company}-{role}-cover.pdf (a cover- PREFIX filter finds nothing real)', async () => {
   await withFixture([['acme-vp-marketing-cover.pdf']], async (outputDir) => {
-    const result = await resolveTailoredCover('Acme');
+    const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, 'Acme');
     assert.equal(result, join(outputDir, 'acme-vp-marketing-cover.pdf'));
   });
 });
@@ -141,7 +141,7 @@ test('resolveTailoredCover: a cv-*.pdf is never returned as a cover, even when i
       ['cv-jane-doe-acme-cover-letter-writer-2026-03-01.pdf', 0],
     ],
     async (outputDir) => {
-      const result = await resolveTailoredCover('Acme');
+      const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, 'Acme');
       assert.equal(result, join(outputDir, 'acme-vp-marketing-cover.pdf'));
     }
   );
@@ -149,21 +149,21 @@ test('resolveTailoredCover: a cv-*.pdf is never returned as a cover, even when i
 
 test('resolveTailoredCover: a PDF in output/ that is not a cover at all (an archived JD capture) is never returned', async () => {
   await withFixture([['2026-01-01_acme_vp-marketing.pdf']], async () => {
-    const result = await resolveTailoredCover('Acme');
+    const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, 'Acme');
     assert.equal(result, null);
   });
 });
 
 test('resolveTailoredCover: "Acme" does not resolve "Acmecorp"\'s cover (token-boundary match)', async () => {
   await withFixture([['acmecorp-engineer-cover.pdf']], async () => {
-    const result = await resolveTailoredCover('Acme');
+    const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, 'Acme');
     assert.equal(result, null);
   });
 });
 
 test('resolveTailoredCover: a punctuation-only company slugs to nothing and resolves nothing, rather than matching every cover in output/', async () => {
   await withFixture([['acme-vp-marketing-cover.pdf']], async () => {
-    const result = await resolveTailoredCover('!!!');
+    const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, '!!!');
     assert.equal(result, null);
   });
 });
@@ -175,7 +175,7 @@ test('resolveTailoredCover: newest match wins when a company has several covers 
       ['acme-head-of-growth-cover.pdf', 0],
     ],
     async (outputDir) => {
-      const result = await resolveTailoredCover('Acme');
+      const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, 'Acme');
       assert.equal(result, join(outputDir, 'acme-head-of-growth-cover.pdf'));
     }
   );
@@ -193,7 +193,7 @@ test('resolveTailoredCover: with an application number, a second application at 
       // Row 12 is the OLDER of the two covers. Resolving by company alone —
       // the shape #2599 removed from the CV resolver — would hand back
       // acme-head-of-growth-cover.pdf here.
-      const result = await resolveTailoredCover(undefined, '12');
+      const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, undefined, '12');
       assert.equal(result, join(outputDir, 'acme-vp-marketing-cover.pdf'));
     },
     [
@@ -207,7 +207,7 @@ test('resolveTailoredCover: with an application number, a cover that identifies 
   await withFixture(
     [['acme-head-of-growth-cover.pdf']],
     async () => {
-      const result = await resolveTailoredCover(undefined, '12');
+      const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, undefined, '12');
       assert.equal(result, null);
     },
     [{ n: '12', company: 'Acme', role: 'VP Marketing' }]
@@ -218,7 +218,7 @@ test('resolveTailoredCover: an application number naming no tracker row resolves
   await withFixture(
     [['acme-vp-marketing-cover.pdf']],
     async () => {
-      const result = await resolveTailoredCover('Acme', '99');
+      const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, 'Acme', '99');
       assert.equal(result, null);
     },
     [{ n: '12', company: 'Acme', role: 'VP Marketing' }]
@@ -231,7 +231,7 @@ test('resolveTailoredCover: matches the role slug generate-cover-letter.mjs trun
   await withFixture(
     [['acme-senior-director-of-product-mar-cover.pdf']],
     async (outputDir) => {
-      const result = await resolveTailoredCover(undefined, '12');
+      const result = await resolveTailoredCover(process.env.CAREER_OPS_ROOT, undefined, '12');
       assert.equal(result, join(outputDir, 'acme-senior-director-of-product-mar-cover.pdf'));
     },
     [{ n: '12', company: 'Acme', role: 'Senior Director of Product Marketing' }]

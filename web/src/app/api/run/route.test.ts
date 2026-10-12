@@ -50,10 +50,15 @@ vi.mock("node:child_process", () => ({ spawn: h.spawnMock }));
 
 vi.mock("@/lib/clis", () => ({
   resolveCli: vi.fn((id: string) => h.resolved),
+  resolveCliOrFallback: (id: string) => { const r = (h.resolved); return r ? { ...r, spec: { id, ...r.spec }, substitutedFrom: null } : null; },
+  cliSubstitutionNotice: () => null,
+  cliUnavailableError: (id: string) => ({ error: `CLI '${id}' not found on this machine` }),
 }));
 
 vi.mock("@/lib/career-ops", () => ({
   readMemory: vi.fn(() => h.memory),
+  readInbox: vi.fn(() => []),
+  readScanDates: vi.fn(() => new Map()),
   // The English/global default: `evaluate`'s prerequisite gate now checks the
   // mode file the prompt will actually read, which is this value.
   readLanguageConfig: vi.fn(() => ({ output: "en", modesDir: "modes", evalModeFile: "modes/oferta.md" })),
@@ -175,7 +180,7 @@ describe("POST /api/run — unknown cli", () => {
     const res = await POST(makeReq({ input: "https://x.test/job", cliId: "bogus" }));
     expect(res.status).toBe(404);
     expect(res.headers.get("Content-Type")).toBe("application/json");
-    expect(await res.json()).toEqual({ error: "CLI 'bogus' not found" });
+    expect(await res.json()).toEqual({ error: "CLI 'bogus' not found on this machine" });
   });
 });
 

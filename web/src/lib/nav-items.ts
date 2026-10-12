@@ -13,7 +13,8 @@ export type NavItem = {
 export const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "Today", icon: LayoutDashboard },
   { href: "/board", label: "Job board", icon: Target },
-  { href: "/explore", label: "Explore", icon: Compass },
+  { href: "/explore", label: "Explore", icon: Compass, chip: "New" },
+  { href: "/scheduled-scans", label: "Scheduled scans", icon: CalendarClock },
   { href: "/pipeline", label: "Pipeline", icon: ListChecks },
   { href: "/followups", label: "Follow-ups", icon: CalendarClock },
   { href: "/apply-queue", label: "Apply queue", icon: Send },

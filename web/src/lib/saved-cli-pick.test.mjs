@@ -5,7 +5,7 @@ import { test } from "node:test";
 // hold a hand-copied mirror of pickSoleInstalled, which cannot fail when the
 // real function changes -- exactly the drift that let the multi-CLI gap below
 // go unnoticed.
-import { keepIfInstalled, pickDefaultInstalled, pickSoleInstalled } from "../../src/lib/cli-pick.mjs";
+import { keepIfInstalled, pickDefaultInstalled, pickSoleInstalled } from "./cli-pick.mjs";
 
 test("sole installed CLI is the default", () => {
   assert.equal(

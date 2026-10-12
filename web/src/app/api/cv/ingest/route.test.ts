@@ -61,6 +61,9 @@ vi.mock("node:child_process", () => ({ spawn: h.spawnMock }));
 
 vi.mock("@/lib/clis", () => ({
   resolveCli: h.resolveCliMock,
+  resolveCliOrFallback: (id: string) => { const r = (h.resolveCliMock(id)); return r ? { ...r, spec: { id, ...r.spec }, substitutedFrom: null } : null; },
+  cliSubstitutionNotice: () => null,
+  cliUnavailableError: (id: string) => ({ error: `CLI '${id}' not found on this machine` }),
 }));
 
 vi.mock("@/lib/onboarding/run", () => ({
@@ -80,7 +83,7 @@ import { POST } from "./route";
 // A fake resolveCli result. `name`/`args` mirror the CliSpec shape the route uses
 // (spec.name for stderr framing; spec.args(prompt) for non-Claude invocation).
 function fakeResolved(name = "Codex", binPath = "/fake/bin/codex") {
-  return { spec: { id: name.toLowerCase(), name, bin: name.toLowerCase(), run: name, url: "", args: (p: string) => ["exec", p] }, binPath };
+  return { spec: { id: name.split(" ")[0].toLowerCase(), name, bin: name.toLowerCase(), run: name, url: "", args: (p: string) => ["exec", p] }, binPath };
 }
 
 // Drain a streaming Response body into a single decoded string.
@@ -304,7 +307,7 @@ describe("POST /api/cv/ingest — non-Claude verbatim path", () => {
 
     // Non-Claude uses spec.args(prompt) → ["exec", <prompt>], not the stream-json flags.
     expect(h.state.spawnArgs.cmd).toBe("/fake/bin/codex");
-    expect(h.state.spawnArgs.args[0]).toBe("exec");
+    expect(h.state.spawnArgs.args).toContain("exec"); // fencing prepends its own sandbox flags
     expect(h.state.spawnArgs.args).not.toContain("stream-json");
 
     const bodyPromise = readBody(res);

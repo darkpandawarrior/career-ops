@@ -21,6 +21,7 @@ const loader = `
         if (existsSync(base + ext)) return { url: pathToFileURL(base + ext).href, shortCircuit: true };
       }
     }
+    if (specifier === "next/headers") return nextResolve("next/headers.js", context);
     return nextResolve(specifier, context);
   }
 `;

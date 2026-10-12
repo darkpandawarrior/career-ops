@@ -31,7 +31,7 @@ const WEB = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 // URL scheme and throws ERR_UNSUPPORTED_ESM_URL_SCHEME. POSIX happens to
 // tolerate the path form, so the bug is invisible until CI runs on Windows.
 // web-ts-alias-loader.test.mjs already does this; I did not copy it.
-const LOADER = pathToFileURL(join(WEB, "tests", "helpers", "web-ts-alias-loader.mjs")).href;
+const LOADER = pathToFileURL(join(WEB, "src", "helpers", "web-ts-alias-loader.mjs")).href;
 
 const DRIVER = `
 const { GET } = await import("@/app/api/whats-new/route.ts");

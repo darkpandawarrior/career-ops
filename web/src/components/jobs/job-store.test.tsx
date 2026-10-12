@@ -124,14 +124,14 @@ describe("JobsProvider.startJob — per-profile worker dispatch", () => {
     expect(runCall!.body).toMatchObject({ cliId: "claude", kind: "evaluate", input: "https://job.example/anthropic" });
   });
 
-  it("with /api/cli selected:null, ends in error 'No CLI configured — open Config' and never calls /api/run", async () => {
+  it("with /api/cli selected:null, ends in error 'No CLI configured — open Config and click Save config' and never calls /api/run", async () => {
     const { fetchMock } = mockFetch({ selected: null });
 
     renderHarness();
     fireEvent.click(screen.getByText("run-job"));
 
     await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("error"));
-    expect(screen.getByTestId("last-step").textContent).toBe("No CLI configured — open Config");
+    expect(screen.getByTestId("last-step").textContent).toBe("No CLI configured — open Config and click Save config");
 
     // The worker short-circuits before dispatch — /api/run is never reached.
     const urls = fetchMock.mock.calls.map((c) => c[0]);
@@ -150,7 +150,7 @@ describe("JobsProvider.startJob — per-profile worker dispatch", () => {
     fireEvent.click(screen.getByText("run-job"));
 
     await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("error"));
-    expect(screen.getByTestId("last-step").textContent).toBe("No CLI configured — open Config");
+    expect(screen.getByTestId("last-step").textContent).toBe("No CLI configured — open Config and click Save config");
   });
 
   it("streams tool/status/text events from /api/run into the job before finishing", async () => {

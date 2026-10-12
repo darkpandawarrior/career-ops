@@ -98,12 +98,12 @@ describe("GET /api/usage", () => {
     expect(body.window7d).toEqual({ tokens: 175, messages: 1 });
   });
 
-  it("ignores cache_read tokens (only input+output+cache_creation are counted)", async () => {
+  it("counts cache_read tokens too (input+output+cache_creation+cache_read)", async () => {
     writeTranscript("proj-a", "s.jsonl", [
       usageLine(HOUR, { input_tokens: 10, output_tokens: 0, cache_read_input_tokens: 9999 }),
     ]);
     const body = await (await GET()).json();
-    expect(body.window7d.tokens).toBe(10);
+    expect(body.window7d.tokens).toBe(10009);
   });
 
   it("treats missing token fields as 0", async () => {

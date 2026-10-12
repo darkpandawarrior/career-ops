@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveCli } from "@/lib/clis";
+import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { getSession } from "@/lib/apply/session";
+import { resolveSessionCv } from "@/lib/apply/cv";
+import { applyCvSource } from "@/lib/apply/cv-source.mjs";
 import { buildAnswerPrompt } from "@/lib/apply/answer-prompt.mjs";
 import { runPlanner } from "@/lib/apply/planner";
 
@@ -75,13 +77,21 @@ function extractJsonObject(text: string): { obj: Record<string, unknown> | null;
 // exit code/signal, parse outcome) so a stuck/empty prefill is observable on the
 // page AND written to <root>/.career-ops-web/apply-prefill.log for debugging.
 export async function POST(req: Request) {
-  let body: { sessionId?: string; cliId?: string };
+  let body: { sessionId?: string; cliId?: string; company?: string; application?: string };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, cliId } = body;
+  const { sessionId, cliId: requestedCliId, company, application } = body;
+  // Same two identifiers the fill route takes, validated the same way: they
+  // reach a filesystem resolver, so a non-string is refused before it gets there.
+  if (company !== undefined && typeof company !== "string") {
+    return Response.json({ error: "company must be a string" }, { status: 400 });
+  }
+  if (application !== undefined && typeof application !== "string") {
+    return Response.json({ error: "application must be a string" }, { status: 400 });
+  }
   const t0 = Date.now();
   const encoder = new TextEncoder();
   const dataRoot = await requestRoot();
@@ -110,61 +120,48 @@ export async function POST(req: Request) {
           /* ignore */
         }
       };
+      // Idempotent, like the `closed` guard the sibling routes carry. fail() closes
+      // the controller, and there is more than one path to it: a fencing refusal
+      // reports through fail() and then resolves with an empty buffer, which the
+      // empty-output branch below reports through fail() a second time. Closing an
+      // already-closed controller throws "Invalid state", and that throw escapes
+      // the async start() as an unhandled rejection — a worse failure than the one
+      // being reported.
+      let failed = false;
       const fail = (m: string, raw?: string) => {
+        if (failed) return;
+        failed = true;
         log(`ERROR: ${m}`);
         emit({ t: "error", m, raw });
         controller.close();
       };
       try {
-        fs.appendFileSync(logPath, `\n===== prefill ${new Date(t0).toISOString()} session=${sessionId} cli=${cliId} =====\n`);
+        fs.appendFileSync(logPath, `\n===== prefill ${new Date(t0).toISOString()} session=${sessionId} cli=${requestedCliId} =====\n`);
       } catch {
         /* ignore */
       }
 
       const s = sessionId ? getSession(sessionId) : undefined;
       if (!s) return fail("apply session not found (it may have expired)");
-      const resolved = cliId ? resolveCli(cliId) : null;
-      if (!resolved) return fail(`CLI '${cliId}' not found on this machine`);
+      const resolved = requestedCliId ? resolveCliOrFallback(requestedCliId) : null;
+      if (!resolved) return fail(cliUnavailableError(requestedCliId ?? "").error);
       const { spec, binPath } = resolved;
+      // The CLI actually running: the planner's fencing and argv are keyed on it.
+      const cliId = spec.id;
+      const substitution = cliSubstitutionNotice(resolved);
+      if (substitution) log(substitution);
 
       const mem = readMemory(dataRoot).trim();
-      // Inline the candidate's REAL files into the prompt — we're LOCAL (same
-      // machine, the very data the planner would Read anyway), so the planner needs
-      // ZERO tool round-trips: this kills the ~50s of startup file-reads + the
-      // mid-draft plateau that made prefill feel hung. cv.md is the source of truth;
-      // a SEEDED TEMPLATE profile (Jane Smith placeholders) is skipped so its
-      // placeholder data can't poison answers.
-      let cv = "";
-      try {
-        cv = fs.readFileSync(path.join(dataRoot, "cv.md"), "utf8");
-      } catch {
-        /* no cv.md → fall back to letting the planner read files itself */
-      }
-      const haveCv = cv.trim().length > 0;
-      let profile = "";
-      try {
-        const p = fs.readFileSync(path.join(dataRoot, "config", "profile.yml"), "utf8");
-        if (!/jane\s+smith|jane@|@example\.com|your[-_. ]?(name|email)|placeholder/i.test(p)) profile = p;
-      } catch {
-        /* none */
-      }
-      let report = "";
-      try {
-        const company = (s.title.split(/\bat\b/i).pop() || s.title).trim();
-        const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-        if (slug.length > 2) {
-          const dir = path.join(dataRoot, "reports");
-          const hit = fs.readdirSync(dir).filter((f) => f.endsWith(".md") && f.toLowerCase().includes(slug)).sort().pop();
-          if (hit) report = fs.readFileSync(path.join(dir, hit), "utf8").slice(0, 12000);
-        }
-      } catch {
-        /* no matching report → fine, it's optional context */
-      }
-      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem, cv, profile, report });
+      // Draft from the SAME tailored CV the fill route uploads to this form,
+      // resolved through the one shared call so the answers and the resume
+      // stapled to them cannot describe different documents.
+      const cvPath = await resolveSessionCv(dataRoot, { company, application, title: s.title });
+      const cvSource = cvPath ? applyCvSource(dataRoot, cvPath) : null;
+      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem, cvSource });
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
+      log(`CV source: ${cvSource ?? "none found — answers will come from cv.md"}`);
       log(`Planner: ${cliId} (${binPath})`);
-      log(`Context: CV ${cv.length}c${profile ? ` + profile ${profile.length}c` : ""}${report ? ` + report ${report.length}c` : ""}${haveCv ? " — inlined, no file reads (fast path)" : " — none inlined; planner will read files"}`);
 
       // Consent/sensitive detector — used BOTH while streaming (so a policy "Yes"
       // never even flashes into the UI) and in the final post-filter. Scoped to
@@ -215,7 +212,6 @@ export async function POST(req: Request) {
         fieldCount: s.fields.length,
         cwd: careerOpsRoot(),
         env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
-        haveCv,
         t0,
         log,
         onText: (text) => {
@@ -223,6 +219,11 @@ export async function POST(req: Request) {
           flushFields();
         },
       });
+
+      // Fencing refused to start the planner (#2507): runPlanner already logged
+      // the reason; report it as THE error, before the empty-output branch below
+      // turns it into an unrelated "produced no output".
+      if (result.refused) return fail(result.refused);
 
       log(`Planner exited code=${result.code} signal=${result.signal} · ${result.buf.length} chars total`);
       log(`output head: ${result.buf.slice(0, 100).replace(/\s+/g, " ") || "(empty)"}`);

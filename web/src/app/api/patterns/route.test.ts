@@ -105,12 +105,12 @@ describe("GET /api/patterns — happy path", () => {
     expect(body.result).toEqual({ a: { b: 2 } });
   });
 
-  it("invokes node with the script path and --json, scoped to the data root via env", async () => {
+  it("invokes node with the script path (no --json: the script emits JSON itself), scoped to the data root via env", async () => {
     feed(JSON.stringify({ ok: true }));
     await GET();
     expect(h.lastCall).not.toBeNull();
     expect(h.lastCall!.file).toBe("node");
-    expect(h.lastCall!.args).toEqual([SCRIPT, "--json"]);
+    expect(h.lastCall!.args).toEqual([SCRIPT]);
     expect(h.lastCall!.opts.cwd).toBe(ENGINE);
     const env = h.lastCall!.opts.env as Record<string, string>;
     expect(env.CAREER_OPS_ROOT).toBe(DATA_ROOT);
@@ -157,13 +157,11 @@ describe("GET /api/patterns — bad output / non-zero exit", () => {
     expect(body).toEqual({ available: false, result: null });
   });
 
-  it("does NOT trust partial stdout from a non-zero-exit child (regression)", async () => {
-    // A crashed child may have printed partial/garbled JSON; the route now blanks
-    // the output on error so a failed run degrades to available:false, not garbage.
+  it("DOES use stdout from a non-zero-exit child (analyze-patterns exits 1 for 'not enough data' but prints JSON)", async () => {
     feed(JSON.stringify({ partial: true }), new Error("Command failed: exit 1"));
     const res = await GET();
     const body = await res.json();
-    expect(body).toEqual({ available: false, result: null });
+    expect(body).toEqual({ available: true, result: { partial: true } });
   });
 
   it("returns available:false when the child errors AND produced no stdout", async () => {

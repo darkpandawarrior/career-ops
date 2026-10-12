@@ -2,10 +2,18 @@ import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolveCli } from "@/lib/clis";
+import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback, type CliResolution } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { runOnboarding } from "@/lib/onboarding/run";
+import { CAPS } from "@/lib/worker-capabilities.mjs";
+import { scopeFrom } from "@/lib/claude-invocation.mjs";
+import { fencingReport } from "@/lib/cli-fencing.mjs";
+
+// Deny list DERIVED, never hand-written: every one of the six advisor argvs
+// that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
+// then auto-approves (#2185, #2507).
+const ADVISOR_SCOPE = scopeFrom("Read,Glob,Grep");
 
 // Parse a CV (pasted text or an uploaded PDF) into clean cv.md markdown by running
 // the USER'S OWN CLI headless — the web never ships a heavyweight parser, and the
@@ -64,6 +72,7 @@ export async function POST(req: Request) {
   let cliId = "";
   let promptSource = "";
   let tempFile: string | null = null;
+  let resolved: CliResolution | null = null;
 
   try {
     if (ctype.includes("application/json")) {
@@ -77,11 +86,17 @@ export async function POST(req: Request) {
       cliId = String(form.get("cliId") || "");
       const file = form.get("file");
       if (!(file instanceof File)) return Response.json({ error: "no file" }, { status: 400 });
+      // Resolve first: if no CLI can run, that is the error to show, not the PDF
+      // one below, which would wrongly say Claude is missing (#4607).
+      resolved = resolveCliOrFallback(cliId);
+      if (!resolved) return Response.json(cliUnavailableError(cliId), { status: 404 });
       const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || ".pdf").toLowerCase();
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-cv-"));
       tempFile = path.join(dir, `cv${ext}`); // outside the repo, basename-only
       fs.writeFileSync(tempFile, Buffer.from(await file.arrayBuffer()), { mode: 0o600 }); // PII → owner-only
-      if (cliId !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
+      // Judged on the CLI that will actually run: a stale saved id falls back to the sole
+      // installed CLI, and that may well be Claude.
+      if (resolved.spec.id !== "claude" && /\.(pdf|docx)$/i.test(file.name)) {
         // Non-Claude CLIs can't read arbitrary files via tool calls. Extract the PDF
         // text locally via pdfjs (zero tokens, same bridge the onboarding flow uses),
         // then hand the text to the CLI exactly like the paste path.
@@ -105,12 +120,15 @@ export async function POST(req: Request) {
     return Response.json({ error: "bad request" }, { status: 400 });
   }
 
-  const resolved = resolveCli(cliId);
+  resolved ??= resolveCliOrFallback(cliId);
   if (!resolved) {
     if (tempFile) cleanupTemp(tempFile);
-    return Response.json({ error: `CLI '${cliId}' not found on this machine` }, { status: 404 });
+    return Response.json(cliUnavailableError(cliId), { status: 404 });
   }
   const { spec, binPath } = resolved;
+  // The CLI actually running: fencing and argv below are keyed on it.
+  cliId = spec.id;
+  const substitution = cliSubstitutionNotice(resolved);
   const prompt = ingestPrompt(promptSource);
   const dataRoot = await requestRoot();
   const isClaude = cliId === "claude";
@@ -124,16 +142,26 @@ export async function POST(req: Request) {
         "--include-partial-messages",
         "--permission-mode",
         "acceptEdits",
+        // Required for a non-writing worker — see cli-fencing.mjs (#2507).
+        "--strict-mcp-config",
         "--allowedTools",
-        "Read,Glob,Grep", // read the temp PDF; CANNOT write/edit/shell (proposer)
+        ADVISOR_SCOPE.allowed,
         "--disallowedTools",
-        "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch",
+        ADVISOR_SCOPE.disallowed,
       ]
     : spec.args(prompt);
 
   let child;
   try {
-    child = spawnHeadlessCli(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, shell: process.platform === "win32" });
+    // Reads the temp PDF and proposes; cannot write, and does not fetch — the
+    // Claude branch denies WebFetch/WebSearch outright, so this is the strictest
+    // record and Codex gets a true read-only sandbox.
+    child = spawnHeadlessCli(
+      binPath,
+      args,
+      { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot } },
+      { cliId, capabilities: CAPS.localReadOnly },
+    );
   } catch (e) {
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
@@ -166,12 +194,28 @@ export async function POST(req: Request) {
           }
         }
       };
-      const emit = (s: string) => {
-        if (!closed && s) {
-          emitted = true;
+      const safeEnqueue = (s: string): boolean => {
+        if (closed || !s) return false;
+        try {
           controller.enqueue(encoder.encode(s));
+          return true;
+        } catch {
+          closed = true;
+          return false;
         }
       };
+      const emit = (s: string) => {
+        if (safeEnqueue(s)) emitted = true;
+      };
+      // Same honesty as the other CLI-spawning routes: a runtime with no verified
+      // fencing mechanism runs with its default access, and that must be visible
+      // rather than inferred from which CLI happens to be selected (#2507). This
+      // stream is plain text, so the notice is a leading line rather than an event.
+      // It lands in the client's `trace`, which renders only its latest line — a
+      // pre-existing limit of this view, not something to work around here.
+      const fencing = fencingReport({ cliId, cliName: spec.name, capabilities: CAPS.localReadOnly });
+      if (fencing.notice) safeEnqueue(`⚠️ ${fencing.notice}\n\n`);
+      if (substitution) safeEnqueue(`⚠️ ${substitution}\n\n`);
 
       child.stdout.on("data", (d: Buffer) => {
         if (closed) return;

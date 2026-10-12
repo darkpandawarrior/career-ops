@@ -88,6 +88,9 @@ vi.mock("node:fs", async (importOriginal) => {
 
 vi.mock("@/lib/clis", () => ({
   resolveCli: vi.fn(() => h.resolved),
+  resolveCliOrFallback: (id: string) => { const r = (h.resolved); return r ? { ...r, spec: { id, ...r.spec }, substitutedFrom: null } : null; },
+  cliSubstitutionNotice: () => null,
+  cliUnavailableError: (id: string) => ({ error: `CLI '${id}' not found on this machine` }),
 }));
 
 vi.mock("@/lib/career-ops", () => ({
@@ -104,6 +107,9 @@ vi.mock("@/lib/core/discover", () => ({
 }));
 
 import { POST } from "./route";
+
+// Upstream prefixes a "cannot be permission-restricted" notice for CLIs the fence cannot certify.
+const unfenced = (t: string) => t.replace(/^⚠️[^\n]*\n\n/, "");
 
 function makeReq(body: unknown): Request {
   return new Request("http://localhost/api/explore/ai", {
@@ -195,7 +201,7 @@ describe("POST /api/explore/ai — streaming (generic CLI)", () => {
       child.stdout.emit("data", Buffer.from("found one"));
       child.emit("close");
     });
-    expect(text).toBe("hunting boards... found one");
+    expect(unfenced(text)).toBe("hunting boards... found one");
   });
 
   it("spawns the resolved binary with the spec's args and the prompt, scoped to the data root via env", async () => {
@@ -212,7 +218,7 @@ describe("POST /api/explore/ai — streaming (generic CLI)", () => {
 
   it("emits the no-output placeholder when the child closes having produced nothing", async () => {
     const text = await collect(makeReq({ query: "x", cliId: "opencode" }), (child) => child.emit("close"));
-    expect(text).toBe("_(no output — is the CLI authenticated?)_");
+    expect(unfenced(text)).toBe("_(no output — is the CLI authenticated?)_");
   });
 
   it("surfaces stderr lines that look like errors, prefixed with the CLI name", async () => {
@@ -229,7 +235,7 @@ describe("POST /api/explore/ai — streaming (generic CLI)", () => {
       child.stdout.emit("data", Buffer.from("ok"));
       child.emit("close");
     });
-    expect(text).toBe("ok");
+    expect(unfenced(text)).toBe("ok");
     expect(text).not.toContain("loading model weights");
   });
 
@@ -306,7 +312,7 @@ describe("POST /api/explore/ai — streaming (claude stream-json)", () => {
       child.stdout.emit("data", Buffer.from(claudeDelta("Greenhouse...")));
       child.emit("close");
     });
-    expect(text).toBe("Searching Greenhouse...");
+    expect(unfenced(text)).toBe("Searching Greenhouse...");
   });
 
   it("reassembles a stream-json line split across stdout chunks", async () => {
@@ -317,7 +323,7 @@ describe("POST /api/explore/ai — streaming (claude stream-json)", () => {
       child.stdout.emit("data", Buffer.from(line.slice(mid)));
       child.emit("close");
     });
-    expect(text).toBe("split across chunks");
+    expect(unfenced(text)).toBe("split across chunks");
   });
 
   it("ignores non-delta stream-json events and malformed lines", async () => {
@@ -327,7 +333,7 @@ describe("POST /api/explore/ai — streaming (claude stream-json)", () => {
       child.stdout.emit("data", Buffer.from(claudeDelta("real text")));
       child.emit("close");
     });
-    expect(text).toBe("real text");
+    expect(unfenced(text)).toBe("real text");
   });
 
   it("uses the claude-specific arg set (stream-json + read-only proposer tools), not spec.args", async () => {

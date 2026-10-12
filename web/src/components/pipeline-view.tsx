@@ -1,27 +1,32 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useOptimistic, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, Loader2, X, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { canonStatus, scoreNum, scoreTone, statusDot, CANONICAL_STATES } from "@/lib/format";
+import { canonStatus, scoreNum, scoreTone } from "@/lib/format";
+import { StatusSelect } from "@/components/status-select";
+import { applicationKey, applySavedStatus } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
-import { PageShell, PageHeader } from "@/components/ui/page-shell";
-import { EmptyState } from "@/components/ui/empty-state";
-import { StatusDot } from "@/components/ui/status-dot";
 import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
+import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
+import { startRouteProgress } from "@/components/route-progress";
+import { sortRows } from "@/lib/core/pipeline-sort.mjs";
+import { PageFrame } from "@/components/page-frame";
+import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 
-// INBOX (the action queue) is the default tab; the rest filter the tracker.
+// INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
   "INBOX",
   "ALL",
   "EVALUATED",
   "APPLIED",
   "RESPONDED",
+  "ASSESSMENT",
   "INTERVIEW",
   "OFFER",
   "HIRED",
@@ -31,7 +36,7 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
-const SORT_KEYS = ["company", "role", "score", "status", "date"] as const;
+const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
@@ -44,12 +49,20 @@ export function PipelineView({
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const [isPending, startNavigation] = useTransition();
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
+  // Starts AFTER the POST succeeds. React replays the confirmed save over
+  // intervening snapshots and discards it when the refresh transition settles.
+  const [visibleApplications, showSavedStatus] = useOptimistic(applications, applySavedStatus<Application>);
+  const [announcement, setAnnouncement] = useState("");
+  const activeTab = useRef<HTMLButtonElement>(null);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
   // the table identically (no useState mirror → no desync).
   const pTab = (params.get("tab") ?? "").toUpperCase();
   const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "INBOX";
+  const visibleTab = isPending && pendingTab ? pendingTab : tab;
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
@@ -59,6 +72,8 @@ export function PipelineView({
   // Search stays LOCAL for snappy typing; seeded from the URL and re-synced only
   // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
   const [q, setQ] = useState(params.get("q") ?? "");
+  // Typing stays local, so include it explicitly when leaving the list.
+  const detailQuery = pipelineQuery(params.toString(), q);
   const lastUrlQ = useRef(params.get("q") ?? "");
   useEffect(() => {
     const urlQ = params.get("q") ?? "";
@@ -76,13 +91,25 @@ export function PipelineView({
         else sp.set(k, String(v));
       }
       const qs = sp.toString();
-      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+      if (qs === params.toString()) return;
+      if (Object.prototype.hasOwnProperty.call(updates, "tab")) {
+        const nextTab = String(updates.tab ?? "INBOX").toUpperCase();
+        if ((TABS as readonly string[]).includes(nextTab)) setPendingTab(nextTab as Tab);
+      }
+      startRouteProgress();
+      startNavigation(() => {
+        router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+      });
     },
-    [params, router, pathname],
+    [params, router, pathname, startNavigation],
   );
 
+  useEffect(() => {
+    if (!isPending) setPendingTab(null);
+  }, [isPending]);
+
   // Pending + deduped by URL (pipeline.md can list the same posting twice) so the
-  // header count, the tab count, and the triage list all agree on one number.
+  // header count, the tab count and the triage list all agree on one number.
   const pendingInbox = useMemo(() => {
     const seen = new Set<string>();
     const out: InboxJob[] = [];
@@ -96,7 +123,7 @@ export function PipelineView({
 
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
-    let rows = applications;
+    let rows = visibleApplications;
     if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
     if (minFilter != null) {
       rows = rows.filter((r) => {
@@ -108,51 +135,42 @@ export function PipelineView({
       const needle = q.toLowerCase();
       rows = rows.filter((r) => companySearchText(r).toLowerCase().includes(needle));
     }
-    return [...rows].sort((a, b) => {
-      if (sort.key === "score") {
-        const an = scoreNum(a.score);
-        const bn = scoreNum(b.score);
-        const av = Number.isNaN(an) ? -Infinity : an;
-        const bv = Number.isNaN(bn) ? -Infinity : bn;
-        return (av - bv) * sort.dir;
-      }
-      // Sort the company column by what the row actually SHOWS: a confidential
-      // employer renders as "Confidential · via X", so sorting the raw "?" would
-      // pile every masked row together under a label nobody sees.
-      const aValue = sort.key === "company" ? companyPresentation(a).label : a[sort.key] || "";
-      const bValue = sort.key === "company" ? companyPresentation(b).label : b[sort.key] || "";
-      return aValue.localeCompare(bValue) * sort.dir;
-    });
-  }, [applications, tab, q, sort, minFilter]);
+    // scoreNum is the real score parser (it handles the tracker's "4.2/5"
+    // cells); sortRows takes it rather than keeping a second copy (#4333).
+    return sortRows(
+      rows,
+      sort,
+      scoreNum,
+      (row) => companyPresentation(row).label,
+    ) as Application[];
+  }, [visibleApplications, tab, q, sort, minFilter]);
 
   return (
-    <PageShell maxWidth="6xl" className="max-sm:pb-24">
-      <PageHeader
-        title="Pipeline"
-        description={
-          <>
+    <PageFrame>
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
+          <p className="mt-1 text-sm text-muted">
             <span className="tabular-nums">{pendingInbox.length}</span> in inbox ·{" "}
-            <span className="tabular-nums">{applications.length}</span> tracked
-          </>
-        }
-        actions={
-          // the tracker has its own search; the inbox brings its own facet filters
-          tab !== "INBOX" ? (
-            <div className="relative w-64 max-w-[40vw]">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search company or role…"
-                className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-              />
-            </div>
-          ) : undefined
-        }
-      />
+            <span className="tabular-nums">{visibleApplications.length}</span> tracked
+          </p>
+        </div>
+        {/* the tracker has its own search; the inbox brings its own facet filters */}
+        {visibleTab !== "INBOX" && (
+          <div className="relative w-64 max-w-[40vw]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search company or role…"
+              className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
+            />
+          </div>
+        )}
+      </div>
 
-      {/* funnel mini-viz — status distribution across the tracker */}
-      <Funnel applications={applications} />
+      {/* funnel mini-viz: status distribution across the tracker */}
+      <Funnel applications={visibleApplications} />
 
       {/* tabs */}
       <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
@@ -161,15 +179,18 @@ export function PipelineView({
             t === "INBOX"
               ? pendingInbox.length
               : t === "ALL"
-                ? applications.length
-                : applications.filter((r) => canonStatus(r.status).includes(t)).length;
+                ? visibleApplications.length
+                : visibleApplications.filter((r) => canonStatus(r.status).includes(t)).length;
           return (
             <button
               key={t}
+              ref={tab === t ? activeTab : undefined}
               onClick={() => setParams({ tab: t === "INBOX" ? null : t })}
               className={cn(
-                "-mb-px border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                tab === t
+                // gap-1, not a whitespace text node: flex containers drop
+                // whitespace-only anonymous items, which rendered "INBOX0".
+                "-mb-px inline-flex items-center justify-center gap-1 border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+                visibleTab === t
                   ? "border-brand text-foreground"
                   : "border-transparent text-muted hover:text-foreground",
               )}
@@ -180,13 +201,15 @@ export function PipelineView({
         })}
       </div>
 
-      {tab !== "INBOX" && minFilter != null && (
+      <p role="status" className="sr-only">{announcement}</p>
+
+      {visibleTab !== "INBOX" && minFilter != null && (
         <div className="mt-3 flex items-center gap-2">
           <span className="text-xs text-faint">Filtered:</span>
           <button
             type="button"
             onClick={() => setParams({ min: null })}
-            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15 max-sm:min-h-[44px]"
+            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
             title="Clear score filter"
           >
             score ≥ {minFilter.toFixed(1)}
@@ -195,132 +218,166 @@ export function PipelineView({
         </div>
       )}
 
-      {tab === "INBOX" ? (
+      {visibleTab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
           <InboxTriage inbox={pendingInbox} />
         ) : (
-          <EmptyState
-            className="mt-4"
-            variant="terminal"
-            title={<>Your <span className="text-brand">inbox</span> is empty.</>}
-            description="Find roles that match your CV — free, no tokens spent."
-            actions={
-              <>
-                <Link
-                  href="/explore?run=1"
-                  className="inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition hover:bg-brand-200 max-sm:min-h-[44px]"
-                >
-                  Run your first free scan <ArrowRight className="size-4" />
-                </Link>
-                <p className="mt-4 font-mono text-xs text-faint">
-                  Prefer the terminal? <span className="text-foreground/40">$</span> career-ops scan — or drop URLs into data/pipeline.md.
-                </p>
-              </>
-            }
-          />
+          <InboxEmpty count={0} filtered={false} />
         )
-      ) : filtered.length > 0 ? (
-        <>
-          {/* ── Tracker table (desktop) ── */}
-          <div className="mt-4 hidden overflow-hidden rounded-2xl border border-border md:block">
-            <table className="w-full text-sm">
-              <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
-                <tr>
-                  {SORT_KEYS.map((k) => (
-                    <th
-                      key={k}
-                      className="cursor-pointer select-none px-4 py-2.5 font-medium hover:text-foreground"
+      ) : isPending || filtered.length > 0 ? (
+        /* ── Tracker table ──
+           overflow-x-auto, not overflow-hidden: the rounded corners still clip,
+           but a table too wide for the viewport can now be scrolled to instead
+           of being silently cut off. min-w keeps the columns readable rather
+           than letting w-full crush them on a phone. */
+        <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
+          <table className="w-full min-w-[44rem] text-sm">
+            <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
+              <tr>
+                {SORT_KEYS.map((k) => (
+                  <th
+                    key={k}
+                    aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
+                    className={cn(
+                      "whitespace-nowrap px-4 py-2.5 font-medium",
+                      k === "date" && "hidden lg:table-cell",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
                       onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
                     >
-                      <span className="inline-flex items-center gap-1">
-                        {k}
-                        <ChevronsUpDown className="size-3" />
-                      </span>
-                    </th>
-                  ))}
-                  <th className="px-4 py-2.5 font-medium">notes</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filtered.map((r, i) => {
-                  const company = companyPresentation(r);
-                  return (
-                  <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
+                      {k}
+                      <ChevronsUpDown aria-hidden="true" className="size-3" />
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            {/* Keep editors mounted while query navigation is pending: sorting
+                must not discard an open editor or an in-flight status save. */}
+            <tbody className="divide-y divide-border" hidden={isPending} aria-busy={false}>
+              {filtered.map((r) => {
+                const company = companyPresentation(r);
+                const key = applicationKey(r);
+                const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
+                return (
+                  <tr key={key} data-application-key={key} className="group transition-colors hover:bg-surface/40">
+                    <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
+                      <Link href={detailHref} className="transition-colors group-hover:text-brand">
+                        #{r.n}
+                      </Link>
+                    </td>
                     <td className="px-4 py-3 font-medium">
-                      <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
+                      <Link href={detailHref} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
                         <CompanyLogo name={company.logoName} size={20} />
                         {company.label}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-muted">
-                      <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
-                      {r.via && r.via !== "—" && r.via !== "-" && (
-                        <span className="ml-1.5 rounded-full bg-surface px-1.5 py-0.5 text-[11px] text-faint">via {r.via}</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-                    </td>
-                    <td className="px-4 py-3 text-muted">
-                      <StatusCell n={r.n} status={r.status} onSaved={() => router.refresh()} />
-                    </td>
-                    <td className="px-4 py-3 text-faint tabular-nums">{r.date}</td>
-                    <td className="px-4 py-3 text-muted">
-                      <NotesCell n={r.n} notes={r.notes} onSaved={() => router.refresh()} />
-                    </td>
+                  <td className="px-4 py-3 text-muted">
+                    <Link href={detailHref}>{r.role}</Link>
+                    {r.via && r.via !== "—" && r.via !== "-" && (
+                      <span className="ml-1.5 rounded-full bg-surface px-1.5 py-0.5 text-[11px] text-faint">via {r.via}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-muted">
+                    <StatusSelect
+                      n={r.n}
+                      current={r.status}
+                      inline
+                      applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
+                      onSaved={(status, restoreFocus) => {
+                        // If this focused row leaves its tab, preserve a useful
+                        // focus target. Do not interrupt someone using search.
+                        const focusedRow = document.activeElement?.closest("tr");
+                        if (tab !== "ALL" && !canonStatus(status).includes(tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
+                          activeTab.current?.focus();
+                        }
+                        setAnnouncement(`Application #${r.n} status saved as ${status}.`);
+                        startTransition(() => {
+                          showSavedStatus({ key, status });
+                          router.refresh();
+                        });
+                      }}
+                    />
+                  </td>
+                  <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
                   </tr>
-                  );
-                })}
+                );
+              })}
+            </tbody>
+            {isPending && (
+              <tbody className="divide-y divide-border" aria-busy="true">
+                <PipelineTableRowsSkeleton trackerColumn />
               </tbody>
-            </table>
-          </div>
-
-          {/* ── Tracker cards (mobile) ── */}
-          <div className="mt-4 space-y-2.5 md:hidden">
-            {filtered.map((r, i) => {
-              const company = companyPresentation(r);
-              return (
-              <div key={`${r.n}-${i}`} className="rounded-xl border border-border bg-surface/40 p-3.5 transition-colors hover:border-brand/30">
-                <div className="flex items-start gap-2.5">
-                  <CompanyLogo name={company.logoName} size={24} />
-                  <Link href={`/pipeline/${r.n}`} className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-foreground">{company.label}</p>
-                    <p className="truncate text-[13px] text-muted">
-                      {r.role}
-                      {r.via && r.via !== "—" && r.via !== "-" && <span className="ml-1 text-faint">via {r.via}</span>}
-                    </p>
-                  </Link>
-                  <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-                </div>
-                <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-border pt-2.5">
-                  <StatusCell n={r.n} status={r.status} onSaved={() => router.refresh()} />
-                  <span className="shrink-0 text-xs tabular-nums text-faint">{r.date}</span>
-                </div>
-                <div className="mt-1.5 text-xs text-muted">
-                  <NotesCell n={r.n} notes={r.notes} onSaved={() => router.refresh()} />
-                </div>
-              </div>
-              );
-            })}
-          </div>
-        </>
+            )}
+          </table>
+        </div>
       ) : (
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
           <p className="font-display text-lg">No matches</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
         </div>
       )}
-    </PageShell>
+    </PageFrame>
   );
 }
 
-// The active funnel stages (in flow order) + the muted terminal buckets.
-const FUNNEL_STAGES = ["EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER"] as const;
+// Empty inbox. Self-sufficient for the mainstream user (a primary in-web action),
+// honest for devs (the CLI/file path stays, demoted to progressive transparency).
+function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
+  if (filtered) {
+    return (
+      <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
+        <p className="font-display text-lg">No matches</p>
+        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Clear the search to see the full inbox.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="dot-bg mt-4 overflow-hidden rounded-2xl border border-border bg-surface/50 bg-origin-border bg-gradient-to-tr from-brand/10 via-transparent to-transparent shadow-lg">
+      <div className="flex items-center gap-2 border-b border-foreground/10 px-5 py-3">
+        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
+        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
+        <span className="size-2.5 rounded-full bg-foreground/15" aria-hidden="true" />
+        <span className="ml-3 font-mono text-xs tracking-wide text-muted">career-ops · inbox</span>
+      </div>
+      <div className="px-6 py-10 text-center">
+        <p className="font-display text-lg">
+          Your <span className="text-brand">inbox</span> is empty.
+        </p>
+        {count > 0 ? (
+          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Nothing pending right now.</p>
+        ) : (
+          <>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
+            <Link
+              href="/explore?run=1"
+              className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
+            >
+              <Compass className="size-4" /> Run your first free scan <ArrowRight className="size-4" />
+            </Link>
+            <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
+              Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
+              <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">data/pipeline.md</code>.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Active funnel stages (flow order) + the muted terminal buckets.
+const FUNNEL_STAGES = ["EVALUATED", "APPLIED", "RESPONDED", "ASSESSMENT", "INTERVIEW", "OFFER", "HIRED"] as const;
 const FUNNEL_MUTED = ["REJECTED", "DISCARDED"] as const;
 
-/** Compact horizontal funnel of the status distribution. Buckets via canonStatus
- *  so aliases collapse to canonical tokens. Subtle, on-brand, read-only. */
+/** Compact horizontal funnel of the status distribution (read-only). */
 function Funnel({ applications }: { applications: Application[] }) {
   const counts = useMemo(() => {
     const m: Record<string, number> = {};
@@ -371,92 +428,3 @@ function Funnel({ applications }: { applications: Application[] }) {
     </div>
   );
 }
-
-
-/** Inline status editor → POST /api/status {n,status}. */
-function StatusCell({ n, status, onSaved }: { n: string; status: string; onSaved: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const save = async (value: string) => {
-    if (value === status) return;
-    setBusy(true);
-    try {
-      await fetch("/api/status", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ n, status: value }),
-      });
-      onSaved();
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <StatusDot dotClassName={statusDot(status)} />
-      <select
-        defaultValue={status.trim()}
-        onChange={(e) => save(e.target.value)}
-        disabled={busy}
-        className="cursor-pointer rounded border border-transparent bg-transparent py-0.5 pl-0.5 pr-4 text-muted outline-none transition-colors hover:border-border hover:bg-surface focus:border-brand/50 max-sm:min-h-[44px]"
-      >
-        {!CANONICAL_STATES.includes(status.trim() as (typeof CANONICAL_STATES)[number]) && (
-          <option value={status.trim()}>{status.trim() || "—"}</option>
-        )}
-        {CANONICAL_STATES.map((s) => (
-          <option key={s} value={s}>{s}</option>
-        ))}
-      </select>
-      {busy && <Loader2 className="size-3 animate-spin text-brand" />}
-    </span>
-  );
-}
-
-/** Inline notes editor → POST /api/notes {n,notes}. Click to edit, Enter/blur saves. */
-function NotesCell({ n, notes, onSaved }: { n: string; notes: string; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(notes);
-  const [busy, setBusy] = useState(false);
-  const save = async () => {
-    setBusy(true);
-    try {
-      if (value !== notes) {
-        await fetch("/api/notes", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ n, notes: value }),
-        });
-        onSaved();
-      }
-    } finally {
-      setBusy(false);
-      setEditing(false);
-    }
-  };
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={save}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") save();
-          if (e.key === "Escape") { setValue(notes); setEditing(false); }
-        }}
-        disabled={busy}
-        className="w-full min-w-40 rounded border border-brand/40 bg-surface px-2 py-1 text-xs outline-none max-sm:min-h-[44px]"
-      />
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={() => setEditing(true)}
-      className="line-clamp-2 max-w-xs text-left text-xs text-faint transition-colors hover:text-foreground max-sm:min-h-[44px]"
-      title="Click to edit notes"
-    >
-      {notes?.trim() || <span className="italic opacity-60">add note…</span>}
-    </button>
-  );
-}
-

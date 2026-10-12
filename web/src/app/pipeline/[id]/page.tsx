@@ -1,18 +1,30 @@
 import { notFound } from "next/navigation";
 import { readReport, readReportForApplication, findApplication, pdfReadyForReport, trackerCanDelete } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
+import { resolveTailoredCover } from "@/lib/apply/cover";
 import { ReportView } from "@/components/report-view";
+import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReportPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ReportPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
   const root = await requestRoot();
+  const query = pipelineQuery(await searchParams);
   const app = findApplication(id, root);
   // Resolve the report via the tracker row's link (report no. ≠ application no.),
   // falling back to a by-number lookup when there is no matching row.
   const report = app ? readReportForApplication(app, root) : readReport(id, root);
   if (!app && !report) notFound();
+  // Resolved here rather than in the component so the link is only rendered when
+  // THIS application's cover is actually on disk. `id` is passed as the
+  // application number, never as a company: a report with no tracker row has no
+  // identity to match on, and guessing one from the id would surface another
+  // offer's cover.
+  const coverReady = (await resolveTailoredCover(root, app?.company, id)) !== null;
   return (
     <ReportView
       id={id}
@@ -21,6 +33,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
       file={report?.file ?? null}
       canDelete={trackerCanDelete()}
       pdfReadyFromIndex={await pdfReadyForReport(id, root)}
+      coverReady={coverReady}
+      backHref={`/pipeline${query ? `?${query}` : ""}`}
     />
   );
 }

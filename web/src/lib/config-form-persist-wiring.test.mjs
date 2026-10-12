@@ -37,7 +37,7 @@ test("persisting is guarded by readSavedCliId so an explicit choice is never ove
 });
 
 test("the detect effect picks with pickDefaultInstalled, not the sole-install helper", () => {
-  const detect = src.slice(src.indexOf('fetch("/api/clis")'), src.indexOf("function save()"));
+  const detect = src.slice(src.indexOf('fetch("/api/cli")'), src.indexOf("function save()"));
   assert.notEqual(detect.length, 0, "could not locate the CLI-detection effect");
   assert.match(detect, /pickDefaultInstalled\(\s*list\s*\)/);
   assert.doesNotMatch(
@@ -60,7 +60,7 @@ test("the persist call lives in the detect effect, ahead of save()", () => {
 // save() wrote it straight back — "open Config and click Save config" was a
 // no-op on any machine with two or more CLIs installed.
 test("the detect effect only keeps the restored id while its CLI is installed", () => {
-  const detect = src.slice(src.indexOf('fetch("/api/clis")'), src.indexOf("function save()"));
+  const detect = src.slice(src.indexOf('fetch("/api/cli")'), src.indexOf("function save()"));
   assert.match(detect, /if\s*\(\s*keepIfInstalled\(\s*prev\s*,\s*list\s*\)\s*\)\s*return\s+prev/);
   assert.doesNotMatch(
     detect,
