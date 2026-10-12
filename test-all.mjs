@@ -18,19 +18,52 @@
  *   data, paths, etc.) is SKIPPED. A green `--only` run is NOT a green
  *   suite. Always run the full suite (no flags) before pushing.
  *
- * Provider tests live in tests/providers/{name}.test.mjs and are
- * auto-discovered — no registration needed. To add a test for a new
- * provider, create that one file; do not add a section to this file.
+ * NEW TESTS GO IN A FILE OF THEIR OWN, NOT IN A SECTION HERE.
+ * Node tests matching tests/**\/*.test.mjs are auto-discovered — no
+ * registration, no section number. The CV visual Playwright suite is the
+ * exception: its dedicated workflow discovers tests/cv-visual/cv-visual.test.mjs.
+ * Provider tests are one case of Node test auto-discovery
+ * (tests/providers/{name}.test.mjs), not the only one.
+ *
+ * Why it matters beyond tidiness: a numbered section means editing the end of
+ * this file, and the section number is a global label picked by hand. Six
+ * contributors doing that at once in Aug-2026 all picked `60a` and each merge
+ * forced a rebase on the other five - about fifteen rebases and six serialized
+ * CI runs for six lines of test code. A new file collides with nobody, so
+ * those PRs can all land in parallel.
+ *
+ * The inline sections below are history, not a pattern to copy.
  */
 
+
 import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
-import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, symlinkSync } from 'fs';
-import { join, dirname, delimiter } from 'path';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync as _rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+
+// Windows keeps a handle open on a just-exited child process's working files
+// for a short window (antivirus and Search Indexer widen it), so removing a
+// fixture directory the suite created inside the repo can fail with EPERM even
+// though every assertion passed. `force: true` does not cover that — it
+// suppresses ENOENT, not EPERM — and most of these removals sit in `finally`
+// blocks, so one unlucky cleanup aborted the whole run with a stack trace and
+// a non-zero exit. That reads as a broken test suite on Windows when nothing
+// is broken, and it leaves the fixture dir behind for the next run to trip on.
+//
+// Node retries exactly this class of error (EBUSY/EMFILE/ENFILE/ENOTEMPTY/
+// EPERM) with linear backoff when given maxRetries, so default it everywhere
+// rather than at ~95 individual call sites. An explicit option still wins.
+const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+import { join, dirname, basename, relative, delimiter } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath, pathToFileURL } from 'url';
 import { promisify } from 'util';
-import { pass, fail, warn, run, lastRunFailure, formatRunFailure, fileExists, finish, ROOT, NODE, toBashPath } from './tests/helpers.mjs';
-import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
+import { fileURLToPath, pathToFileURL } from 'url';
+import * as yaml from 'js-yaml';
+import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { collectMjsFiles } from './lib/mjs-files.mjs';
+import { walkTree, listTree } from './lib/walk-tree.mjs';
+import { FROZEN_EVALUATION_MODES, KNOWN_EVALUATION_MODES, discoverEvaluationModes, readModeText, structuralGaps } from './tests/evaluation-mode-parity-helpers.mjs';
+import { childFailureExcerpt } from './lib/failure-excerpt.mjs';
+import { SCRATCH_PREFIX, markScratchOwner, sweepScratchDirs } from './lib/scratch-dirs.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -39,6 +72,9 @@ import { collectMjsFiles, isNestedCheckout } from './lib/mjs-files.mjs';
  * @returns {string} File contents.
  */
 function readFile(path) {
+  // Several earlier checks walk modes before the parity gate. They must use
+  // the same contained reader or a pointer could escape before parity runs.
+  if (/^modes[\\/]/.test(path)) return readModeText(ROOT, path);
   const fullPath = join(ROOT, path);
   let content = readFileSync(fullPath, 'utf-8');
   if (content.trim().startsWith('..') && content.trim().split('\n').length === 1) {
@@ -50,7 +86,30 @@ function readFile(path) {
   return content;
 }
 
-// ── Auto-discovered test files ───────────────────────────────────────────
+/**
+ * Normalize CRLF line endings to LF (#1771).
+ *
+ * On Windows checkouts with core.autocrlf=true, repo text files arrive with
+ * CRLF endings. Doc assertions that anchor on `\n` (JS `.` never matches `\r`)
+ * then fail on pristine main. Normalizing at read time keeps the assertions
+ * byte-ending agnostic without touching any regex.
+ *
+ * @param {string} text - Raw file contents.
+ * @returns {string} Contents with LF-only line endings.
+ */
+const normalizeEol = (text) => text.replace(/\r\n/g, '\n');
+
+/**
+ * Read a repo text file with line endings normalized to LF (#1771).
+ * Use for doc-content reads that feed `\n`-anchored regex assertions.
+ * Do NOT use where byte-exact content matters.
+ *
+ * @param {string} path - Path relative to the career-ops repository root.
+ * @returns {string} File contents with LF-only line endings.
+ */
+const readTextLF = (path) => normalizeEol(readFile(path));
+
+// ── Auto-discovered test files (issue #1440) ─────────────────────────────
 // Deterministic: recursive readdirSync with default lexicographic sort of
 // entry names — same order on every run and OS. No glob library, no
 // registration list. Discovery is limited to tests/ so root-level
@@ -58,24 +117,68 @@ function readFile(path) {
 const TESTS_DIR = join(ROOT, 'tests');
 
 function discoverTests(dir) {
-  const out = [];
-  const entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      // A worktree under tests/ is a second checkout of this repository, and
-      // this walker does not merely read what it finds — it hands the files to
-      // the runner. Without this guard a stale checkout's suites execute
-      // against the current tree and the run prints "safe to push/merge" for
-      // them (#3762). `git worktree add` accepts any path, so nothing but this
-      // check keeps one out. Tested on children only: TESTS_DIR is never itself
-      // a checkout root, and the root exemption in `collectMjsFiles` exists for
-      // a case that cannot arise here.
-      if (isNestedCheckout(full)) continue;
-      out.push(...discoverTests(full));
-    } else if (entry.name.endsWith('.test.mjs')) out.push(full);
+  // walkTree sorts every level by name, so the run order is identical on every
+  // run and OS — the property #1440 asked for. It also refuses to descend into
+  // a nested checkout, which matters more here than anywhere else in this file:
+  // this walk does not READ what it finds, it hands it to the runner. A
+  // worktree parked under tests/ executed a stale checkout's suites against the
+  // current tree, and test-all.mjs printed "🟢 All tests passed — safe to
+  // push/merge" for them (#3762).
+  return listTree(dir, { match: /\.test\.mjs$/ })
+    // This is a Playwright suite, run by the dedicated CV visual job. It is
+    // named .test.mjs for the repository convention, but node --test cannot
+    // execute Playwright's test registration API.
+    .filter((f) => f !== join(TESTS_DIR, 'cv-visual', 'cv-visual.test.mjs'));
+}
+
+// Strip comment lines before grepping a discovered suite's source for a
+// forbidden call: a suite that only MENTIONS a call in a comment (e.g.
+// documenting why it doesn't make it) must not be flagged.
+//
+// Removed: whole-line `//` comments, and every line of a `/* ... */` block,
+// including unstarred interior lines. Kept: any code that shares a line with a
+// comment, on either side of it, so a real call can never hide behind one:
+// `/* why */ process.exit(1)` and `*gen() { finish() }` are still scanned.
+// Trailing `//` comments on a code line are deliberately still scanned,
+// erring toward a loud false positive, never a silent miss.
+//
+// Comment markers inside a multi-line template literal are text, not
+// comments, and an interpolation there IS executable — so nothing is stripped
+// while the kept code has an odd number of unescaped backticks (quoted
+// strings and trailing `//` comments excluded from the count). An opener that
+// never closes is not a comment we understand either; the raw source is
+// scanned instead. Both limits fail loud, never silent.
+function stripCommentLines(src) {
+  let inBlock = false;
+  let inTemplate = false;
+  const kept = [];
+  for (const line of src.split('\n')) {
+    let rest = line;
+    if (!inTemplate) {
+      if (inBlock) {
+        const end = rest.indexOf('*/');
+        if (end === -1) continue;
+        inBlock = false;
+        rest = rest.slice(end + 2);
+      }
+      // A block comment opening at the start of the (remaining) line: drop it,
+      // then look again — `/* a */ /* b */ code` keeps `code`.
+      let open;
+      while ((open = /^\s*\/\*/.exec(rest))) {
+        const end = rest.indexOf('*/', open[0].length);
+        if (end === -1) { inBlock = true; rest = ''; break; }
+        rest = rest.slice(end + 2);
+      }
+      if (/^\s*(\/\/|$)/.test(rest)) continue;
+    }
+    kept.push(rest);
+    const code = rest
+      .replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '')
+      .replace(/\/\/.*$/, '');
+    if (((code.match(/(?<!\\)`/g) ?? []).length) % 2 === 1) inTemplate = !inTemplate;
   }
-  return out;
+  if (inBlock) return src;
+  return kept.join('\n');
 }
 
 async function runDiscovered(filter = null) {
@@ -90,20 +193,153 @@ async function runDiscovered(filter = null) {
     process.exit(1);
   }
   for (const f of files) {
+    const rel = f.slice(ROOT.length + 1);
+    const src = readFileSync(f, 'utf-8');
     // Discovered suites run IN-PROCESS and share this suite's counters. A
     // process.exit() inside one would terminate test-all mid-run with a forged
     // exit code — every later section (and finish()) would silently never run.
     // Refuse to import such a suite and fail loudly instead (#1916 regression).
-    if (/\bprocess\.exit\s*\(/.test(readFileSync(f, 'utf-8'))) {
-      fail(`${f.slice(ROOT.length + 1)} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
+    // stripCommentLines() first: a suite that only MENTIONS process.exit() in
+    // a comment (e.g. documenting why it doesn't call it) must not be flagged.
+    if (/\bprocess\.exit\s*\(/.test(stripCommentLines(src))) {
+      fail(`${rel} calls process.exit() — discovered suites must use pass/fail from tests/helpers.mjs and never exit`);
       continue;
     }
-    await import(pathToFileURL(f).href);
+    // A node:test suite reports through node's OWN runner, which touches none
+    // of the counters above, and it runs its tests asynchronously AFTER the
+    // import resolves — so finish()'s process.exit() killed them mid-flight and
+    // discarded the result. A deliberately failing suite dropped into tests/
+    // printed "2049 passed, 0 failed / All tests passed" and exited 0
+    // (verified 2026-08-03). That silently covered all 16 node:test suites
+    // here, including every provider test: they only ever reported under a
+    // direct `node --test`.
+    //
+    // Run those in a child process and fold the real exit code into the
+    // counters. Importing them is what loses the result, so this cannot be
+    // fixed in finish(); it has to happen where the suite is invoked.
+    if (/from ['"]node:test['"]/.test(src)) {
+      const out = run(NODE, ['--test', f]);
+      if (out === null) {
+        const detail = lastRunFailure();
+        fail(`${rel} — node:test suite failed (exit ${detail?.status ?? '?'})`);
+        // Surface the runner's own summary; a bare "failed" is not actionable.
+        // The trailing window alone is not actionable either: node prints the
+        // error message above the frames, so a twelve-line tail kept
+        // `actual: false, expected: true` and dropped the interpolated value
+        // that says WHICH assertion and by how much (#4017).
+        for (const line of childFailureExcerpt(detail)) {
+          console.log(`      ${line}`);
+        }
+      } else {
+        // Both reporters: TAP prints "# pass N", the default spec reporter
+        // prints "ℹ pass N". Cosmetic — the pass/fail verdict is the exit code.
+        const count = (out.match(/^(?:#|ℹ) pass (\d+)/m) ?? [])[1];
+        pass(`${rel} — node:test suite passed${count ? ` (${count} tests)` : ''}`);
+      }
+      continue;
+    }
+    // finish() prints the global summary and exits — inside a discovered suite
+    // it forges the verdict line and decapitates every suite sorting after it,
+    // sailing past the process.exit() check above (the exit lives in helpers).
+    // Same stripCommentLines() treatment as the process.exit() guard above: a
+    // suite that only MENTIONS finish() in a comment (e.g. documenting why it
+    // doesn't call it) must not be flagged.
+    if (/\bfinish\s*\(\s*\)/.test(stripCommentLines(src))) {
+      fail(`${f.slice(ROOT.length + 1)} calls finish() — only test-all.mjs may print the global summary; discovered suites use pass/fail and return`);
+      continue;
+    }
+    // Neither guard above survives contact with an uncaught THROW, which ends
+    // the run just as completely and rather more quietly: node unwinds straight
+    // out of test-all, finish() never prints its summary, and every suite
+    // sorting after this one silently never runs. That does not read as a
+    // broken suite — it reads as a finished one, so the screen of green above
+    // the cut looks like a pass. (Measured on a Windows box with no symlink
+    // privilege: tests/intake.test.mjs threw at import and took 2067 of 3693
+    // checks with it, with no verdict line at all — #2828.) A discovered suite
+    // is a guest, not a co-host: its crash is one failure, not the end of the
+    // run.
+    const before = results();
+    try {
+      await import(pathToFileURL(f).href);
+    } catch (err) {
+      const ran = (results().passed - before.passed) + (results().failed - before.failed);
+      fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+      // How much this counts as "one failure" actually cost: the reported
+      // totals only ever include the `ran` assertions above, and nothing else
+      // says the rest never happened — on one platform a suite's crash reads
+      // as one broken assertion, on another the same file's assertions run
+      // and pass, and the two summaries look the same shape (#3976).
+      //
+      // An earlier version of this line also estimated how many assertions
+      // never ran, from a static count of pass()/fail() call sites in the
+      // file. artemtrofymenko (the issue's author) measured that estimate
+      // against real suites and found it wrong in both directions badly
+      // enough to make the diagnostic worse than none: a suite asserting
+      // through a local wrapper (`function ok(cond) { if (cond) pass(...)
+      // else fail(...) }`) has far more real assertions than call sites
+      // (tests/discover-ats.test.mjs: 155 executed, 4 call sites — the
+      // estimate goes negative, `lost > 0` is false, and the line silently
+      // does not print, reverting to exactly the pre-fix silence for the
+      // suites this was built for — 38 of 278 in-process suites use this
+      // shape); a suite writing `if (cond) pass(...); else fail(...)` pairs
+      // has roughly twice as many call sites as real assertions
+      // (tests/providers/_http.test.mjs: ~2x), so the estimate invents lost
+      // assertions that never existed. A signal present for some suites and
+      // silently absent for others turns its own absence into a false
+      // reassurance — worse than never estimating at all. `ran` alone does
+      // not have that failure mode: it is an exact count in every case, so
+      // it is printed unconditionally instead.
+      console.log(`      ${ran} assertion${ran === 1 ? '' : 's'} ran before the throw; everything after it in this file did not run`);
+      // The throw site, not just the message: a suite that dies mid-import
+      // leaves no other clue how far it got.
+      for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+        if (line.trim()) console.log(`      ${line.trim()}`);
+      }
+    }
   }
 }
 
-const onlyIdx = process.argv.indexOf('--only');
-const ONLY = onlyIdx !== -1 ? (process.argv[onlyIdx + 1] ?? '') : null;
+// A scratch copy left by a killed run used to poison every walker that follows:
+// `.gitignore` hides it and the copy carries no `.git`, so neither `git status`
+// nor `isNestedCheckout()` could see it, and the layout guards read a second
+// copy of `tests/` as several hundred misplaced suites (#3940).
+//
+// What makes the run correct is `isScratchDir` in the walkers, not this sweep —
+// they skip a leftover whether it gets removed or not. This only reclaims the
+// disk, which is why it can afford the age gate that keeps it off a scratch a
+// concurrent run is still writing into.
+//
+// Placed before the `--only` exit below: the 264-failure run is exactly the one
+// a developer then re-runs with `--only core-test-layout` to look closer, and a
+// sweep they skip past would leave that second run behaving differently again.
+{
+  const { removed, failed } = sweepScratchDirs(ROOT);
+  // Only speak when there was something to say. A sweep is silent on the
+  // overwhelming majority of runs, and a line reporting that nothing happened
+  // would be noise at the top of every one of them. `kept` is deliberately not
+  // reported: a young scratch is somebody else's live run, and it is none of
+  // this run's business.
+  for (const name of removed) {
+    console.log(`  🧹 removed a stale scratch copy from an interrupted run: ${name}/`);
+  }
+  for (const { name, error } of failed) {
+    // Not fatal — the walkers skip it, so every guard below still grades the
+    // real tree — but not silent either: something is holding a directory this
+    // run tried to delete, and that is worth knowing before it becomes a
+    // disk-space question.
+    warn(`could not remove the stale scratch copy ${name}/ (${error}) — the guards skip it, so this run is unaffected`);
+  }
+}
+
+// `--only=providers/x` must not read as "no filter": the discovered-test
+// runner exits 1 when a filter matches nothing, precisely so a path typo can
+// never turn CI green — and a silently dropped filter runs the whole suite
+// instead, which looks like a pass of the subset that was asked for.
+// `--only` supplied without a value must stay a usage error, not fall through
+// to "no filter": that would run everything and read as a pass of the subset
+// that was asked for — the same silent substitution this file's flag reading
+// was fixed for.
+const ONLY = hasFlag(process.argv, '--only') ? (flagValue(process.argv, '--only') ?? '') : null;
 if (ONLY !== null) {
   if (ONLY === '' || ONLY.startsWith('--')) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');

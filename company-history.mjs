@@ -49,6 +49,8 @@ import { parseScanHistory, detectReposts, loadAggregatorCompanies, isKeyLookup }
 import { normalizeCompanyName } from './invite-match.mjs';
 import { normalizeCompany, resolveTrackerPath } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import {
   parseFollowups,
   parseAppliedDate,
@@ -57,14 +59,13 @@ import {
   normalizeStatus,
 } from './followup-cadence.mjs';
 
-import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 // engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
 // profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+// multi-profile setup. Data paths below must use DATA_ROOT, never CAREER_OPS.
+const { engineRoot: CAREER_OPS, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 
 const DEFAULT_STALE_AFTER_DAYS = 365;
 const DEFAULT_SILENCE_WINDOW_DAYS = 28;
@@ -72,8 +73,8 @@ const DEFAULT_SILENCE_WINDOW_DAYS = 28;
 // Statuses that count as "the company answered" — a rejection IS an answer, and
 // a hire is the strongest answer of all (omitting it once labelled a company
 // that hired you 'no-history', or 'silent-on-you' against other quiet rows).
-const RESPONDED_STATUSES = new Set(['responded', 'interview', 'offer', 'hired', 'rejected']);
-const OUTCOME_LABELS = { responded: 'Responded', interview: 'Interview', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
+const RESPONDED_STATUSES = new Set(['responded', 'assessment', 'interview', 'offer', 'hired', 'rejected']);
+const OUTCOME_LABELS = { responded: 'Responded', assessment: 'Assessment', interview: 'Interview', offer: 'Offer', hired: 'Hired', rejected: 'Rejected' };
 
 const EXPLANATION_LINE =
   'high-volume inboxes, evergreen requisitions, re-opened searches, and your own unlogged responses ' +
@@ -113,58 +114,15 @@ const USAGE = `Usage:
 function parseArgs(argv) {
   const args = argv.slice(2);
 
-  if (args.includes('--help') || args.includes('-h')) {
-    console.log(USAGE);
-    process.exit(0);
-  }
+  // Unknown flags (and a missing operand) are rejected BEFORE --help is
+  // answered, so `--help --bogus` still fails. See lib/cli-flags.mjs.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-  // A value flag's space-separated value must not be mistaken for an
-  // unrecognized flag just because it starts with `-` (mirrors
-  // scan-ats-full.mjs's adjacency rule).
-  const consumedValueIndices = new Set();
-  args.forEach((a, idx) => {
-    if (VALUE_FLAGS.includes(a) && args[idx + 1] !== undefined && !args[idx + 1].startsWith('--')) {
-      consumedValueIndices.add(idx + 1);
-    }
-  });
-
-  const unknownFlags = args.filter((a, idx) =>
-    a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
-  if (unknownFlags.length) {
-    console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
-    console.error(USAGE);
-    process.exit(1);
-  }
-
-  // --emit-signal is a bare boolean flag, not a value flag: the unrecognized-
-  // flag check above strips the `=` suffix before matching KNOWN_FLAGS, so
-  // `--emit-signal=true` passes that check silently rather than being caught
-  // as unrecognized. Reject it explicitly here instead.
-  const emitSignalValue = args.find(a => a.startsWith('--emit-signal='));
-  if (emitSignalValue !== undefined) {
-    console.error('Error: --emit-signal does not accept a value.');
-    console.error(USAGE);
-    process.exit(1);
-  }
-
-  const valueOf = (flag) => {
-    // `--flag=value` form first: `args.indexOf(flag)` is -1 for it, so the
-    // space-separated lookup below would silently drop the value otherwise.
-    const eq = args.find(a => a.startsWith(`${flag}=`));
-    if (eq) return eq.slice(flag.length + 1);
-    const idx = args.indexOf(flag);
-    if (idx === -1) return undefined;
-    return args[idx + 1];
-  };
-
-  // A value-taking flag must actually receive a non-empty value: without this
-  // guard `--company --summary` would consume `--summary` as the company name,
-  // and `--company ""` / `--company=` would filter to a company that does not
-  // exist. Reject the missing, the next-is-a-flag, and the empty-string cases in
-  // both the space-separated (`--company ""`) and equals (`--company=`) forms.
+  // A present-but-empty operand (`--company ""`, `--company=`) would filter to
+  // a company that does not exist; the shared guard only covers a missing one.
   for (let idx = 0; idx < args.length; idx += 1) {
     const flag = args[idx];
-    if (VALUE_FLAGS.includes(flag) && (args[idx + 1] === undefined || args[idx + 1] === '' || args[idx + 1].startsWith('--'))) {
+    if (VALUE_FLAGS.includes(flag) && args[idx + 1] === '') {
       console.error(`Error: ${flag} expects a value.`);
       console.error(USAGE);
       process.exit(1);
@@ -179,9 +137,29 @@ function parseArgs(argv) {
   // --silence-window must be a positive integer, validated before anything
   // runs: a NaN silently falling back to the default hides the user's typo,
   // and a zero/negative window would label every application silent.
-  const silenceWindowArg = valueOf('--silence-window');
+  const silenceWindowArg = flagValue(args, '--silence-window');
   if (silenceWindowArg !== undefined && !/^[1-9]\d*$/.test(silenceWindowArg)) {
     console.error(`Error: --silence-window expects a positive integer number of days, got "${silenceWindowArg}"`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
+  const summaryMode = args.includes('--summary');
+  const company = flagValue(args, '--company');
+  const emitSignal = args.includes('--emit-signal');
+
+  // --emit-signal REQUIRES --summary (and is incompatible with --company).
+  // Default mode and --company mode both print a single parsable JSON
+  // document on stdout; appending JSON Lines signal records after that
+  // document would make stdout un-parsable as one JSON value. --summary's
+  // output is human-readable text, not JSON, so appending JSON Lines after it
+  // is the one combination that stays clean — fail fast here rather than
+  // silently corrupting a piped consumer's parse. `--company` wins over
+  // `--summary` in the output-selection branch below (see the CLI run body),
+  // so `--company --summary --emit-signal` would otherwise still print a bare
+  // JSON object followed by JSON Lines; reject that combination too.
+  if (emitSignal && (!summaryMode || company)) {
+    console.error('Error: --emit-signal requires --summary and cannot be combined with --company (default and --company mode already print a single JSON document; appending JSON Lines after it would break JSON parsing of stdout). Use: node company-history.mjs --summary --emit-signal');
     console.error(USAGE);
     process.exit(1);
   }
@@ -189,11 +167,12 @@ function parseArgs(argv) {
   return {
     summaryMode: args.includes('--summary'),
     selfTestMode: args.includes('--self-test'),
-    company: valueOf('--company'),
+    company: flagValue(args, '--company'),
     silenceWindowArg,
     includeStale: args.includes('--include-stale'),
-    scanHistoryOverride: valueOf('--scan-history'),
-    followupsOverride: valueOf('--followups'),
+    scanHistoryOverride: flagValue(args, '--scan-history'),
+    followupsOverride: flagValue(args, '--followups'),
+    emitSignal,
   };
 }
 
@@ -235,7 +214,7 @@ function resolveNow(now) {
 
 // --- Source loaders (each returns {rows|clusters, loaded}; missing file -> empty + loaded:false) ---
 
-export function loadTrackerRows(rootDir = CAREER_OPS) {
+export function loadTrackerRows(rootDir = DATA_ROOT) {
   const path = resolveTrackerPath(rootDir);
   if (!existsSync(path)) return { rows: [], loaded: false };
   const content = readFileSync(path, 'utf-8');
@@ -249,17 +228,17 @@ export function loadTrackerRows(rootDir = CAREER_OPS) {
   return { rows, loaded: true };
 }
 
-export function loadFollowupRows(rootDir = CAREER_OPS, overridePath) {
+export function loadFollowupRows(rootDir = DATA_ROOT, overridePath) {
   const path = overridePath || join(rootDir, 'data/follow-ups.md');
   if (!existsSync(path)) return { rows: [], loaded: false };
   return { rows: parseFollowups(readFileSync(path, 'utf-8')), loaded: true };
 }
 
-// Returns the clusters plus the aggregator key Map, because the card needs
-// both: the clusters to report, and the Map to explain why a flagged company
-// has none — without it an aggregator would render as `none-detected`, which
-// claims a negative result from a check that never ran (#2703).
-export function loadRepostClusters(rootDir = CAREER_OPS, overridePath, portalsPath) {
+// Returns the clusters plus the aggregator key Set, because the card needs both:
+// the clusters to report, and the Set to explain why a given company has none.
+// Without the Set an aggregator would render as `none-detected`, which claims a
+// negative result from a check that never ran.
+export function loadRepostClusters(rootDir = DATA_ROOT, overridePath, portalsPath) {
   const path = overridePath || join(rootDir, 'data/scan-history.tsv');
   // Same override scan.mjs and detect-reposts.mjs honour, so a sandboxed run
   // points all three at one config instead of silently reading the real one.
@@ -943,9 +922,14 @@ if (isMainModule(import.meta.url)) {
     });
   } else {
     const run = async () => {
-      const tracker = loadTrackerRows(CAREER_OPS);
-      const followups = loadFollowupRows(CAREER_OPS, followupsOverride);
-      const scanHistory = loadRepostClusters(CAREER_OPS, scanHistoryOverride);
+      // DATA_ROOT, not CAREER_OPS: these three read data/applications.md,
+      // data/follow-ups.md and data/scan-history.tsv, which are USER layer and
+      // move with CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
+      // resolveDefaultSilenceWindow() below stays on CAREER_OPS on purpose —
+      // templates/benchmarks.yml is SYSTEM layer and ships with the code.
+      const tracker = loadTrackerRows(DATA_ROOT);
+      const followups = loadFollowupRows(DATA_ROOT, followupsOverride);
+      const scanHistory = loadRepostClusters(DATA_ROOT, scanHistoryOverride);
       const statusLog = await loadStatusLogSource();
 
       // parseArgs already validated the flag as a positive integer.

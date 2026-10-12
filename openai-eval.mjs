@@ -3,8 +3,8 @@
  * openai-eval.mjs — OpenAI-compatible Job Offer Evaluator for career-ops
  *
  * Evaluate job offers with ANY OpenAI-compatible chat endpoint instead of Claude.
- * Works with OpenAI, OpenRouter, Together, Groq, DeepSeek, Zhipu GLM, MiniMax,
- * Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
+ * Works with OpenAI, OpenRouter, Requesty, Cheaper Inference, API Route, Together, Groq, DeepSeek, Zhipu GLM,
+ * MiniMax, Fireworks, and local servers that speak the OpenAI API (LM Studio, llama.cpp,
  * vLLM, Ollama's /v1). Point it at a base URL + model + key and go.
  *
  * Reads evaluation logic from modes/oferta.md + modes/_shared.md, reads the
@@ -30,11 +30,18 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync } from 'child_process';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
+import {
+  formatReportNumber, releaseReportNumbers, reserveReportNumbers,
+} from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { buildBudgetedPrompt } from './lib/context-budget.mjs';
+import {
+  isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
+} from './lib/tracker-addition.mjs';
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -45,26 +52,24 @@ try {
   config();
 } catch { /* dotenv optional */ }
 
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 const PATHS = {
-  shared:  join(CAREER_OPS, 'modes', '_shared.md'),
-  oferta:  join(CAREER_OPS, 'modes', 'oferta.md'),
-  cv:        join(CAREER_OPS_DATA, 'cv.md'),
-  profileYml: join(CAREER_OPS_DATA, 'config', 'profile.yml'),
-  reports:    join(CAREER_OPS_DATA, 'reports'),
-  // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under CAREER_OPS_DATA
+  shared:  join(ROOT, 'modes', '_shared.md'),
+  oferta:  join(ROOT, 'modes', 'oferta.md'),
+  cv:        join(DATA_ROOT, 'cv.md'),
+  profileYml: join(DATA_ROOT, 'config', 'profile.yml'),
+  reports:    join(DATA_ROOT, 'reports'),
+  // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
   // regardless would drop the addition somewhere the merge it instructs never
   // looks, so the evaluation would sit there unread.
   trackerAdditions: process.env.CAREER_OPS_ADDITIONS
     ? process.env.CAREER_OPS_ADDITIONS
-    : join(CAREER_OPS_DATA, 'batch', 'tracker-additions'),
+    : join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -94,6 +99,7 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
     --posting-url <url>  Posting URL, recorded in the report header and
                      used as the tracker's dedup key
     --no-save        Do not save report to reports/ directory
+    --no-compress    Skip token budget compression (full context injection)
     --help           Show this help
 
   ENV
@@ -101,6 +107,9 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   PROVIDER EXAMPLES (cheap / free-tier friendly — addresses token cost)
     OpenRouter:  --url https://openrouter.ai/api/v1   --model deepseek/deepseek-chat
+    Requesty:    --url https://router.requesty.ai/v1  --model deepseek/deepseek-chat
+    Cheaper Inference: --url https://api.cheaperinference.com/v1  --model gpt-5.4-mini
+    API Route:   --url https://global.api-route.com/v1  --model gpt-5.5
     Together:    --url https://api.together.xyz/v1     --model meta-llama/Llama-3.3-70B-Instruct-Turbo
     Groq:        --url https://api.groq.com/openai/v1  --model llama-3.3-70b-versatile
     DeepSeek:    --url https://api.deepseek.com/v1     --model deepseek-chat
@@ -121,6 +130,7 @@ let modelName  = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 let baseUrl    = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
 let apiKey     = process.env.OPENAI_API_KEY || '';
 let saveReport = true;
+let noCompress = false;
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file' && args[i + 1]) {
@@ -146,6 +156,8 @@ for (let i = 0; i < args.length; i++) {
     postingUrl = args[++i];
   } else if (args[i] === '--no-save') {
     saveReport = false;
+  } else if (args[i] === '--no-compress') {
+    noCompress = true;
   } else if (!args[i].startsWith('--')) {
     jdText += (jdText ? '\n' : '') + args[i];
   }
@@ -229,128 +241,49 @@ function readFile(path, label) {
   return readFileSync(path, 'utf-8').trim();
 }
 
-/**
- * Atomically reserve the next report number via reserve-report-num.mjs, so two
- * concurrent runs (batch workers, parallel windows) never collide on the same
- * slot — see reserve-report-num.mjs for the O_CREAT|O_EXCL sentinel mechanism.
- * @returns {string} Zero-padded report number string, e.g. "042" or "1001".
- */
-function reserveReportNumber() {
-  return execFileSync(process.execPath, [join(CAREER_OPS, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
-}
-
-/** Release the sentinel for a previously-reserved report number. */
-function releaseReportNumber(num) {
-  execFileSync(process.execPath, [join(CAREER_OPS, 'reserve-report-num.mjs'), '--release', num]);
-}
-
-// ---------------------------------------------------------------------------
-// Tracker-addition helpers
-// ---------------------------------------------------------------------------
-/**
- * Whether a value is a complete http(s) URL, and so can become a dedup key.
- * @param {string} value - Candidate posting URL.
- * @returns {boolean} True only for a parseable http/https URL with a host.
- */
-function isPostingUrl(value) {
-  try {
-    const parsed = new URL(value);
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname !== '';
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Slugify a company name for report/addition filenames.
- * @param {string} value - Raw company name.
- * @returns {string} Lowercase dash slug, or "unknown" when nothing survives.
- */
-function slugifyCompany(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '') || 'unknown';
-}
-
-/**
- * Flatten a value into a single TSV cell (tabs and newlines would shift columns).
- * @param {*} value - Raw cell value.
- * @returns {string} Single-line, trimmed cell.
- */
-function tsvSafe(value) {
-  return String(value ?? '').replace(/[\t\r\n]+/g, ' ').trim();
-}
-
-/**
- * Normalize a model-reported score into the tracker's score cell.
- *
- * A missing or unparseable score becomes the documented `N/A` sentinel rather
- * than an empty cell — `looksLikeScoreCell` in tracker-parse.mjs recognizes
- * `N/A`, and a blank or unrecognized placeholder makes the row ambiguous and
- * gets it skipped with a warning (#1799).
- *
- * @param {string} value - Score as extracted from the model's summary block.
- * @returns {string} `X.X/5` or `N/A`.
- */
-function normalizedTrackerScore(value) {
-  const clean = tsvSafe(value);
-  // Parse, do not pattern-match the string. Two bugs lived in the old guard:
-  // `/n\/?a/i` was unanchored with an optional slash, so bare `na` matched and a
-  // real score with trailing prose -- `4.2 (final)`, `4.2 (internal)`,
-  // `4.5 - strong signal` -- was recorded as `N/A`; and the `/5` early return kept
-  // the whole string, so `4.2/10` became `4.2/5` and merged as a genuine score.
-  // Trailing prose is tolerated because models produce it; a denominator that is
-  // not 5, or a value outside 0..5, is refused rather than reinterpreted.
-  const parsed = clean.match(/^(\d+(?:\.\d+)?)/);
-  if (!parsed) return 'N/A';
-  const score = parseFloat(parsed[1]);
-  // The denominator is load-bearing wherever it sits. Requiring it immediately
-  // after the number read `4.2 (strong fit)/10` -- a ten-point score with an
-  // annotation -- as a bare 4.2 and wrote `4.2/5`, the same wrong number
-  // `8/10` used to produce. The first denominator in the cell is taken and must
-  // be 5; absent one, the scale is the contract's. A cell that puts an unrelated
-  // fraction first (`4.2 (fit 3/4 axes)`) is refused rather than guessed at --
-  // N/A is recoverable, a wrong score is not.
-  const denominator = clean.match(/\/\s*(\d+(?:\.\d+)?)/);
-  const scale = denominator ? parseFloat(denominator[1]) : 5;
-  if (!Number.isFinite(score) || scale !== 5 || score < 0 || score > 5) return 'N/A';
-  return `${score}/5`;
-}
-
 // ---------------------------------------------------------------------------
 // Load context files
 // ---------------------------------------------------------------------------
 console.log('\n📂  Loading context files...');
 
-const sharedContext = readFile(PATHS.shared, 'modes/_shared.md');
-const ofertaLogic   = readFile(PATHS.oferta, 'modes/oferta.md');
-const cvContent     = readFile(PATHS.cv,     'cv.md');
+const sharedContext = readFile(PATHS.shared,     'modes/_shared.md');
+const ofertaLogic   = readFile(PATHS.oferta,     'modes/oferta.md');
+const cvContent     = readFile(PATHS.cv,         'cv.md');
 const profileYml    = readFile(PATHS.profileYml, 'config/profile.yml');
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
 // ---------------------------------------------------------------------------
-// Build system prompt
+// Build system prompt with token budget management
 // ---------------------------------------------------------------------------
+const { contextBody, budgetReport } = buildBudgetedPrompt({
+  sharedContent: sharedContext,
+  ofertaContent: ofertaLogic,
+  cvContent,
+  profileYml,
+  jdText,
+  noCompress,
+  modelName,
+});
+
+// Log token budget info
+if (budgetReport.compressed) {
+  console.log(`📊  Token budget: ${budgetReport.beforeTokens} → ${budgetReport.afterTokens} tokens (saved ${budgetReport.beforeTokens - budgetReport.afterTokens})`);
+  console.log(`    Trimmed sections: ${budgetReport.removed.join(', ')}`);
+  if (budgetReport.overBudget) {
+    console.log(`    ⚠️  Still ${budgetReport.afterTokens - budgetReport.budget} tokens over budget after compression`);
+  }
+} else if (budgetReport.overBudget) {
+  console.log(`⚠️  Token budget: ${budgetReport.totalTokens} tokens exceeds ${budgetReport.budget} limit by ${budgetReport.totalTokens - budgetReport.budget}`);
+} else {
+  console.log(`📊  Token budget: ${budgetReport.totalTokens} tokens (within ${budgetReport.budget} limit)`);
+}
+
 const systemPrompt = `You are career-ops, an AI-powered job search assistant.
 You evaluate job offers against the user's CV using a structured A-G scoring system.
 
 Your evaluation methodology is defined below. Follow it exactly.
 
-═══════════════════════════════════════════════════════
-SYSTEM CONTEXT (_shared.md)
-═══════════════════════════════════════════════════════
-${sharedContext}
-
-═══════════════════════════════════════════════════════
-EVALUATION MODE (oferta.md)
-═══════════════════════════════════════════════════════
-${ofertaLogic}
-
-═══════════════════════════════════════════════════════
-CANDIDATE RESUME (cv.md)
-═══════════════════════════════════════════════════════
-${cvContent}
+${contextBody}
 
 ═══════════════════════════════════════════════════════
 IMPORTANT OPERATING RULES FOR THIS SESSION
@@ -373,11 +306,11 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 `;
 
 // ---------------------------------------------------------------------------
-// Prompt caching (#1709) — the static prefix (shared + oferta + cv, ~12K
-// tokens) is byte-identical across every offer, yet was re-sent and re-billed
-// each call.
+// Prompt caching (#1709) — engine 2 of the four from #1709, same shape as the
+// OpenRouter runner. The static prefix (shared + oferta + cv, ~12K tokens) is
+// byte-identical across every offer, yet was re-sent and re-billed each call.
 //
-// Host-gated on purpose: OpenAI-compatible gateways (OpenRouter, DeepSeek, …)
+// Host-gated on purpose: OpenAI-compatible gateways (OpenRouter, Requesty, DeepSeek, …)
 // honor an ephemeral `cache_control` breakpoint on the prefix and reuse it
 // across back-to-back calls within the cache TTL. api.openai.com instead caches
 // long prefixes automatically and may reject the non-standard field, so it gets
@@ -517,15 +450,25 @@ if (summaryMatch) {
 // Save report
 // ---------------------------------------------------------------------------
 if (saveReport) {
-  let reservedNum = null;
+  let reservedNumbers = [];
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
     }
 
-    reservedNum       = reserveReportNumber();
-    const num         = reservedNum;
-    const today       = new Date().toISOString().split('T')[0];
+    reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
+    const num         = formatReportNumber(reservedNumbers[0]);
+    // LOCAL calendar day (#3070). This one value becomes three things that have to
+    // agree with each other and with the user's calendar: the report FILENAME
+    // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+    // column of the tracker row written for it.
+    //
+    // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+    // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+    // while every other date the user sees, and every date the other scripts now
+    // stamp, says the 17th. The filename is the part that cannot be corrected
+    // later: reports are addressed by it.
+    const today       = localToday();
     const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
     const reportPath  = join(PATHS.reports, filename);
@@ -586,9 +529,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
   } finally {
-    if (reservedNum) {
+    if (reservedNumbers.length > 0) {
       try {
-        releaseReportNumber(reservedNum);
+        await releaseReportNumbers(reservedNumbers, { reportsDir: PATHS.reports });
       } catch (err) {
         console.warn(`⚠️   Could not release report reservation: ${err.message}`);
       }

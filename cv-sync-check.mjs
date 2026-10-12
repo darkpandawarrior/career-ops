@@ -13,6 +13,7 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // CAREER_OPS: where this script + system-layer files (modes/, batch/) live —
 // always the script's own directory. dataRoot: where the user-layer files
@@ -20,6 +21,23 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 // setup, else the same as CAREER_OPS. See AGENTS.md's Data Contract for the
 // System Layer / User Layer split.
 const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+
+// ── CLI flags + help ────────────────────────────────────────────────
+//
+// docs/SCRIPTS.md lists `node cv-sync-check.mjs` as a runnable command, but the
+// script read no arguments at all: a mistyped flag was ignored and the checks
+// ran anyway, so `--hlep` looked like a successful run of whatever the caller
+// meant (#3565). KNOWN_FLAGS is exactly --help/-h because that is every flag
+// this file parses. Unrecognized flags exit 1 naming the flag; --help/-h print
+// USAGE and exit 0.
+
+const KNOWN_FLAGS = ['--help', '-h'];
+
+const USAGE = `Usage:
+  node cv-sync-check.mjs            # run the cv.md / profile.yml / prompt checks
+  node cv-sync-check.mjs --help|-h  # print this usage block and exit`;
+
+validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE);
 
 const warnings = [];
 const errors = [];

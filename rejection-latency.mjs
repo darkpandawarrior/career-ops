@@ -52,25 +52,21 @@ import { join } from 'path';
 import * as yaml from 'js-yaml';
 
 import { parseActiveInterviews } from './process-quality.mjs';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
-const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(CAREER_OPS_DATA, 'data/active-interviews.md'))
-  ? join(CAREER_OPS_DATA, 'data/active-interviews.md')
-  : join(CAREER_OPS_DATA, 'active-interviews.md');
-const DEFAULT_TRACKER_PATH = existsSync(join(CAREER_OPS_DATA, 'data/applications.md'))
-  ? join(CAREER_OPS_DATA, 'data/applications.md')
-  : join(CAREER_OPS_DATA, 'applications.md');
-const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(CAREER_OPS_DATA, 'config/profile.yml');
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
+  ? join(DATA_ROOT, 'data/active-interviews.md')
+  : join(DATA_ROOT, 'active-interviews.md');
+export const DEFAULT_TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
+const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 export const DEFAULT_COURTESY_DAYS = 30;
 
@@ -135,14 +131,6 @@ const cliCourtesyDays = argValue('--courtesy-days');
 const cliToday = argValue('--today');
 
 // --- Date helpers (same conventions as detect-reposts.mjs) ---
-export function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 // Extract a YYYY-MM-DD date from a free-form Date/Time cell
 // (e.g. "2026-06-01 14:00 EST" → 2026-06-01). Returns null when the cell
 // contains no valid date.
@@ -165,12 +153,29 @@ function isoDay(date) {
 }
 
 // --- Company key ---
-// Case-folded, punctuation-free, script-preserving (NFKC first) — the same
-// normalization idea as tracker-parse.mjs's normalizeVia, applied to company
-// names so "Acme Corp." in active-interviews.md matches "Acme Corp" in the
-// tracker without depending on the candidate's punctuation habits.
+// Case-folded, punctuation-free, script-preserving — so "Acme Corp." in
+// active-interviews.md matches "Acme Corp" in the tracker without depending on
+// the candidate's punctuation habits.
+//
+// Delegates to tracker-parse.mjs's normalizeTextKey rather than keeping a local
+// regex. The local one was `[^\p{L}\p{N}]` — no \p{M} — which strips COMBINING
+// MARKS. Latin survives that because NFKC precomposes its accents, which is why
+// it read as correct; scripts whose vowel signs have no precomposed form do not:
+//
+//     कंपनी लिमिटेड  ->  कपनलमटड     (every vowel sign and the anusvara gone)
+//     บริษัท          ->  บรษท         (Thai for "company")
+//
+// So two distinct Hindi employers differing only in vowel signs keyed the same,
+// and one employer spelled identically on both sides could key differently from
+// itself. career-ops ships modes/hi and modes/ar as supported markets.
+//
+// normalizeTextKey is the version that has been paid for. It keeps \p{M}, and
+// it strips the U+0307 that lowercasing a Turkish dotted İ leaves behind
+// (#2705/#2736) while deliberately NOT using NFD — decomposing first would
+// collapse Żubr/Zubr, Ėmė/Eme and Ġenerali/Generali. The local regex got
+// İstanbul right only by accident, because it threw away every mark.
 export function companyKey(name) {
-  return String(name || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  return normalizeTextKey(name);
 }
 
 /**
@@ -249,10 +254,10 @@ export function parseTrackerInterviewRows(content) {
  * Interview-state tracker rows this signal CANNOT see, because their employer
  * cell is a placeholder rather than a name.
  *
- * companyKey() strips everything that is not a letter or a digit, so `?` — the
- * documented marker for an undisclosed end employer (#1596) — normalizes to the
- * empty string and parseTrackerInterviewRows' `if (!key) continue` discards the
- * row. The same goes for the `—`/`-` no-data sentinels.
+ * companyKey() keeps only letters, marks and digits, so `?` — the documented
+ * marker for an undisclosed end employer (#1596) — normalizes to the empty
+ * string and parseTrackerInterviewRows' `if (!key) continue` discards the row.
+ * The same goes for the `—`/`-` no-data sentinels.
  *
  * Dropping them is defensible; dropping them SILENTLY is not. This check exists
  * to flag applications that have gone quiet, and agency-brokered roles — the

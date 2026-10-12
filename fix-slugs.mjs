@@ -41,6 +41,7 @@ import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { verifyPortalsFile } from './verify-portals.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
 const { dataRoot: FS_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
 // Anchored to the ACTIVE PROFILE's data root, not the cwd. A bare relative default
@@ -302,7 +303,13 @@ export function computeFixes(rawText, results, { dateStr = new Date().toISOStrin
   // invalidated by a fix applied further down.
   const pending = [];
   for (const r of results) {
+    // `suggested` must carry a writable ats/slug. A result can now also carry
+    // `suggested.rejectedAlternate` — a live board the identity gate refused — and
+    // that is reporting only. Without this guard a rejected-only result would pass
+    // the truthiness check below and applyFix would write `undefined/undefined`
+    // into portals.yml (#4230).
     if (r.status !== 'missing' || !r.suggested) continue;
+    if (!r.suggested.ats || !r.suggested.slug) continue;
     const block = blocksByName.get(r.name);
     if (!block) continue; // name mismatch — leave untouched rather than guess
     pending.push({ r, block });
