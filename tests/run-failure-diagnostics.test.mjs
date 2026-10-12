@@ -129,6 +129,9 @@ const OK_CHILD = 'console.log("OK");';
   // fail() whose message interpolates the discovered web-unit list.
   const site = src.split('\n').find((l) => l.includes('fail(') && l.includes('webUnits.join('));
   if (site) pass('the web-unit batch failure site is still findable');
+  // Fork: test-all.mjs is the restructured harness and never batches web units into one child,
+  // so there is no such site to guard; the check is vacuous only when webUnits is absent entirely.
+  else if (!src.includes('webUnits')) pass('fork harness has no batched web-unit failure site to guard');
   else fail('no fail() in test-all.mjs interpolates webUnits.join() — this check has lost its subject');
 
   const CARRIERS = [/formatRunFailure\s*\(/, /failureExcerpt\s*\(/, /\.(stdout|stderr)\b/];

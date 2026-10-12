@@ -34,7 +34,7 @@ writeFileSync(followups, '# Follow-ups\n');
 // happens before the first write lands and one append is lost — the exact
 // lost-update shape the tracker had before #2903.
 {
-  const rmw = async (line, holdMs) => withFollowupsLock(followups, {}, async () => {
+  const rmw = async (line, holdMs) => withFollowupsLock(followups, async () => {
     const before = readFileSync(followups, 'utf-8');
     await sleep(holdMs);              // the window a lost update needs
     writeFileSync(followups, `${before}${line}\n`);
@@ -55,7 +55,7 @@ writeFileSync(followups, '# Follow-ups\n');
 {
   let threw = false;
   try {
-    await withFollowupsLock(followups, {}, () => { throw new Error('boom'); });
+    await withFollowupsLock(followups, () => { throw new Error('boom'); });
   } catch (err) {
     threw = err.message === 'boom';
   }
@@ -63,7 +63,7 @@ writeFileSync(followups, '# Follow-ups\n');
 
   // If the lock leaked, this second acquisition would block until timeout.
   let reacquired = false;
-  await withFollowupsLock(followups, { lockTimeoutMs: 3_000 }, () => { reacquired = true; });
+  await withFollowupsLock(followups, () => { reacquired = true; }, { timeoutMs: 3_000 });
   ok(reacquired, 'and the lock was released anyway, so the next caller gets it immediately');
 }
 
@@ -74,9 +74,9 @@ writeFileSync(followups, '# Follow-ups\n');
 {
   const spelled = join(dir, '.', 'follow-ups.md');
   let inner = 'not attempted';
-  await withFollowupsLock(followups, {}, async () => {
+  await withFollowupsLock(followups, async () => {
     try {
-      await withFollowupsLock(spelled, { lockTimeoutMs: 400, lockRetryMs: 25 }, () => { inner = 'acquired'; });
+      await withFollowupsLock(spelled, () => { inner = 'acquired'; }, { timeoutMs: 400, retryMs: 25 });
     } catch {
       inner = 'blocked';
     }
@@ -86,7 +86,7 @@ writeFileSync(followups, '# Follow-ups\n');
 
 // ── The return value passes through ──────────────────────────────────
 {
-  const got = await withFollowupsLock(followups, {}, () => 'value');
+  const got = await withFollowupsLock(followups, () => 'value');
   ok(got === 'value', 'whatever fn returns is what the caller gets');
 }
 

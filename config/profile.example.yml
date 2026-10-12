@@ -83,6 +83,15 @@ location:
   city: "San Francisco"
   timezone: "PST"
   visa_status: "No sponsorship needed"
+  # Countries/regions where you ALREADY hold work authorization (no sponsorship
+  # needed there). Drives the Work-Authorization signal in job evaluation
+  # (modes/oferta.md → Block A "Work-authorization check"). Optional — omit or
+  # leave [] if not applicable; the free-text visa_status above still applies.
+  authorized_in: ["United States"]
+  # true if you need visa sponsorship for roles OUTSIDE authorized_in. When a JD
+  # explicitly states it will not sponsor, that is a hard blocker (see
+  # modes/_profile.md "Your Location Policy"). Omit → treated as false.
+  needs_sponsorship: false
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
@@ -105,6 +114,11 @@ location:
 #   br_pcd_quota_eligible: true
 
 language:
+  # Human-facing output language for reports, tracker notes, PDFs, cover
+  # letters, outreach, and form answers. Use an ISO language code such as
+  # `en` or `zh-CN`; `zh-CN` also enables Chinese PDF typography rules.
+  # This is separate from language.modes_dir: modes_dir selects market
+  # vocabulary/rules, while output selects the prose language.
   output: en
   # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
   # modes_dir can also be a LIST of declared candidate markets, for a
@@ -249,6 +263,19 @@ cover_letter:
       # Only trigger this entry when the JD location is in one of these countries.
       countries: [Spain, Mexico, Argentina, Colombia, Chile]
 
+# ── Contact Preferences ──────────────────────────────────────────────────────
+#
+# Used by `/career-ops contacto` (outreach CTA) and `/career-ops email` (contact
+# block) to steer drafted messages toward how you actually want to be reached.
+# Optional. Omit the whole block, or set preferred_channel to "either", to keep
+# today's behavior unchanged (no channel steering).
+#
+# contact_preferences:
+#   preferred_channel: "email"   # email | phone | either — default "either" if omitted
+#   # Optional. Surfaced near the contact block in `/career-ops email` drafts and
+#   # can inform the CTA wording in `/career-ops contacto`. Keep it one line.
+#   note: "Screens unknown numbers — please email or text first to schedule a call"
+
 # ── Outreach / greeting ─────────────────────────────────────────────────────
 #
 # Used by the greeting variant of `/career-ops contacto` (the short first-touch
@@ -259,18 +286,6 @@ cover_letter:
 # match the platform you're messaging on.
 # outreach:
 #   greeting_max_chars: 150
-
-# ── Contact Preferences ──────────────────────────────────────────────────────
-#
-# Used by `/career-ops contacto` (outreach CTA) and `/career-ops email` (contact
-# block) to steer drafted messages toward how you actually want to be reached.
-# Optional. Omit the whole block, or set preferred_channel to "either", to keep
-# today's behavior unchanged (no channel steering).
-# contact_preferences:
-#   preferred_channel: "email"   # email | phone | either — default "either" if omitted
-#   # Optional. Surfaced near the contact block in `/career-ops email` drafts and
-#   # can inform the CTA wording in `/career-ops contacto`. Keep it one line.
-#   note: "Screens unknown numbers -- please email or text first to schedule a call"
 
 # ── Application Email Drafts ────────────────────────────────────────────────
 #
@@ -323,6 +338,26 @@ cover_letter:
 # generate a PDF for every offer.
 # auto_pdf_score_threshold: 4.0
 
+# ── Two-pass triage gate ────────────────────────────────────────────────────
+#
+# Used by `/career-ops pipeline`. Before running the full A-G evaluation on
+# every URL in a batch, a lightweight first pass (`modes/triage.md`) scores each
+# role from a compact profile brief (`modes/_brief.md`) and filters out the ones
+# that would clearly disqualify — so the expensive full evaluation only runs on
+# roles that pass. On a mixed batch this cuts total tokens by roughly half.
+#
+#   triage_threshold  — minimum triage score (out of 5) to proceed to full
+#                       evaluation. Roles at 3.0–(threshold) are MARGINAL and
+#                       shown to you; below 3.0 they are filtered silently.
+#                       Default (key absent): 3.5.
+#   triage_min_urls   — batches with fewer surviving URLs than this skip triage
+#                       and go straight to full evaluation (triage overhead
+#                       isn't worth it on a handful of roles). Default: 5.
+#
+# pipeline:
+#   triage_threshold: 3.5
+#   triage_min_urls: 5
+
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #
 # Define cooldown windows for companies where you've recently applied.
@@ -334,34 +369,6 @@ cover_letter:
 #     cross_role_bucket: "all_EM_roles"
 #     applied_to: ["Senior Software Engineer"]
 #     last_apply_date: "2026-01-01"
-
-# ── Spend Tier ──────────────────────────────────────────────────────────────
-#
-# Controls which model is used for batch and pipeline evaluations.
-# Set once at onboarding; can be changed here at any time.
-#
-#   economy  → cheapest model  (Claude: claude-haiku-4-5; Gemini: gemini-2.5-flash)
-#   standard → default model   (Claude: claude-sonnet-4-6; Gemini: gemini-2.5-flash)
-#   premium  → strongest model (Claude: claude-opus-4-6; Gemini: gemini-2.5-pro)
-#
-# Standard and premium can also apply a cheap pre-screen gate in batch mode: a
-# fast/cheap-model worker scores each offer first; only offers scoring
-# >= batch_prescreen_threshold are forwarded to the full model, saving tokens
-# on obvious mismatches.
-#
-# Omitting this key (or leaving it commented out) is equivalent to "standard".
-#
-spend_tier: standard  # economy | standard | premium
-
-# Opt-in cheap pre-screen gate for standard and premium tiers in batch mode.
-# If true, runs a fast/cheap-model scoring pass before evaluating with the
-# full model.
-# batch_prescreen: false
-
-# Score threshold for the pre-screen gate (default: 3.0). Offers scoring below
-# this threshold skip the full-model evaluation and use the pre-screen report
-# as-is.
-# batch_prescreen_threshold: 3.0
 
 # ── Broad Search via Apify (opt-in, COSTS MONEY) ────────────────────────────
 #

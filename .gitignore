@@ -299,7 +299,9 @@ graphify-out/
 # Personal source documents for the intake flow (master CV, LinkedIn export,
 # diplomas, references). User Layer: never committed. Declared here BEFORE the
 # feature is ported so a later sync cannot land the directory unprotected.
-documents/
+/documents
+!/documents/
+documents/*
 !documents/.gitkeep
 !documents/README.md
 # Intake fingerprints — the recorded source filenames may themselves carry

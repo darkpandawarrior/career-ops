@@ -1,10 +1,14 @@
 ---
 name: career-ops
-description: AI job search command center -- evaluate offers, generate CVs, scan portals, track applications
+description: >-
+  AI job search command center -- evaluate offers, generate CVs, scan portals,
+  track applications. Use when the user pastes a job URL or JD, asks to scan
+  portals, generate a CV/PDF, track applications, prepare for interviews, draft
+  outreach/emails, or run any career-ops mode.
 arguments: mode
 user_invocable: true
 user-invocable: true
-argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | master-profile | intake | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
+argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | master-profile | intake | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome]"
 license: MIT
 ---
 
@@ -14,7 +18,7 @@ career-ops is a multi-CLI job-search command center. The routing below is shared
 
 ## Project Root Resolution
 
-Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `SKILL.md`: start at the skill file's directory and walk upward until the nearest directory containing both `AGENTS.md` and `modes/`. Resolve every path in this router (`modes/`, `config/`, `data/`, scripts, templates, and output paths) against `PROJECT_ROOT`, never against the process's current working directory. This is required even when the checkout itself is nested or the command starts from a subdirectory. If those two sentinels cannot be found, stop and locate the checkout before reading or writing files. (Scripts have their own contract: they resolve the DATA root through `resolveCareerOpsRoot(import.meta.url)` / `getCareerOpsRoot()` in `path-resolver.mjs`, which under `./profile <name>` is a different directory from `PROJECT_ROOT`.)
+Before reading any repo-relative path, derive `PROJECT_ROOT` from this loaded `SKILL.md`: start at the skill file's directory and walk upward until the nearest directory containing both `AGENTS.md` and `modes/`. Resolve every path in this router (`modes/`, `config/`, `data/`, scripts, templates, and output paths) against `PROJECT_ROOT`, never against the process's current working directory. This is required even when the checkout itself is nested (for example `Development\\career-ops`) or the command starts from a subdirectory. If those two sentinels cannot be found, stop and locate the career-ops checkout before reading or writing files.
 
 ## Invocation Notes
 
@@ -55,12 +59,14 @@ Determine the mode from `$mode`:
 | `interview/plan` | `interview/plan` |
 | `interview/practice` | `interview/practice` |
 | `interview/debrief` | `interview/debrief` |
-| `interview/redflag` | `interview/redflag` |
-| `interview-redflag` | `interview-redflag` |
 | `pdf` | `pdf` |
 | `ats` | `ats` |
 | `text` | `text` |
 | `latex` | `latex` |
+| `latex-tex` | `latex-tex` |
+| `email` | `email` |
+| `add` | `add` |
+| `expand` | `expand` |
 | `training` | `training` |
 | `project` | `project` |
 | `tracker` | `tracker` |
@@ -72,19 +78,18 @@ Determine the mode from `$mode`:
 | `discover` | `discover` |
 | `triage` | `triage` |
 | `batch` | `batch` |
-| `email-sweep` | `email-sweep` |
-| `email` | `email` |
-| `reply-watch` | `reply-watch` |
-| `add` | `add` |
-| `expand` | `expand` |
-| `ko` | `ko` (Korean locale pack — see `modes/ko/README.md`) |
 | `patterns` | `patterns` |
 | `calibrate` | `calibrate` |
 | `offer-prep` | `offer-prep` |
 | `titles` | `titles` |
 | `upskill` | `upskill` |
 | `followup` | `followup` |
-| `update` | `update` |
+| `reply-watch` | `reply-watch` |
+| `email-sweep` | `email-sweep` |
+| `ko` | `ko` (Korean locale pack — see `modes/ko/README.md`) |
+| `outcome` | `outcome` |
+| `interview/redflag` | `interview/redflag` |
+| `interview-redflag` | `interview-redflag` |
 | `cover` | `cover` |
 
 **Auto-pipeline detection:** If `$mode` is not a known sub-command AND contains JD text (keywords: "responsibilities", "requirements", "qualifications", "about the role", "we're looking for", company name + role) or a URL to a JD, execute `auto-pipeline`.
@@ -119,6 +124,7 @@ Concrete equivalents for Codex prompt-driven sessions:
 /career-ops scan           ↔ "Run the career-ops scan mode and summarize new matches."
 /career-ops pipeline       ↔ "Run the career-ops pipeline mode for data/pipeline.md."
 /career-ops pdf            ↔ "Run the career-ops pdf mode for the latest evaluated role."
+/career-ops email          ↔ "Run the career-ops email mode for the latest evaluated role."
 /career-ops tracker        ↔ "Run the career-ops tracker mode and summarize the current statuses."
 ```
 
@@ -148,7 +154,12 @@ Available commands:
   /career-ops ats       → ATS-friendliness check of a generated CV (score + fixable issues)
   /career-ops text      → Tailored markdown CV (mirrors cv.md, no PDF)
   /career-ops latex     → Export CV as LaTeX/Overleaf .tex
+  /career-ops latex-tex → Tailor your own resume.tex in place (opt-in; cv.md stays default)
   /career-ops cover     → Cover letter: standalone JD paste or /career-ops cover {slug}
+  /career-ops email-sweep → Scan Gmail for application-status changes (rejections, interviews, offers) and merge into tracker
+  /career-ops email     → Formal application email draft (draft-only; never sends, submits, or clicks)
+  /career-ops add       → Add a project/paper/role to your CV (fetch + preview + confirm)
+  /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops training  → Evaluate course/cert against North Star
   /career-ops project   → Evaluate portfolio project idea
   /career-ops tracker   → Application status overview
@@ -158,18 +169,13 @@ Available commands:
   /career-ops discover  → Resolve a company list to scannable ATS boards + append to portals.yml (zero-token)
   /career-ops triage    → Fast first-pass go/no-go score from modes/_brief.md (writes no files)
   /career-ops batch     → Batch processing with parallel workers
-  /career-ops email-sweep → Scan Gmail for application-status changes (rejections, interviews, offers) and merge into tracker
-  /career-ops email     → Draft a formal outbound application email (draft-only, never sends — distinct from email-sweep)
-  /career-ops reply-watch → Classify employer reply emails against the tracker and print a review digest
-  /career-ops add       → Fetch a project/paper/role URL into cv.md / article-digest.md
-  /career-ops expand    → Auto-discover and add missing competencies from profile links
   /career-ops patterns  → Analyze rejection patterns and improve targeting
   /career-ops calibrate → Check whether evaluation scores predict your real outcomes (advisory only)
   /career-ops offer-prep → Read a received offer/contract with the candidate: clause walk + lawyer questions (not legal advice)
   /career-ops titles    → Suggest adjacent job titles from your CV to broaden the search
   /career-ops upskill   → Aggregate skill-gap analysis from your evaluated reports
   /career-ops followup  → Follow-up cadence tracker: flag overdue, generate drafts
-  /career-ops update    → Update career-ops system files with diff preview + compat check
+  /career-ops outcome   → Record application outcome & archive artifacts
 
 Inbox: add URLs to data/pipeline.md → /career-ops pipeline
 Or paste a JD directly to run the full pipeline.
@@ -191,12 +197,11 @@ Read the resolved shared context (default `modes/_shared.md`) + `modes/_profile.
 
 Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `apply`, `pipeline`, `scan`, `batch`
 
-### Standalone modes (only their mode file):
-Read `modes/{mode}.md`
+### Standalone modes with profile and custom context
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `interview/redflag`, `interview-redflag`, `latex`, `training`, `project`, `patterns`, `followup`, `cover`, `email-sweep`, `email`, `reply-watch`, `add`, `expand`
+Read `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + `modes/{mode}.md`
 
-Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `master-profile`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`, `intake`, `ats`, `calibrate`
+Applies to: `tracker`, `agent-inbox`, `deep`, `interview-prep`, `interview`, `master-profile`, `regional/eu-swe`, `interview/plan`, `interview/practice`, `interview/debrief`, `latex`, `latex-tex`, `training`, `project`, `patterns`, `titles`, `upskill`, `followup`, `reply-watch`, `outcome`, `cover`, `email`, `add`, `offer-prep`, `discover`, `intake`, `ats`, `calibrate`, `interview/redflag`, `interview-redflag`, `email-sweep`
 
 ### Modes that load only their mode file
 

@@ -21,7 +21,7 @@
 // is what git saw.
 
 import { execFileSync, spawnSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
@@ -201,8 +201,12 @@ try {
 // in for ~/.gitconfig (it replaces it), which keeps the test off the real one.
 console.log('\nhermetic git env — the #3052 release fixture builds under ambient signing config');
 
+// Fork: the #3052 suite exercises the upstream updater, which this fork does not ship.
+const signingSuiteShipped = existsSync(fileURLToPath(new URL('./updater-apply-target-verification.test.mjs', import.meta.url)));
+if (!signingSuiteShipped) pass('the #3052 release fixture is not shipped in this fork (no updater), so there is nothing to seal');
 const signingRoot = mkdtempSync(join(tmpdir(), 'career-ops-hermetic-signing-'));
 try {
+  if (!signingSuiteShipped) throw Object.assign(new Error('skip'), { skipped: true });
   const signingConfig = join(signingRoot, 'gitconfig');
   writeFileSync(signingConfig, [
     '[tag]', '\tgpgSign = true', '\tforceSignAnnotated = true',
@@ -235,6 +239,8 @@ try {
   } else {
     fail('the release fixture never reached the assertions after its `git tag` commands');
   }
+} catch (err) {
+  if (!err.skipped) throw err;
 } finally {
   rmSync(signingRoot, { recursive: true, force: true });
 }

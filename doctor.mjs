@@ -549,7 +549,7 @@ function resolveActiveCli() {
 function checkScanExtractor(root) {
   const mode = resolveExtractorMode(join(root, 'config', 'profile.yml'));
   if (mode === 'cli') {
-    if (existsSync(join(root, 'browser-extract.mjs'))) {
+    if (existsSync(join(__dirname, 'browser-extract.mjs'))) {
       return { pass: true, label: 'Scan extractor: cli (browser-extract.mjs)' };
     }
     return {
@@ -1069,8 +1069,8 @@ function onboardingState(root) {
   const autoCopied = [];
   const templates = [
     { target: 'modes/_profile.md', template: 'modes/_profile.template.md' },
-    { target: 'modes/_brief.md', template: 'modes/_brief.template.md' },
     { target: 'modes/_custom.md', template: 'modes/_custom.template.md' },
+    { target: 'modes/_brief.md', template: 'modes/_brief.template.md' },
     // Fork-only: upstream tracks voice-dna.md directly. See .gitignore for why.
     { target: 'voice-dna.md', template: 'voice-dna.template.md' },
   ];

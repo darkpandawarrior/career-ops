@@ -12,9 +12,7 @@ The portfolio that goes with this system is also open source: [cv-santiago](http
 
 There are two layers. Read `DATA_CONTRACT.md` for the full list.
 
-**User Layer (NEVER auto-updated, personalization goes HERE):**
-- `cv.md`, `config/profile.yml`, `modes/_profile.md`, `article-digest.md`, `portals.yml`
-- `data/*`, `reports/*`, `output/*`, `interview-prep/*`
+**User Layer (NEVER auto-updated, personalization goes HERE):** `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `article-digest.md`, `portals.yml`, `data/*`, `documents/*`, `reports/*`, `output/*`, `interview-prep/*`
 
 **System Layer (auto-updatable, DON'T put user data here):**
 - `modes/_shared.md`, `modes/oferta.md`, all other modes
@@ -56,6 +54,8 @@ User-facing content (CV, cover letters, form answers, recruiter outreach, applic
 `story-bank.md` is *accumulated*, not authored the way `cv.md` is — it is commonly built up from past interview-prep documents, which are themselves AI-written mappings of the user's experience onto a specific job posting's language. A scale figure or scope claim invented once in a prep doc (to match a JD's emphasis) can get absorbed into story-bank.md as a standalone fact, then cited as ground truth by a later, unrelated prep doc, drifting further on each reuse — with nothing forcing it back to a primary file. These files may supply narrative structure and phrasing freely. **Any quantified claim, scale figure, or scope-of-responsibility claim originating in a derived file must trace to a primary file above, or carry an explicit provenance marker on that story-bank entry** (`**Provenance:** source: cv.md | user-stated YYYY-MM-DD | derived-unverified | user-cannot-confirm` — see `story-provenance-check.mjs`'s header for the full convention and classification). Absent a marker, treat an unconfirmed number from story-bank.md as `derived-unverified`, not as an established fact — run `node story-provenance-check.mjs --summary` before trusting a story-bank figure in generated content, and don't restate a `derived-unverified` number as settled just because it appears confidently in the story.
 
 **Confirmation UX invariant (binding on any workflow that surfaces a `derived-unverified` finding to the user):** never lead with the unverified number as if confirm/deny were the only options — that invites a guess, and a confirmed guess is worse than an honest unknown because it launders the guess into a "verified" fact. Present the claim plainly and offer four distinct outcomes: (a) confirm it's accurate as stated, (b) provide the correct figure, (c) mark it narrative-only / not a quantified claim, (d) "I don't know" → sets `user-cannot-confirm` on that entry, durably. A `user-cannot-confirm` marker must never decay back into being treated as verified through repeated citation or a later re-scan — every consumer (CV generation, cover letters, interview prep) treats it as narrative texture only, never as a quantified claim in interview-facing output. Building this interactive flow is separate future work; the invariant applies regardless of which mode eventually implements it.
+
+**One narrow exception — `intake`.** Documents the user drops in `documents/` may be read *during the `intake` mode only*, and only to propose **source-annotated** additions to the in-scope files above. They are never a source for generated user-facing content directly, the no-fabrication rule applies unchanged (a proposal must restate what the document says), and nothing is written without the user's explicit confirmation. Once confirmed, the claim lives in `config/profile.yml` / `cv.md` / `modes/_profile.md` and is in scope because it is *there*, not because it was in `documents/`.
 
 Anything not in this list is **out of scope for content generation**, including:
 
@@ -199,7 +199,6 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `data/contacts.tsv` | Job-search contact list — recruiters/hiring managers/peers saved from `contacto` (user layer, gitignored third-party PII) |
 | `data/Connections.csv` | LinkedIn connections export (user layer, gitignored third-party PII; read by `linkedin-join.mjs`, safe to delete after use) |
 | `outcome.mjs` | Record application outcome, archive artifacts, and sync tracker (`node outcome.mjs <selector> <type>`) |
-| `hired-share.mjs` | Draft a Hired Wall story from the tracker and open a prefilled GitHub issue the user submits themselves; `--status` lists hires never asked; `--mark` records their answer permanently |
 | `jd-capture.mjs` | Resolves an archived JD in `jds/` by report number, matching padded and unpadded prefixes (`064-`, `64-`, `01-`). Consumed by `outcome.mjs`; written by `archive-posting.mjs --report=N`. Replaces rebuilding a capture's filename from today's date, which stopped resolving the next day |
 | `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
 | `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Verdict (lead) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}`; **REQUIRED:** a `## Job Description (archived verbatim)` section with the JD's verbatim text, or an equivalent `jds/` capture (#2789) |
@@ -447,10 +446,11 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 | Asks about follow-ups or application cadence | `followup` |
 | Wants adjacent job titles the scanner isn't searching for yet | `titles` |
 | Wants to know which missing skills recur across evaluated roles | `upskill` |
+| Wants to build or enrich the profile from documents they already have (master CV, LinkedIn export, diplomas, references) | `intake` — scans `documents/`, extracts text locally (`intake.mjs`), proposes source-annotated additions to `config/profile.yml`/`cv.md`/`modes/_profile.md`; writes nothing without explicit confirm |
 | Wants in-place tailoring of a user-owned LaTeX `.tex` CV | `latex-tex` |
 | Received an offer letter/contract and wants it read before signing | `offer-prep` |
 | Wants interviewer-side company red flags from past sessions | `interview-redflag` |
-| Pastes employer reply emails to triage against the tracker | `node reply-watch.mjs` |
+| Wants to classify application replies and review updates | `reply-watch` — classifies replies, matches to applications, suggests tracker updates |
 
 ### CV Source of Truth
 
@@ -559,20 +559,6 @@ When spawning headless workers for batch processing, use the appropriate command
 **Prefer `--report=N` when archiving for a tracked row.** A capture named only from the date and the scraped company and role can be found again only by rebuilding that exact string, so it stops resolving the day after it is written — precisely when the posting has gone dead and the capture is the only remaining record. `jd-capture.mjs` looks captures up by report number instead, matching padded and unpadded prefixes (`064-`, `64-`, `01-`), and `outcome.mjs` uses it before falling back to re-archiving a live URL.
 
 A capture is copied into `data/outcomes/` under its own extension (`posting.pdf`, `posting.txt`, `posting.md`), never renamed to `.pdf`.
-
-### Celebrating a hire (the Hired Wall)
-
-When the user records a `hired` or `accepted` outcome, celebrate FIRST — a landed job is the whole point of this tool — and then offer, once:
-
-> That's the whole point of everything we did here. Congratulations! 🎉
->
-> One optional thing: career-ops keeps a public wall of people who landed jobs with it. If you want yours there, I'll draft it from what we already know (role, weeks, what helped). You'll see the exact text, and nothing leaves this machine unless you submit it yourself on GitHub. Want the draft? If not, I won't bring this one up again.
-
-If they say yes: run `node hired-share.mjs --report N --anonymity <their choice> --story "<their words>" --open` — it prints the exact payload, opens a prefilled GitHub issue, and the user reviews and submits it themselves. Ask their anonymity level explicitly (handle / role-only / count-only); never default to the most exposed. Offer a 2-sentence draft story built only from tracker data, and let them rewrite it. If they say "not now": `node hired-share.mjs --report N --mark later`. If they say no: `--mark never`, and honor it — that hire is never brought up again.
-
-**Cadence rules (hard):** one ask per hire, at outcome time. After an update, `node hired-share.mjs --status` may list hires never asked or marked "later" more than 30 days ago — at most ONE gentle mention, then respect the answer. Never remind on a schedule. Never mention the wall at `offer_received`: an offer can still fall through, and the ask belongs to the signed outcome only.
-
-**Privacy (hard):** salary is never part of a story. Company name only if the user writes it themselves. The share flow reads tracker data locally and writes only `data/.hired-share-state.json`; the only thing that ever leaves the machine is the issue the user submits from their own GitHub account.
 
 ### TSV Format for Tracker Additions
 

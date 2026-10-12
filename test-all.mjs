@@ -900,9 +900,18 @@ for (const f of userFiles) {
 }
 
 const batchRunnerSource = readFile('batch/batch-runner.sh');
-const minScoreSkipIndex = batchRunnerSource.indexOf('update_state "$id" "$url" "skipped"');
-const minScoreReturnIndex = batchRunnerSource.indexOf('return 0', minScoreSkipIndex);
-const completedStateIndex = batchRunnerSource.indexOf('update_state "$id" "$url" "completed"', minScoreSkipIndex);
+// Match any update_state entrypoint (bare, _retrying, _unlocked) so this asserts
+// the gate's ordering rather than one spelling of the call.
+const SKIPPED_STATE_WRITE = /update_state(?:_retrying|_unlocked)? "\$id" "\$url" "skipped"/;
+const COMPLETED_STATE_WRITE = /update_state(?:_retrying|_unlocked)? "\$id" "\$url" "completed"/;
+const minScoreSkipIndex = batchRunnerSource.search(SKIPPED_STATE_WRITE);
+let minScoreReturnIndex = -1;
+let completedStateIndex = -1;
+if (minScoreSkipIndex !== -1) {
+  minScoreReturnIndex = batchRunnerSource.indexOf('return 0', minScoreSkipIndex);
+  const completedOffset = batchRunnerSource.slice(minScoreSkipIndex).search(COMPLETED_STATE_WRITE);
+  completedStateIndex = completedOffset === -1 ? -1 : minScoreSkipIndex + completedOffset;
+}
 if (
   minScoreSkipIndex !== -1 &&
   minScoreReturnIndex !== -1 &&
@@ -1483,14 +1492,13 @@ if (!fileExists('scripts/parsers/cohere_jobs.py')) {
 
 const portalExample = readFile('templates/portals.example.yml');
 if (
-  !portalExample.includes('cohere_jobs.py') &&
-  portalExample.includes('scripts/parsers/example-js-company-jobs.js') &&
-  portalExample.includes('scripts/parsers/example_python_company_jobs.py') &&
-  portalExample.includes('already know their target careers URL')
+  portalExample.includes('script: local/example-js-company-jobs.js') &&
+  portalExample.includes('script: local/example_python_company_jobs.py') &&
+  !/^\s*#?\s*script:\s*['"]?scripts\/parsers\//m.test(portalExample)
 ) {
-  pass('portals example documents a generic local parser contract');
+  pass('portals example points the local-parser script at a gitignored path');
 } else {
-  fail('portals example still points at a bundled Cohere parser');
+  fail('portals example local-parser script is under the Git-tracked scripts/parsers/');
 }
 
 // Security hardening: command allowlist, in-repo script containment, careers_url/company validation.
@@ -1875,6 +1883,7 @@ try {
     formatPipelineOffer,
     formatScanHistoryRow,
   } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } = await import(pathToFileURL(join(ROOT, 'lib/scan-history-columns.mjs')).href);
 
   const filter = buildLocationFilter({
     always_allow: ['belgium', 'brussels'],
@@ -2211,6 +2220,8 @@ try {
     title: 'Senior Engineer | Growth\n- [ ] https://evil.example/job | EvilCorp | Injected',
     company: '=ACME\\Corp\t| R&D',
     location: '@Remote\nEU',
+    requisitionId: '=R1\tDROP\nx',
+    language: '@en\n-GB',
   };
   const pipelineRow = formatPipelineOffer(hostileOffer);
   const pendingLines = pipelineRow.split('\n').filter(line => /^\s*- \[ \] https?:\/\//.test(line));
@@ -2226,26 +2237,36 @@ try {
     pipelineRow.includes('=ACME\\\\Corp / R&D') &&
     pipelineRow.includes('- \\[ \\] https://evil.example/job / EvilCorp / Injected')
   ) {
-    pass('scan pipeline writer preserves row shape without injected checkboxes or extra pipes');
+    pass('scan pipeline writer preserves row shape (optional location 4th col) without injected checkboxes or extra pipes');
   } else {
     fail(`scan pipeline metadata sanitizer produced unsafe row: ${pipelineRow}`);
   }
 
   const historyRow = formatScanHistoryRow(hostileOffer, '2026-06-18');
-  const historyColumns = historyRow.split('\t');
+  const history = parseScanHistoryLine(historyRow);
+  // The stored cells carry the formula escaping; parseScanHistoryLine undoes it.
+  const stored = Object.fromEntries(SCAN_HISTORY_COLUMNS.map((name, i) => [name, historyRow.split('\t')[i]]));
   if (
-    historyColumns.length === 11 && // 7 metadata + fingerprint (#1597) + postedAt (#1742) + trust score/flags (#1743)
-    historyColumns[8] === '' && // no postedAt on hostileOffer → empty trailing col
-    historyColumns[9] === '' && historyColumns[10] === '' && // no trust signal on hostileOffer → empty trailing cols
-    !historyColumns.some(col => /[\r\n\t]/.test(col)) &&
-    historyColumns[0] === 'https://jobs.example.com/123|evil' &&
-    historyColumns[3].includes('- [ ] https://evil.example/job') &&
-    historyColumns[4] === "'=ACME\\Corp | R&D" &&
-    historyColumns[6] === "'@Remote EU"
+    historyRow.split('\t').length === SCAN_HISTORY_COLUMNS.length && // every declared column, empty ones included
+    !historyRow.includes('\n') && !historyRow.includes('\r') &&
+    !historyRow.split('\t').some(col => /[\r\n\t]/.test(col)) &&
+    history.posted_at === '' &&
+    history.trust_score === '' && history.trust_flags === '' &&
+    history.url === 'https://jobs.example.com/123|evil' &&
+    history.title.includes('- [ ] https://evil.example/job') &&
+    stored.company === "'=ACME\\Corp | R&D" &&
+    stored.location === "'@Remote EU" &&
+    stored.requisition_id === "'=R1 DROP x" &&
+    stored.language === "'@en -GB" &&
+    history.company === '=ACME\\Corp | R&D' &&
+    history.location === '@Remote EU' &&
+    history.requisition_id === '=R1 DROP x' &&
+    history.language === '@en -GB' &&
+    history.listing_key === ''
   ) {
-    pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas');
+    pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas; the reader gets the values back');
   } else {
-    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify(historyColumns)}`);
+    fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify({ stored, history })}`);
   }
 
   // ── content_filter (#734) ──
@@ -2512,6 +2533,395 @@ try {
     pass('parseAppliedDate does not match inside "reapplied"');
   } else {
     fail('parseAppliedDate should not match the date inside "reapplied"');
+  }
+  // An estimated apply date is written "Applied ~YYYY-MM-DD". Without tolerating
+  // the tilde the note is skipped and the cadence silently falls back to the
+  // evaluation date — the same wrong-age failure the notes lookup exists to fix.
+  if (cadence.parseAppliedDate('Applied ~2026-06-09 (date estimated)') === '2026-06-09') {
+    pass('parseAppliedDate tolerates an estimated "Applied ~YYYY-MM-DD" date');
+  } else {
+    fail(`parseAppliedDate should tolerate "~", got ${JSON.stringify(cadence.parseAppliedDate('Applied ~2026-06-09 (date estimated)'))}`);
+  }
+  if (cadence.parseAppliedDate('reapplied ~2026-06-09 after rejection') === null) {
+    pass('parseAppliedDate still refuses "reapplied" when a tilde is present');
+  } else {
+    fail('parseAppliedDate must not match inside "reapplied" even with a tilde');
+  }
+  // #2607 — a note citing ANOTHER row's apply date must not win. Notes routinely
+  // reference a sibling requisition's timeline for context, and that citation
+  // reads exactly like this row's own date to a positional scan.
+  const crossRefNote =
+    'STRATEGY DECISION NEEDED: #154 Sr PM M&A is already live in the same ATS '
+    + '(applied 2026-08-04) - recommend applying anyway. TIER A flagship CV '
+    + 'required. APPLIED 2026-08-06 - submitted directly by Jason.';
+  if (cadence.parseAppliedDate(crossRefNote) === '2026-08-06') {
+    pass('parseAppliedDate ignores a date cited about another row (#2607)');
+  } else {
+    fail(`parseAppliedDate cross-reference: got ${JSON.stringify(cadence.parseAppliedDate(crossRefNote))}, want 2026-08-06`);
+  }
+  // The reference's scope ends at a sentence boundary — otherwise any note that
+  // mentions a sibling row would lose its own date.
+  if (cadence.parseAppliedDate('Sibling #140 was slow. Applied 2026-08-06.') === '2026-08-06') {
+    pass('parseAppliedDate: a sentence boundary ends the row-reference scope');
+  } else {
+    fail('parseAppliedDate should keep its own date after a sentence break');
+  }
+  // ...but a SEMICOLON is not a boundary: it joins independent clauses inside
+  // one sentence, so the subject carries across it and the date is still the
+  // referenced row's.
+  const semicolonRef = '#154 is already live; applied 2026-08-04. Not submitted here yet.';
+  if (cadence.parseAppliedDate(semicolonRef) === null) {
+    pass('parseAppliedDate: a semicolon does NOT end the scope of a reference that has no date yet');
+  } else {
+    fail(`parseAppliedDate semicolon scope: got ${JSON.stringify(cadence.parseAppliedDate(semicolonRef))}, want null`);
+  }
+  // ...but once the citation HAS been given its own date, a separator does end
+  // it, and what follows is this row's. This is the mixed shape #2610 review
+  // called out: the note names a sibling AND records this submission, which is
+  // the common case when two roles are live at one employer. Reading the whole
+  // note as the sibling's throws away a real measured date.
+  //
+  // It is also the pair a future simplification would silently re-break — the
+  // two cases differ only by whether a date precedes the separator, so they are
+  // asserted together on purpose.
+  for (const [note, want, why] of [
+    ['#154 Sr PM (applied 2026-08-04); applied 2026-06-15', '2026-06-15', 'semicolon, citation already dated'],
+    ['#154 Sr PM (applied 2026-08-04) | applied 2026-06-15', '2026-06-15', 'pipe, citation already dated'],
+    // No space after the separator. A full stop needs trailing whitespace to
+    // avoid firing on "3.5", but `;` and `|` never appear inside numbers, and a
+    // hand-typed note writes ";applied" as readily as "; applied".
+    ['#154 Sr PM (applied 2026-08-04);applied 2026-06-15', '2026-06-15', 'unspaced semicolon'],
+    ['#154 Sr PM (applied 2026-08-04)|applied 2026-06-15', '2026-06-15', 'unspaced pipe'],
+    ['#154 is already live;applied 2026-08-04.', null, 'unspaced separator, citation NOT yet dated'],
+    ['#154 Sr PM (applied 2026-08-04)', null, 'citation dated, nothing after it'],
+  ]) {
+    const got = cadence.parseAppliedDate(note);
+    if (got === want) pass(`parseAppliedDate: ${why} → ${JSON.stringify(want)}`);
+    else fail(`parseAppliedDate ${why}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  }
+  // When EVERY apply-date belongs to another row, the note does not state this
+  // row's date. Degrade to the labelled evaluation-date fallback rather than
+  // report a real-but-foreign date as measured.
+  const onlyForeign = 'Same posting as #140 (applied 2026-07-20). Not yet submitted.';
+  if (cadence.parseAppliedDate(onlyForeign) === null) {
+    pass('parseAppliedDate returns null when every applied date is a cross-reference');
+  } else {
+    fail(`parseAppliedDate should not adopt a foreign date, got ${JSON.stringify(cadence.parseAppliedDate(onlyForeign))}`);
+  }
+  {
+    const r = cadence.resolveAppliedDate({ notes: onlyForeign, date: '2026-07-25' });
+    if (r.appliedDate === '2026-07-25' && r.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate labels a cross-reference-only note as the evaluation-date fallback');
+    } else {
+      fail(`resolveAppliedDate cross-ref-only: got ${JSON.stringify(r)}`);
+    }
+  }
+  // A `#NNN` carrying a req/job/posting/ref label is THIS row's ATS identifier,
+  // not a pointer at another tracker row. Without this scoping the row's own
+  // posting id disqualified the row's own apply date — a false positive that
+  // costs a real measured date, so the extra rule earns its keep (#2610 review).
+  for (const [note, why] of [
+    ['Req #1311 - applied 2026-08-06.', 'req'],
+    ['Job ID #65136; applied 2026-08-06.', 'job id'],
+    ['Posting #4471 — applied 2026-08-06.', 'posting'],
+    ['Ref #R2857957 applied 2026-08-06.', 'ref'],
+  ]) {
+    if (cadence.parseAppliedDate(note) === '2026-08-06') {
+      pass(`parseAppliedDate reads a "${why}"-labelled #id as this row's own, not a cross-reference`);
+    } else {
+      fail(`parseAppliedDate "${why}"-labelled id: got ${JSON.stringify(cadence.parseAppliedDate(note))}, expected 2026-08-06`);
+    }
+  }
+  // ...and the exemption must not blunt the rule it scopes: a BARE #NNN in the
+  // same shape is still a cross-reference.
+  if (cadence.parseAppliedDate('Sibling #1311 - applied 2026-08-06.') === null) {
+    pass('parseAppliedDate still treats a bare #id in the same shape as a cross-reference');
+  } else {
+    fail('the req-label exemption swallowed a genuine cross-reference');
+  }
+  // A malformed value must be rejected, not silently truncated to a plausible
+  // date. Truncating "2026-06-091" to "2026-06-09" would be reported as a
+  // measured application date and quietly shift the whole cadence — worse than
+  // the honest evaluation-date fallback, because nothing marks it as a guess.
+  const trailingJunk = [
+    ['Applied 2026-06-091', 'a trailing digit'],
+    ['Applied ~2026-06-091', 'a trailing digit after a tilde'],
+    ['Applied 2026-06-09-foo', 'a hyphenated suffix'],
+    ['Applied 2026-06-09foo', 'an unseparated word suffix'],
+    ['Applied 2026-06-09_v2', 'an underscore suffix'],
+    ['Applied 2026-06-09-2026-06-10', 'an ambiguous date range'],
+  ];
+  for (const [notes, label] of trailingJunk) {
+    if (cadence.parseAppliedDate(notes) === null) {
+      pass(`parseAppliedDate rejects ${label} instead of truncating (${notes})`);
+    } else {
+      fail(`parseAppliedDate should reject ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // A leading digit is the mirror-image malformation and must fail the same way.
+  if (cadence.parseAppliedDate('Applied 12026-06-09') === null) {
+    pass('parseAppliedDate rejects a leading extra digit');
+  } else {
+    fail(`parseAppliedDate should reject "Applied 12026-06-09", got ${JSON.stringify(cadence.parseAppliedDate('Applied 12026-06-09'))}`);
+  }
+  // Rejecting a malformed candidate must not swallow a valid one later in the
+  // note — the scan has to continue past the bad match, not stop at it.
+  if (cadence.parseAppliedDate('Applied 2026-06-091 (typo); Applied 2026-06-17 for real') === '2026-06-17') {
+    pass('parseAppliedDate skips a malformed date and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip the malformed date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-091 (typo); Applied 2026-06-17 for real'))}`);
+  }
+  // A date can match the token shape and still not exist. These must not be
+  // returned as MEASURED application dates: parseDate() rolls them over
+  // (2026-06-31 -> 2026-07-01), so an impossible date silently becomes a real
+  // but wrong one and shifts the cadence by days. The honest
+  // evaluation-date fallback is strictly better than a fabricated date.
+  const impossibleDates = [
+    ['Applied 2026-06-31', 'a 31st in a 30-day month'],
+    ['Applied 2026-02-30', 'a 30th in February'],
+    ['Applied 2026-02-29', 'a 29th of February in a non-leap year'],
+    ['Applied 2026-13-01', 'a 13th month'],
+    ['Applied 2026-00-10', 'a zero month'],
+    ['Applied 2026-06-00', 'a zero day'],
+  ];
+  const VALIDATE = { requireValidCalendarDate: true };
+  for (const [notes, label] of impossibleDates) {
+    if (cadence.parseAppliedDate(notes, VALIDATE) === null) {
+      pass(`parseAppliedDate rejects ${label} when calendar validation is requested (${notes})`);
+    } else {
+      fail(`parseAppliedDate should reject ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes, VALIDATE))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // Validation is OPT-IN. followup-seed.mjs depends on receiving the raw
+  // candidate so it can throw INVALID_DATE and make the user fix the typo;
+  // filtering unconditionally would turn that loud, fixable error into a
+  // silent wrong answer.
+  if (cadence.parseAppliedDate('Applied 2026-06-31') === '2026-06-31') {
+    pass('parseAppliedDate returns the raw candidate by default so callers can reject it loudly');
+  } else {
+    fail(`parseAppliedDate default mode must not swallow an impossible date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-31'))}`);
+  }
+  // A real leap day must still be accepted — the validity check must not
+  // over-reject.
+  if (cadence.parseAppliedDate('Applied 2024-02-29', VALIDATE) === '2024-02-29') {
+    pass('parseAppliedDate accepts a real leap day under validation');
+  } else {
+    fail(`parseAppliedDate should accept 2024-02-29, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2024-02-29', VALIDATE))}`);
+  }
+  // The continued-scan contract applies to calendar-invalid candidates too.
+  if (cadence.parseAppliedDate('Applied 2026-06-31; corrected: Applied 2026-06-30', VALIDATE) === '2026-06-30') {
+    pass('parseAppliedDate skips an impossible date and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip the impossible date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-31; corrected: Applied 2026-06-30', VALIDATE))}`);
+  }
+  // isRealCalendarDate is exported so callers share one definition of validity.
+  if (cadence.isRealCalendarDate('2024-02-29') && !cadence.isRealCalendarDate('2026-02-29') && !cadence.isRealCalendarDate('nope')) {
+    pass('isRealCalendarDate distinguishes a real leap day from an impossible one');
+  } else {
+    fail('isRealCalendarDate mis-classifies a calendar date');
+  }
+  // Date.UTC() maps years 0-99 onto 1900-1999, so a literal ISO year below
+  // 0100 would be validated against the wrong year entirely.
+  if (cadence.isRealCalendarDate('0096-02-29') && !cadence.isRealCalendarDate('0097-02-29')) {
+    pass('isRealCalendarDate preserves a literal ISO year below 0100');
+  } else {
+    fail(`isRealCalendarDate mishandles a sub-0100 year: 0096-02-29=${cadence.isRealCalendarDate('0096-02-29')} 0097-02-29=${cadence.isRealCalendarDate('0097-02-29')}`);
+  }
+  // And the source must degrade to the fallback, not report a fabricated date.
+  {
+    const r = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-31' });
+    if (r.appliedDate === '2026-06-01' && r.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate falls back when the notes date is not a real calendar date');
+    } else {
+      fail(`resolveAppliedDate impossible-date case got ${JSON.stringify(r)}`);
+    }
+  }
+  if (cadence.parseAppliedDate('Reapplied 2026-06-09; applied 2026-06-17') === '2026-06-17') {
+    pass('parseAppliedDate skips a "reapplied" match and takes the next valid one');
+  } else {
+    fail(`parseAppliedDate should skip "reapplied" and continue, got ${JSON.stringify(cadence.parseAppliedDate('Reapplied 2026-06-09; applied 2026-06-17'))}`);
+  }
+  // Two valid dates: the first still wins (already covered for a status date;
+  // this pins it for two literal "applied" mentions).
+  if (cadence.parseAppliedDate('Applied 2026-06-09, then applied 2026-07-01 to a second req') === '2026-06-09') {
+    pass('parseAppliedDate keeps the first of two "applied" dates');
+  } else {
+    fail(`parseAppliedDate should keep the first applied date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-09, then applied 2026-07-01 to a second req'))}`);
+  }
+  // Reverse ordering: a later malformed candidate must not disturb the earlier
+  // valid match the scan already found.
+  if (cadence.parseAppliedDate('Applied 2026-06-09; Applied 2026-06-171 (typo)') === '2026-06-09') {
+    pass('parseAppliedDate keeps a valid first date despite a later malformed one');
+  } else {
+    fail(`parseAppliedDate should keep the valid first date, got ${JSON.stringify(cadence.parseAppliedDate('Applied 2026-06-09; Applied 2026-06-171 (typo)'))}`);
+  }
+  // Boundary characters that legitimately terminate a date must keep matching —
+  // a boundary guard that also rejects these would break real tracker notes.
+  const validTerminators = [
+    ['Applied 2026-06-09', 'end of string'],
+    ['Applied 2026-06-09.', 'a period'],
+    ['Applied 2026-06-09; noted', 'a semicolon'],
+    ['Applied 2026-06-09)', 'a closing paren'],
+    ['Applied 2026-06-09\nvia Personio', 'a newline'],
+  ];
+  for (const [notes, label] of validTerminators) {
+    if (cadence.parseAppliedDate(notes) === '2026-06-09') {
+      pass(`parseAppliedDate still matches a date terminated by ${label}`);
+    } else {
+      fail(`parseAppliedDate should match with ${label}, got ${JSON.stringify(cadence.parseAppliedDate(notes))} from ${JSON.stringify(notes)}`);
+    }
+  }
+  // Nullish notes must not throw (the tracker's Notes cell can be absent).
+  if (cadence.parseAppliedDate(null) === null && cadence.parseAppliedDate(undefined) === null) {
+    pass('parseAppliedDate returns null for nullish notes');
+  } else {
+    fail('parseAppliedDate should return null for null/undefined notes');
+  }
+
+  // resolveAppliedDate — reports WHICH date the cadence is measured from, so a
+  // consumer can tell a real application date from the evaluation-date proxy.
+  // Without it a fallback age is indistinguishable from a measured one.
+  {
+    const measured = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-09 via Personio' });
+    if (measured.appliedDate === '2026-06-09' && measured.appDateSource === 'notes') {
+      pass('resolveAppliedDate reports source "notes" when the apply date is recorded');
+    } else {
+      fail(`resolveAppliedDate notes-case got ${JSON.stringify(measured)}`);
+    }
+
+    const inferred = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'On-archetype fit; no submission yet' });
+    if (inferred.appliedDate === '2026-06-01' && inferred.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate flags the evaluation-date proxy as a fallback, not a measured date');
+    } else {
+      fail(`resolveAppliedDate fallback-case got ${JSON.stringify(inferred)}`);
+    }
+
+    const estimated = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied ~2026-06-09' });
+    if (estimated.appliedDate === '2026-06-09' && estimated.appDateSource === 'notes') {
+      pass('resolveAppliedDate treats an estimated "~" apply date as a recorded date, not a fallback');
+    } else {
+      fail(`resolveAppliedDate estimated-case got ${JSON.stringify(estimated)}`);
+    }
+
+    // A malformed note must degrade to the honest fallback, not to a truncated
+    // date wearing the "notes" provenance label.
+    const malformed = cadence.resolveAppliedDate({ date: '2026-06-01', notes: 'Applied 2026-06-091 (typo)' });
+    if (malformed.appliedDate === '2026-06-01' && malformed.appDateSource === 'evaluation-date-fallback') {
+      pass('resolveAppliedDate falls back rather than trusting a truncated apply date');
+    } else {
+      fail(`resolveAppliedDate malformed-case got ${JSON.stringify(malformed)}`);
+    }
+  }
+
+  // analyze() output contract: every emitted entry must carry appDateSource, and
+  // the value must match how the date was actually obtained. The unit tests above
+  // only cover the helper — this pins the field on the JSON consumers read, which
+  // is where a silently-inferred age would actually do damage.
+  cadenceAppDateSourceE2e: {
+    // NOT realpathed, deliberately. This used to be, because followup-cadence's
+    // hand-rolled CLI guard compared a realpath-resolved import.meta.url against
+    // a lexical argv[1], so macOS's symlinked tmpdir silently suppressed main()
+    // and yielded empty stdout. lib/is-main-module.mjs canonicalizes both sides
+    // (#3170), so the workaround can go.
+    //
+    // Do NOT read this as coverage of that fix: whether a symlink is involved
+    // at all depends on the platform's tmpdir (it is one on macOS, usually not
+    // on Linux CI), so on most runs this proves nothing about #3170. The
+    // deliberate coverage lives in tests/main-guard-convention.test.mjs, which
+    // creates its own symlink. What this line buys is the absence of a
+    // workaround that would otherwise outlive its reason and mislead a reader.
+    const e2eTmp = mkdtempSync(join(tmpdir(), 'co-cadence-e2e-'));
+    try {
+      copyFileSync(join(ROOT, 'followup-cadence.mjs'), join(e2eTmp, 'followup-cadence.mjs'));
+      copyFileSync(join(ROOT, 'owed-actions.mjs'), join(e2eTmp, 'owed-actions.mjs'));
+      copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(e2eTmp, 'tracker-parse.mjs'));
+      copyFileSync(join(ROOT, 'tracker-aliases.json'), join(e2eTmp, 'tracker-aliases.json'));
+      // followup-cadence now derives its status aliases from templates/states.yml
+      // via tracker-utils, so the fixture has to carry both — same reason
+      // tracker-aliases.json is copied for tracker-parse.mjs (#2704).
+      copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(e2eTmp, 'tracker-utils.mjs'));
+      // ...and tracker-utils imports the shared lock-contention helpers
+      // (#2777 fix), so the fixture carries that import too.
+      copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(e2eTmp, 'pipeline-lock.mjs'));
+      // ...and followup-cadence resolves user-layer paths via path-resolver.mjs
+      // (CAREER_OPS_ROOT), so the fixture carries that too.
+      copyFileSync(join(ROOT, 'path-resolver.mjs'), join(e2eTmp, 'path-resolver.mjs'));
+      // ...and followup-cadence now resolves "today" as the LOCAL calendar day
+      // via lib/local-today.mjs (#3070), so the fixture carries that too.
+      mkdirSync(join(e2eTmp, 'lib'), { recursive: true });
+      copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(e2eTmp, 'lib', 'local-today.mjs'));
+      // ...and followup-cadence now delegates flag validation to the shared
+      // lib/cli-flags.mjs helper, so the fixture carries that too.
+      copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
+      // ...and its main-guard now comes from lib/is-main-module.mjs (#3170),
+      // which is what lets the copy answer "am I main?" correctly from a
+      // symlinked tmpdir in the first place.
+      copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(e2eTmp, 'lib', 'is-main-module.mjs'));
+      mkdirSync(join(e2eTmp, 'templates'), { recursive: true });
+      copyFileSync(join(ROOT, 'templates', 'states.yml'), join(e2eTmp, 'templates', 'states.yml'));
+      // The sandbox resolves js-yaml (and the rest of followup-cadence's
+      // package imports) through the repo's own installed tree. linkNodeModules
+      // junction-links on Windows, where a directory symlink would need
+      // SeCreateSymbolicLinkPrivilege and threw EPERM on an ordinary checkout.
+      // It also refuses to link blind against a tree that was never installed:
+      // symlinkSync succeeds on a missing target, the dangling link killed the
+      // child with ERR_MODULE_NOT_FOUND, and the catch below reported that as a
+      // crash of the appDateSource contract, which is innocent. This suite is
+      // meant to run on a fresh clone with only Node, so an absent tree is a
+      // skip that names itself.
+      const depsReason = linkNodeModules(e2eTmp);
+      if (depsReason) {
+        warn(`analyze() appDateSource end-to-end check skipped: ${depsReason}`);
+        break cadenceAppDateSourceE2e;
+      }
+      mkdirSync(join(e2eTmp, 'data'), { recursive: true });
+      writeFileSync(join(e2eTmp, 'data', 'applications.md'), [
+        '# Applications Tracker',
+        '',
+        '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+        '|---|------|---------|------|-------|--------|-----|--------|-------|',
+        '| 901 | 2026-06-01 | ExactCo | Head of AI | 4.5/5 | Applied | ✅ | [901](reports/901-exactco-2026-06-01.md) | Applied 2026-06-09 via Personio |',
+        '| 902 | 2026-06-02 | EstimateCo | Head of AI | 4.4/5 | Applied | ✅ | [902](reports/902-estimateco-2026-06-02.md) | Applied ~2026-06-10 (date estimated) |',
+        '| 903 | 2026-06-03 | FallbackCo | Head of AI | 4.3/5 | Applied | ✅ | [903](reports/903-fallbackco-2026-06-03.md) | On-archetype fit; no apply date recorded |',
+        '| 904 | 2026-06-04 | TypoCo | Head of AI | 4.2/5 | Applied | ✅ | [904](reports/904-typoco-2026-06-04.md) | Applied 2026-06-091 typo in the tracker |',
+        '',
+      ].join('\n'), 'utf-8');
+
+      const e2eOut = execFileSync(NODE, [join(e2eTmp, 'followup-cadence.mjs')], {
+        cwd: e2eTmp,
+        encoding: 'utf-8',
+        timeout: 30000,
+        env: { ...process.env, CAREER_OPS_PROFILE: '' },
+      });
+      const e2e = JSON.parse(e2eOut.trim());
+      const byNum = new Map((e2e.entries || []).map(entry => [entry.num, entry]));
+
+      const e2eCases = [
+        [901, '2026-06-09', 'notes', 'an exact "Applied YYYY-MM-DD" note'],
+        [902, '2026-06-10', 'notes', 'an estimated "Applied ~YYYY-MM-DD" note'],
+        [903, '2026-06-03', 'evaluation-date-fallback', 'notes with no apply date'],
+        [904, '2026-06-04', 'evaluation-date-fallback', 'a malformed apply date in the notes'],
+      ];
+      for (const [num, expectedDate, expectedSource, label] of e2eCases) {
+        const entry = byNum.get(num);
+        if (entry && entry.appliedDate === expectedDate && entry.appDateSource === expectedSource) {
+          pass(`analyze() emits appDateSource "${expectedSource}" for ${label}`);
+        } else {
+          fail(`analyze() entry #${num} (${label}) got ${JSON.stringify(entry && { appliedDate: entry.appliedDate, appDateSource: entry.appDateSource })}`);
+        }
+      }
+
+      const missingSource = (e2e.entries || []).filter(entry => !['notes', 'evaluation-date-fallback'].includes(entry.appDateSource));
+      if ((e2e.entries || []).length === 4 && missingSource.length === 0) {
+        pass('analyze() stamps every emitted entry with a known appDateSource');
+      } else {
+        fail(`analyze() emitted ${(e2e.entries || []).length} entries, ${missingSource.length} without a known appDateSource`);
+      }
+    } catch (e2eErr) {
+      fail(`analyze() appDateSource end-to-end check crashed: ${e2eErr.message}`);
+    } finally {
+      rmSync(e2eTmp, { recursive: true, force: true });
+    }
   }
 
   // Status normalization (strips bold + trailing date, lowercases, maps aliases)
@@ -3426,10 +3836,35 @@ if (!sqliteAvailable) {
 console.log('\n12b. Playwright MCP detection warning');
 
 try {
+  const doctorScript = readFile('doctor.mjs');
+  if (
+    !/Claude Code config/i.test(doctorScript) &&
+    /project-level MCP config/i.test(doctorScript) &&
+    /\.mcp\.json/.test(doctorScript) &&
+    /\.claude\/settings\.json/.test(doctorScript) &&
+    /\.claude\/settings\.local\.json/.test(doctorScript)
+  ) {
+    pass('doctor Playwright MCP guidance is agent-neutral and keeps conservative config detection');
+  } else {
+    fail('doctor Playwright MCP guidance is still Claude-specific or lost config detection');
+  }
+
+  // doctor also accepts a Playwright MCP server provided by an installed Claude
+  // Code plugin, which lives in the user's config dir rather than the --target
+  // project (#2752). Pin CLAUDE_CONFIG_DIR at an empty dir so these assertions
+  // describe the fixture and not whichever plugins the developer happens to
+  // have enabled; without it "no MCP config" is false on a real machine and the
+  // warning assertion below fails. Same reasoning as the GIT_CONFIG_* pinning
+  // in section 12c.
+  const emptyClaudeCfg = mkdtempSync(join(tmpdir(), 'co-emptycfg-'));
+  const doctorEnv = { env: { ...process.env, CLAUDE_CONFIG_DIR: emptyClaudeCfg } };
+
   // No project MCP config → doctor surfaces a (non-fatal) warning instead of
-  // letting SPA job boards fail silently.
+  // letting SPA job boards fail silently. doctor reads project MCP config from
+  // its launch directory, not --target, so this runs from the empty fixture:
+  // run()'s default cwd is the checkout, whose own .mcp.json would answer.
   const noMcp = mkdtempSync(join(tmpdir(), 'co-nomcp-'));
-  const a = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', noMcp]) || '{}');
+  const a = JSON.parse(run(NODE, [join(ROOT, 'doctor.mjs'), '--json', '--target', noMcp], { ...doctorEnv, cwd: noMcp }) || '{}');
   if (Array.isArray(a.warnings) && a.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('No Playwright MCP config → warning surfaced');
   } else {
@@ -3444,13 +3879,37 @@ try {
     join(withMcp, '.claude', 'settings.json'),
     JSON.stringify({ mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp', '--headless'] } } }),
   );
-  const b = JSON.parse(run(NODE, ['doctor.mjs', '--json', '--target', withMcp]) || '{}');
+  const b = JSON.parse(execFileSync(
+    NODE,
+    [join(ROOT, 'doctor.mjs'), '--json', '--target', withMcp],
+    { ...doctorEnv, cwd: withMcp, encoding: 'utf8' },
+  ) || '{}');
   if (Array.isArray(b.warnings) && !b.warnings.some((w) => /playwright mcp/i.test(w))) {
     pass('Playwright MCP configured → no warning');
   } else {
     fail(`Did not expect a Playwright MCP warning, got: ${JSON.stringify(b.warnings)}`);
   }
   rmSync(withMcp, { recursive: true, force: true });
+
+  // Local Claude settings should also count as a valid MCP registration.
+  const withLocalMcp = mkdtempSync(join(tmpdir(), 'co-local-mcp-'));
+  mkdirSync(join(withLocalMcp, '.claude'), { recursive: true });
+  writeFileSync(
+    join(withLocalMcp, '.claude', 'settings.local.json'),
+    JSON.stringify({ mcpServers: { browser: { command: 'npx', args: ['@playwright/mcp'] } } }),
+  );
+  const c = JSON.parse(execFileSync(
+    NODE,
+    [join(ROOT, 'doctor.mjs'), '--json', '--target', withLocalMcp],
+    { ...doctorEnv, cwd: withLocalMcp, encoding: 'utf8' },
+  ) || '{}');
+  if (Array.isArray(c.warnings) && !c.warnings.some((w) => /playwright mcp/i.test(w))) {
+    pass('Playwright MCP configured via .claude/settings.local.json → no warning');
+  } else {
+    fail(`Did not expect a Playwright MCP warning for settings.local.json, got: ${JSON.stringify(c.warnings)}`);
+  }
+  rmSync(withLocalMcp, { recursive: true, force: true });
+  rmSync(emptyClaudeCfg, { recursive: true, force: true });
 } catch (e) {
   fail(`Playwright MCP detection test crashed: ${e.message}`);
 }
@@ -3553,6 +4012,9 @@ try {
   }
   writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
   writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
+  // The runner stops an offer whose report-number reservation returns nothing,
+  // so the fixture has to hand out a number for the worker to be launched.
+  writeFileSync(join(tmp, 'reserve-report-num.mjs'), 'console.log("001");\n');
   writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
   writeFileSync(join(batchDir, 'batch-input.tsv'), [
     'id\turl\tsource\tnotes',
@@ -3565,10 +4027,13 @@ try {
     'echo "You\\x27ve hit your session limit · resets 12:30pm (Asia/Taipei)"',
     'exit 1',
   ].join('\n') + '\n');
+  // The runner prefetches JDs with curl. Keep this offline fixture deterministic
+  // and exercise the WebFetch fallback instead of waiting on a public request.
+  writeFileSync(join(fakeBin, 'curl'), '#!/usr/bin/env bash\nexit 1\n');
   if (process.platform === 'win32') {
-    try { execFileSync('bash', ['-c', 'chmod +x bin/claude'], { cwd: tmp }); } catch {}
+    try { execFileSync('bash', ['-c', 'chmod +x bin/claude bin/curl'], { cwd: tmp }); } catch {}
   } else {
-    execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+    execFileSync('chmod', ['+x', join(fakeBin, 'claude'), join(fakeBin, 'curl')]);
   }
 
   const env = { ...process.env, PATH: `${fakeBin}${delimiter}${process.env.PATH}` };

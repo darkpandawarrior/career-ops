@@ -5,6 +5,7 @@
 import { pass, fail, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
+import { parseScanHistoryLine } from '../lib/scan-history-columns.mjs';
 
 console.log('\nscan.mjs — posting-age filter + postedAt persistence (#1742)');
 
@@ -55,13 +56,15 @@ try {
     description: '',
     postedAt: Date.parse('2026-06-18T00:00:00Z'),
   };
-  const datedHistory = formatScanHistoryRow(datedOffer, '2026-07-09').split('\t');
-  const noDateHistory = formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09').split('\t');
+  const datedHistory = parseScanHistoryLine(formatScanHistoryRow(datedOffer, '2026-07-09'));
+  const noDateHistory = parseScanHistoryLine(formatScanHistoryRow({ ...datedOffer, postedAt: undefined }, '2026-07-09'));
   if (
-    datedHistory.length === 11 &&
-    datedHistory[8] === '2026-06-18' && // epoch ms → YYYY-MM-DD in the postedAt column (trust cols 9-10 trail it)
-    noDateHistory.length === 11 &&
-    noDateHistory[8] === '' // missing postedAt → empty column, never a bogus date
+    datedHistory.posted_at === '2026-06-18' && // epoch ms -> YYYY-MM-DD in the postedAt column
+    datedHistory.normalized_company === 'acme' &&
+    datedHistory.listing_key === '' &&
+    noDateHistory.posted_at === '' && // missing postedAt -> empty column, never a bogus date
+    noDateHistory.normalized_company === 'acme' &&
+    noDateHistory.listing_key === ''
   ) {
     pass('scan-history writer appends postedAt as an ISO trailing column (empty when absent)');
   } else {

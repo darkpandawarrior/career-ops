@@ -76,7 +76,8 @@ try {
   const { config } = await import('dotenv');
   // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
   // single JSON object (#1906).
-  config({ quiet: true });
+  // Secrets are user-layer data: read them beside the ACTIVE data root, not the caller cwd.
+  config({ path: path.join(resolveCareerOpsRoot(import.meta.url).dataRoot, '.env'), quiet: true });
 } catch {
   // dotenv is optional — fall back to process.env if not installed
 }
@@ -1573,7 +1574,8 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
   if (EXPIRED_STATUSES.has(status)) {
     const ageDays = daysBetweenIsoDates(firstSeen, today);
     if (ageDays == null) return true;
-    return ageDays < EXPIRED_RECHECK_AFTER_DAYS;
+    // A configured recheck_after_days wins; the 45-day default only applies without one.
+    return ageDays < (recheckAfterDays ?? EXPIRED_RECHECK_AFTER_DAYS);
   }
   if (!RECHECKABLE_SCAN_HISTORY_STATUSES.has(status)) return true;
   if (recheckAfterDays == null) return true;
@@ -3720,10 +3722,13 @@ export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
 export function computeConsecutiveFailures(healthRecords) {
   const streaks = new Map();
   for (const r of healthRecords) {
-    if (r.status === 'slug_gone' || r.status === 'network') {
-      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
-    } else if (r.status === 'reachable' || r.status === 'empty') {
+    // Healthy statuses reset the streak; every other status counts toward it
+    // (so newer error kinds can't fall outside it). 'empty' is healthy: a live
+    // board with 0 jobs is reachable.
+    if (r.status === 'reachable' || r.status === 'empty') {
       streaks.set(r.company, 0);
+    } else {
+      streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
     }
   }
   return streaks;

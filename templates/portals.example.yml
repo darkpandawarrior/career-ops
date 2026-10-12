@@ -1199,6 +1199,12 @@ search_queries:
 # origin. A custom frontend merely handing applications to Eploy (for example,
 # Specsavers' Attrax jobs page) is not the same protocol and is not supported.
 #
+# Eploy is also explicit-only: standard tenants use unrelated branded domains,
+# so a URL cannot be distinguished safely from a non-Eploy careers site. Set
+# `provider: eploy`; the provider reads the public `/live-jobs.xml` on that
+# origin. A custom frontend merely handing applications to Eploy (for example,
+# Specsavers' Attrax jobs page) is not the same protocol and is not supported.
+#
 # Some providers are job boards / aggregators with no per-company careers
 # URL to detect, so they must be selected with an explicit `provider:`
 # field. Those are the provider modules that omit detect(); the commented
@@ -1411,6 +1417,42 @@ search_queries:
 #     loc_query: Germany           # optional free-text location filter
 #     base_query: machine learning # optional keyword filter
 #     category: software-development # optional facet (repeatable via array)
+#   enabled: true
+#
+# - name: Example JazzHR Co
+#   careers_url: https://exampleco.applytojob.com/apply
+#   jazzhr:
+#     fetchDetails: false # optional: true fetches each posting's JSON-LD detail page (description, posted date)
+#     detailLimit: 25     # optional max detail calls when fetchDetails=true (max 100)
+#   enabled: true
+#
+# - name: Example PeopleSoft Co
+#   # PeopleSoft Fluid Candidate Gateway. No vendor-owned host to pattern-match
+#   # (every tenant runs on its own branded institution domain) — detect() keys
+#   # on the Fluid job-search URL PATH instead, so any host works as long as the
+#   # path is exactly this shape.
+#   careers_url: https://careers.exampleu.edu/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U&FOCUS=Applicant&SiteId=1
+#   max_pages: 20          # optional cap on "load more" POST replays (default 20, max 100) —
+#                          # PeopleSoft's own anonymous-session cap is ~100 results regardless
+#   peoplesoft:
+#     fetchDetails: false  # opt-in per-posting detail fetch for the full JD (off by default,
+#                          # zero-token); sequential and paced, capped by detailLimit (default 25)
+#     detailLimit: 25
+#   enabled: true
+#
+# - name: Western University                  # worked example — real, smoke-tested live 2026-09
+#                                                # (fetched 97/97 real postings incl. full JD text)
+#   careers_url: https://recruit.uwo.ca/psc/hrprdwebER/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_SCHJOB_FL&Action=U&FOCUS=Applicant&SiteId=1
+#   enabled: true
+#
+# - name: Example PageUp Co
+#   # PageUp vendor-hosted careers site. Auto-detects any path under
+#   # careers.pageuppeople.com/<tenant>/<site>/<lang>/ — the listing, or a posting
+#   # link copied from the site. If the employer fronts it on its own domain, the
+#   # numeric tenant id is in that page's asset URLs (…pageuppeople.com/<tenant>/…).
+#   # Listings carry no location and no posting date.
+#   careers_url: https://careers.pageuppeople.com/123/cw/en/listing/
+#   max_pages: 20          # optional cap on listing pages of 100 (default 20, max 200)
 #   enabled: true
 #
 # - name: Example JazzHR Co
@@ -1669,6 +1711,20 @@ search_queries:
 #   # for precision, same recall-first approach VDAB/Job Bank Canada use.
 #   enabled: true
 #
+# - name: Platsbanken — Software         # Sweden's national job board (Arbetsförmedlingen)
+#   provider: platsbanken
+#   platsbanken:
+#     # keywords optional: falls back to config/profile.yml's target_roles
+#     # (primary[] + archetypes[].name) when omitted.
+#     keywords: ["software engineer", "systemutvecklare"]  # explicit override
+#   max_pages: 5          # optional page cap (100 ads/page, default 5, max 21)
+#   # Keywords scope the source rather than decorate it: the JobTech Dev API
+#   # stops serving at offset 2000, so the unfiltered board (39,433 ads,
+#   # measured 2026-10-12) cannot be walked past 2,100 rows — each keyword gets
+#   # its own window. No location option either — use location_filter (above)
+#   # for precision, same recall-first approach VDAB/Job Bank Canada use.
+#   enabled: true
+#
 # - name: Glints — Indonesia             # SE-Asia aggregator (SG/ID/MY/VN)
 #   provider: glints
 #   searchKeywords: "AI Engineer"
@@ -1804,6 +1860,40 @@ search_queries:
 #     role: site-reliability-engineer
 #   enabled: true
 #
+# - name: Python.org Jobs                 # Python Software Foundation jobs (public RSS feed)
+#   provider: pythonorg
+#   careers_url: https://www.python.org/jobs/
+#   enabled: true
+#
+# Startup Jobs: global startup/scale-up jobs (public RSS feed). Each query
+# returns only the ~50 most recent postings, so cover a search with several
+# narrow entries rather than one broad one: one per role slug, plus a
+# `workplace: remote` variant (for a broad slug the unscoped entry fills up
+# within hours, while the remote one stays under the cap longer).
+#   role: slug = last segment of a https://startup.jobs/roles/<slug> page;
+#     full list: bare /roles/<slug> entries in
+#     https://cdn.startup.jobs/sitemaps/startupjobs/roles.xml.gz
+#   workplace: optional; "remote" is the only accepted value, anything else → HTTP 404
+#
+# - name: Startup Jobs — Platform Engineer
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer
+#   enabled: true
+#
+# - name: Startup Jobs — Platform Engineer (remote)
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: platform-engineer
+#     workplace: remote
+#   enabled: true
+#
+# - name: Startup Jobs — Site Reliability Engineer
+#   provider: startup-jobs
+#   startup_jobs:
+#     role: site-reliability-engineer
+#   enabled: true
+#
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
 #   provider: wttj
 #   wttj:
@@ -1815,6 +1905,40 @@ search_queries:
 #
 # - name: Jobicy
 #   provider: jobicy
+#   enabled: true
+#
+# - name: VDAB — AI/ML Vlaanderen        # Flanders (BE) public employment service
+#   provider: vdab
+#   vdab:
+#     # keywords optional: falls back to config/profile.yml's target_roles
+#     # (primary[] + archetypes[].name) when omitted.
+#     # keywords: ["AI Engineer", "Machine Learning"]  # explicit override
+#     days: 30            # optional recency window (1-1000)
+#     size: 100           # optional results per keyword page (1-100)
+#     fetchDetails: false # optional: true fetches detail JSON descriptions
+#     detailLimit: 25     # optional max detail calls when fetchDetails=true
+#   # No location/radius option: VDAB's search API exposes no working geo
+#   # field we could find, so every keyword search is nationwide — use
+#   # location_filter (above) for precision, same recall-first approach
+#   # arbeitsagentur uses for its optional remote pass.
+#   enabled: true
+#
+# - name: Working Nomads
+#   provider: workingnomads
+#   enabled: true
+#
+# - name: Hacker News "Who is hiring?"
+#   provider: hackernews
+#   enabled: true
+#
+# - name: The Muse
+#   provider: themuse
+#   enabled: true
+#
+# - name: Yourator                        # Taiwanese startup/digital-roles board
+#   provider: yourator
+#   careers_url: https://www.yourator.co/jobs
+#   max_pages: 120                        # optional page cap (default 120, max 500)
 #   enabled: true
 #
 # - name: Yourator                        # Taiwanese startup/digital-roles board

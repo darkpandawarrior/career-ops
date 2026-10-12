@@ -209,11 +209,14 @@ const BLOCKED = 'https://boards.example.com/fixture/2002';
   const LOC = 'https://boards.example.com/fixture/3001';
   const AGE = 'https://boards.example.com/fixture/3002';
   const DEAD = 'https://boards.example.com/fixture/3003';
+  // Fork: skipped_expired self-heals after 45 days (scan.mjs EXPIRED_RECHECK_AFTER_DAYS), so the
+  // 'still pins' fixture is dated today rather than a fixed day that ages out.
+  const RECENT = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const scanHistoryText = [
     HEADER,
     `${LOC}\t2026-01-01\tlocal-parser\tAnalyst\tFixture\tskipped_location\tBengaluru, India`,
     `${AGE}\t2026-01-01\tlocal-parser\tEngineer\tFixture\tskipped_age\tBerlin, Germany`,
-    `${DEAD}\t2026-01-01\tlocal-parser\tManager\tFixture\tskipped_expired\tBerlin, Germany`,
+    `${DEAD}\t${RECENT}\tlocal-parser\tManager\tFixture\tskipped_expired\tBerlin, Germany`,
     '',
   ].join('\n');
 

@@ -21,13 +21,16 @@ export const LEGACY_COLMAP = {
 
 /**
  * Header text (lowercased) → canonical field name. Includes ES aliases.
- * Loaded from tracker-aliases.json — the ONE shared alias table, so a future
- * web read path can load the same file instead of hand-mirroring this map.
+ * Loaded from tracker-aliases.json — the ONE shared alias table, which the web
+ * read path (web/src/lib/tracker-table.mjs) also loads at runtime, so the two
+ * can never drift (PR #1598 review). Add new aliases in the JSON, not here.
  *
- * A missing or corrupt JSON is a broken install (the file ships alongside
- * this module): fail fast with an actionable message rather than degrading
- * silently, which would reintroduce the reader-drift problem this file exists
- * to prevent.
+ * A missing or corrupt JSON is a broken install (the file ships alongside this
+ * module in SYSTEM_PATHS/BOOTSTRAP_PATHS): fail fast with an actionable
+ * message rather than degrading silently — a quiet fallback here would
+ * reintroduce exactly the reader drift the shared table exists to prevent.
+ * (The web loader degrades to the legacy fixed order instead because it reads
+ * the file from a user-configured root at request time.)
  */
 export const HEADER_ALIASES = (() => {
   const src = new URL('./tracker-aliases.json', import.meta.url);
@@ -43,7 +46,11 @@ export const HEADER_ALIASES = (() => {
 
 /**
  * A score cell in the tracker: `N/5` or `N.N/5` (any precision), or the
- * sentinels `N/A` / `DUP`. Markdown bold is stripped first. A status label
+ * sentinels `N/A` / `DUP` / `—` (em dash) / `-` (hyphen). Markdown bold is
+ * stripped first. `—`/`-` mirror the tracker's own "no data" convention used
+ * in every other column (Report, PDF, etc.) — see #1799: a backfilled entry
+ * with no evaluation (e.g. a rejection for a role never run through
+ * `oferta`) needs a score-cell sentinel too, not just `N/A`. A status label
  * never matches this, which is what makes it a reliable discriminator between
  * the score and status columns regardless of their order (#1427).
  */
@@ -52,11 +59,6 @@ export const SCORE_CELL_RE = /^\d+(?:\.\d+)?\/5$/;
 /** @param {string} v @returns {boolean} whether the cell reads as a score. */
 export function looksLikeScoreCell(v) {
   const t = String(v ?? '').replace(/\*\*/g, '').trim();
-  // '—' and '-' are score SENTINELS (#1799): a discarded, never-scored row carries one.
-  // Upstream has had them since before the v1.32.0 boundary; this fork never absorbed that,
-  // so resolveScoreStatus saw neither cell as a score and refused to order the pair — the
-  // row simply failed to ingest. The genuinely undecidable case (BOTH cells '—') still
-  // returns null there, which is why widening this is safe.
   return SCORE_CELL_RE.test(t) || t === 'N/A' || t === 'DUP' || t === '—' || t === '-';
 }
 
@@ -89,10 +91,26 @@ const REQUIRED_HEADER_FIELDS = ['num', 'company', 'role', 'score', 'status'];
  * read as table furniture and skip row-format validation, which is the same
  * class of false positive this module exists to stop.
  *
+ * Extracted rather than duplicated (PR #2267 review): the two callers had
+ * drifted, and a header they disagree about is one that validation skips as
+ * furniture while column detection cannot parse — silently falling back to the
+ * fixed legacy layout.
+ *
  * @param {string[]} cells - Lowercased, trimmed cells from `line.split('|')`.
  * @returns {Object<string,number>|null} Field → column index, or null.
  */
 function headerSchemaMap(cells) {
+  // The alias table is the whole contract — no literal `company`/`role`
+  // pre-filter. There used to be one, which meant a FULLY localized header
+  // (`| # | Fecha | Empresa | Puesto | … |`) never reached the aliases that
+  // exist for exactly that case, and the tracker silently fell back to
+  // LEGACY_COLMAP. On a plain 9-column table the fallback lines up and nothing
+  // looks wrong; insert the Location column from #946's own use case and the
+  // Score cell is read from Location instead (#2274).
+  //
+  // Requiring the full schema is what makes the pre-filter unnecessary: a data
+  // row would have to carry five different header labels in five different
+  // cells to qualify, which no real row does.
   const map = {};
   cells.forEach((c, i) => { if (HEADER_ALIASES[c] != null) map[HEADER_ALIASES[c]] = i; });
   return REQUIRED_HEADER_FIELDS.every(k => map[k] != null) ? map : null;
@@ -614,14 +632,13 @@ function scanNotesForReportLinks(notesCell) {
  *
  * normalizeCompany()-style keys strip everything outside [a-z0-9], so
  * non-Latin agency names (リクルート, パーソル, …) all collapse to the same
- * empty key — which would make a cross-channel dedup guard treat two
- * different agencies as one channel and silently merge two real submissions.
- * Keep letters and digits of any script instead; NFKC first so full-width/
+ * empty key — which made the #1596 cross-channel guard treat two different
+ * agencies as one channel and silently merge two real submissions. Keep
+ * letters and digits of any script instead; NFKC first so full-width/
  * half-width variants compare equal.
  *
- * Shared by every Via consumer (merge-tracker dedup guard, dedup-tracker
- * blind-channel grouping, analyze-patterns channel buckets) so agency
- * identity can't drift between scripts.
+ * Shared by every Via consumer (merge-tracker dedup guard, analyze-patterns
+ * channel buckets) so agency identity can't drift between scripts.
  *
  * @param {string} name - Raw Via cell or via= tag value.
  * @returns {string} Case-folded, punctuation-free, script-preserving key.
@@ -667,6 +684,21 @@ export function normalizeTextKey(value, separator = '') {
   return String(value ?? '')
     .normalize('NFKC')
     .toLowerCase()
+    // Drop the combining dot that lowercasing a Turkish dotted capital leaves
+    // behind. `'İ'.toLowerCase()` yields `i` + U+0307, not a plain `i`, so
+    // `İstanbul Tekstil` and `Istanbul Tekstil` keyed differently while reading
+    // identically on screen: the tracker treated one employer as two, and the
+    // user had no way to see why (#2705, #2736, and verify-pipeline's duplicate
+    // check, which returned a false green because of it).
+    //
+    // NO `NFD` here, and that is the whole safety property. NFKC leaves ż, ė
+    // and ġ as SINGLE precomposed code points, so this strip cannot reach
+    // their dots — while `i` + U+0307 has no precomposed form and stays
+    // exposed. Decomposing first (NFD → strip → NFC) looks equivalent and is
+    // not: it collapsed Żubr/Zubr, Ėmė/Eme and Ġenerali/Generali, which is
+    // Polish, Lithuanian and Maltese losing the distinction (caught in main
+    // by career-ops-ui, 12-ago). The protection is structural, not a list.
+    .replace(/̇/gu, '')
     .replace(/[^\p{L}\p{M}\p{N}]+/gu, separator)
     .trim();
 }

@@ -3,7 +3,7 @@
 // to write, and the dashboard picker's fallback options. Pin both to the file
 // so adding or renaming an id cannot leave either one behind.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { load as yamlLoad } from 'js-yaml';
@@ -57,6 +57,8 @@ check('the batch prompt lists the same ids in the same order', () => {
 });
 
 check('the dashboard picker offers the same ids in the same order', () => {
+  // Fork: the web dashboard has no Go picker (upstream's dashboard/ is not shipped), nothing to compare.
+  if (!existsSync(join(ROOT, 'dashboard', 'internal', 'ui', 'screens', 'pipeline.go'))) return;
   const pipeline = readFileSync(join(ROOT, 'dashboard', 'internal', 'ui', 'screens', 'pipeline.go'), 'utf8');
   const block = pipeline.match(/var canonicalDiscardReasons = \[\]string\{([\s\S]*?)\}/);
   assert.ok(block, 'canonicalDiscardReasons not found in pipeline.go');

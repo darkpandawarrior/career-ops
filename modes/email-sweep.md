@@ -40,9 +40,10 @@ Agent(
    - If genuinely ambiguous (auto-generated marketing mail that only looks like a status email, conflicting signals) — leave it out and note why in the sweep summary. Never guess.
 5. **One row per TSV file** — write each new/updated entry to its own file under `batch/tracker-additions/`, e.g. `batch/tracker-additions/{num}-{company-slug}.tsv`. `merge-tracker.mjs` treats each `.tsv` file in that directory as exactly one addition; a multi-row file will silently only register its first row and move the rest to `merged/` unprocessed. Columns (tab-separated, in this order — note it is the **opposite** of `applications.md`'s own `Score, Status` column order):
    ```
-   num	date	company	role	status	score	pdf	report	notes
+   num	date	company	role	status	score	pdf	report	notes	url
+   {num}	{date}	{company}	{role}	{status}	N/A	❌	—	{short factual note}	{posting url or empty}
    ```
-   Use `N/A` for score (no evaluation report exists for inbound/direct-application discoveries), `❌` for pdf, `—` for report.
+   Use `N/A` for score (no evaluation report exists for inbound/direct-application discoveries), `❌` for pdf, `—` for report, and the posting URL (or an empty cell) for `url` so the row reaches the deterministic dedup key.
 6. Run `node merge-tracker.mjs`, then `node reconcile-pipeline.mjs --dry-run` to check if any of the newly-resolved companies still have open `[ ]` entries in `data/pipeline.md`'s inbox — if `reconcile-pipeline.mjs` reports nothing (it only tracks `batch-state.tsv`-driven offers), manually check off the matching pipeline.md line(s) with an inline note (`| <Status> <date> (tracker #<n>, email sweep)`), matching the file's existing convention for resolved entries.
 7. Run `node verify-pipeline.mjs` and include its output in the sweep summary.
 

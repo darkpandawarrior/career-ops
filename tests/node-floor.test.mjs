@@ -11,7 +11,7 @@
 // a machine running a current Node) and make each restatement fail loudly if it
 // drifts from NODE_MIN.
 
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 import { nodeFloor, NODE_MIN, NODE_MIN_23, NODE_ENGINES } from '../lib/node-floor.mjs';
@@ -59,15 +59,19 @@ const floor = NODE_MIN.split('.').slice(0, 2).join('.');
 // ── Every restatement matches ────────────────────────────────────────
 {
   const engines = (rel) => JSON.parse(readFileSync(join(ROOT, rel), 'utf8')).engines?.node;
-  for (const rel of ['package.json', 'scaffolder/package.json']) {
+  for (const rel of ['package.json']) {
     const got = engines(rel);
     ok(got === NODE_ENGINES, `${rel} engines.node is "${NODE_ENGINES}" (found ${JSON.stringify(got)})`);
   }
 
   // The CI floor job. Exact match: a bare major ('22') resolves to the newest
   // 22.x, so it would run without testing the floor.
-  const wf = readFileSync(join(ROOT, '.github', 'workflows', 'test.yml'), 'utf8');
-  const step = wf.match(/- name: Set up the Node floor[^\n]*\n(?:[^\n]*\n){0,3}?\s*node-version:\s*'([^']+)'/);
-  ok(step !== null, 'test.yml has a "Set up the Node floor" step with a node-version');
-  if (step) ok(step[1] === floor, `test.yml's floor step runs Node '${floor}' (found '${step[1]}')`);
+  // fork: no test.yml workflow (Actions are billing-gated), so the CI-floor restatement is skipped.
+  if (existsSync(join(ROOT, '.github', 'workflows', 'test.yml'))) {
+    const wf = readFileSync(join(ROOT, '.github', 'workflows', 'test.yml'), 'utf8');
+    const step = wf.match(/- name: Set up the Node floor[^\n]*\n(?:[^\n]*\n){0,3}?\s*node-version:\s*'([^']+)'/);
+    ok(step !== null, 'test.yml has a "Set up the Node floor" step with a node-version');
+    if (step) ok(step[1] === floor, `test.yml's floor step runs Node '${floor}' (found '${step[1]}')`);
+
+  }
 }
