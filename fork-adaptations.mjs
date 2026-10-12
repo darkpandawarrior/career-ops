@@ -274,7 +274,7 @@ export const ADAPTATIONS = [
       if (/(^|\/)modes\/oferta\.md$/.test(file) && !/Do not stop at the report/.test(src)) {
         return [`${file}: lost the apply handoff — evaluations would go back to ending at a report`];
       }
-      if (/(^|\/)modes\/apply\.md$/.test(file) && !/Step 7b — Reviewer pass/.test(src)) {
+      if (/(^|\/)modes\/apply\.md$/.test(file) && !/Step 7[ab] — Reviewer pass/.test(src)) {
         return [`${file}: lost the adversarial reviewer pass before submit`];
       }
       return [];

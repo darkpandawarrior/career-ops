@@ -273,7 +273,7 @@ try {
   // An explicit token map still wins, and {} deliberately disables the theme.
   const directRunner = join(sandbox, 'render-themed.mjs');
   writeFileSync(directRunner, `
-import { renderHtmlToPdf } from './generate-pdf.mjs';
+const { renderHtmlToPdf } = await import('./generate-pdf.mjs');
 const [outputPath, root, tokens] = process.argv.slice(2);
 await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
   workspaceRoot: root,
