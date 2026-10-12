@@ -44,6 +44,10 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   limitPerAts: 150,
 };
 
+/** Banded title-vs-profile overlap (web/src/lib/title-fit.mjs). Words, not
+ *  numbers, so it can't be mistaken for the evaluation's real 1–5 / A–F. */
+export type FitBand = "strong" | "related" | "weak";
+
 export type DiscoveredOffer = {
   url: string;
   company: string;
@@ -55,6 +59,15 @@ export type DiscoveredOffer = {
   source: string;
   /** which positive keyword matched the title (transparency, e.g. "ai" in "Nail") */
   matchedKeyword?: string;
+  /** free, zero-token triage hint computed at discovery time from the posting
+   *  TITLE vs config/profile.yml target roles (#3260). Recommendation layer
+   *  only — never filters or orders anything; Evaluate gives the real A–F.
+   *  Scan offers only; AI offers already carry why + confidence. */
+  fit?: { band: FitBand; score: number };
+  /** optional free-text ranking signal preserved to pipeline.md by the canonical
+   *  writer (scan.mjs formatPipelineOffer). Generic and source-agnostic — an
+   *  importer can attach a note; the deterministic scan omits it. */
+  note?: string;
   // ── AI-search (modes/discover.md) additions — all optional, so the
   //    deterministic scan offer is unaffected (fields simply absent). ──
   /** present ONLY on AI offers → drives the "unverified" badge. AI finds can't be
@@ -89,6 +102,9 @@ export type ScanEvent =
       capHit?: boolean;
       datasetStatus?: Record<string, "ok" | "stale" | "empty">;
       postingsDroppedNoDate?: number;
+      // Sources whose results are missing (ran out of time or crashed) while the
+      // others finished — a partial result, never "all caught up".
+      incomplete?: string[];
     }
   | { kind: "log"; line: string }
   | { kind: "error"; message: string }

@@ -45,7 +45,7 @@
 // Pair this provider with a title+company fuzzy dedup pass before trusting
 // its new_added count.
 
-import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 
 const API_HOST = 'search.api.careerjet.net';
 const API_ENDPOINT = `https://${API_HOST}/v4/query`;
@@ -55,11 +55,6 @@ const API_ENDPOINT = `https://${API_HOST}/v4/query`;
 const MAX_PAGES = 10;
 const PAGE_SIZE = 100;
 const INTER_PAGE_DELAY_MS = 200;
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function resolveApiKey() {
   const key = process.env.CAREERJET_API_KEY;

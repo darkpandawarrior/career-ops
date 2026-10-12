@@ -108,10 +108,10 @@ describe("backup", () => {
     expect(siblingsMatching(file, ".bak-")).toEqual([]);
   });
 
-  it("returns null when the path is a directory (read fails, caught)", () => {
+  it("throws when the path is a directory (non-ENOENT read errors are rethrown)", () => {
     const sub = path.join(dir, "adir");
     fs.mkdirSync(sub);
-    expect(backup(sub)).toBeNull();
+    expect(() => backup(sub)).toThrow();
   });
 });
 

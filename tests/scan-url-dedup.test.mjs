@@ -31,6 +31,43 @@ if (
   fail(`normalizeUrlForDedup wrong: withLang=${normalizeUrlForDedup(withLang)} withTrailingSlash=${normalizeUrlForDedup(withTrailingSlash)} withUtm=${normalizeUrlForDedup(withUtm)} ghJid=${normalizeUrlForDedup(ghJid)} malformed=${normalizeUrlForDedup(malformed)}`);
 }
 
+{
+  const SS = 'https://www.stepstone.de/stellenangebote--AI-Engineer-Berlin-Acme--12345-inline.html';
+  const a = normalizeUrlForDedup(`${SS}?rltr=23_23_25_seorl_a_0_0_0_0_1_0`);
+  const b = normalizeUrlForDedup(`${SS}?rltr=42_17_25_seorl_r_0_0_0_0_1_0`);
+  if (a === b && a === normalizeUrlForDedup(SS)) pass('rltr variants collapse onto the bare posting key');
+  else fail('rltr variants did not collapse');
+  const mixed = normalizeUrlForDedup('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
+  if (mixed === 'https://jobs.example.com/j?gh_jid=9') pass('only tracking params are dropped from a mixed query');
+  else fail('mixed query = ' + mixed);
+  const plain = 'https://jobs.ashbyhq.com/acme/abc-123';
+  if (normalizeUrlForDedup(plain) === plain) pass('a tracking-free URL is left unchanged');
+  else fail('plain = ' + normalizeUrlForDedup(plain));
+}
+
+// SPA job routes carry identity in the fragment (upstream #3304 family): dropping
+// every fragment would make distinct postings on one tenant path compare equal.
+{
+  const hashJob1 = normalizeUrlForDedup('https://jobs.example.com/careers#/job/123');
+  const hashJob2 = normalizeUrlForDedup('https://jobs.example.com/careers#/jobs/456');
+  if (hashJob1 !== hashJob2) pass('recognized hash-route job IDs stay distinct');
+  else fail(`collapsed distinct hash-route postings onto ${hashJob1}`);
+
+  const preExistingInternalParam = normalizeUrlForDedup(
+    'https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id',
+  );
+  if (preExistingInternalParam === 'https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id&_career_ops_fragment_job_id=hash-id') {
+    pass('pre-existing internal fragment key is preserved beside promoted hash job ID');
+  } else {
+    fail(`pre-existing fragment query key was overwritten: ${preExistingInternalParam}`);
+  }
+
+  const cosmeticHash = normalizeUrlForDedup('https://jobs.example.com/careers#apply');
+  const fragmentFree = normalizeUrlForDedup('https://jobs.example.com/careers');
+  if (cosmeticHash === fragmentFree) pass('cosmetic fragments still collapse onto the fragment-free key');
+  else fail(`cosmetic fragment changed the key: ${JSON.stringify({ cosmeticHash, fragmentFree })}`);
+}
+
 if (normalizeUrlForDedup(null) == null && normalizeUrlForDedup(undefined) == null && normalizeUrlForDedup('') === '') {
   pass('normalizeUrlForDedup passes through null/undefined/empty unchanged');
 } else {

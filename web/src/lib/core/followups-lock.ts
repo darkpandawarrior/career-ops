@@ -1,14 +1,17 @@
-import { acquireTrackerLock, lockDirFor } from "@/lib/core/tracker-lock";
+import path from "node:path";
+import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+import { engineRoot } from "@/lib/career-ops";
 
 /**
- * ACL for locking `data/follow-ups.md` across processes.
+ * ACL for the core's follow-ups file lock (`followup-seed.mjs`).
  *
  * WHY A WEB ROUTE NEEDS IT. `data/follow-ups.md` is a read-modify-write from
  * two directions: the web's log/override routes AND the core's cadence seeder
- * (`followup-seed.mjs`). `atomicWrite` makes the WRITE atomic, not the
- * read-modify-write around it — two writers each read the whole file, each
- * edit, each rename their full copy back, and one change silently reverts.
- * Same failure family as the tracker (#2900), same cure.
+ * (`followup-seed.mjs`, which takes this same lock). `atomicWrite` makes the
+ * WRITE atomic, not the read-modify-write around it — two writers each read the
+ * whole file, each edit, each rename their full copy back, and one change
+ * silently reverts. Same failure family as the tracker (#2900), same cure.
  *
  * NOT `withLogLock` (followups-server.ts): that is an in-process promise queue.
  * It serializes THIS process's own requests and is blind to the user's CLI —
@@ -16,32 +19,51 @@ import { acquireTrackerLock, lockDirFor } from "@/lib/core/tracker-lock";
  * web-vs-seeder. Two guards, different scopes; they compose (see
  * `withFollowupsWrite`), neither substitutes for the other.
  *
- * WE REUSE THE TRACKER LOCK'S PROTOCOL, NOT A DYNAMIC IMPORT OF THE CORE
- * SCRIPT. Upstream wires this by `await import(pathToFileURL(...))`-ing
- * `followup-seed.mjs` and calling its exported `withFollowupsLock`. This fork's
- * `core/tracker-lock.ts` already made the opposite call for the exact same
- * reason (see its own header): root-level `.mjs` scripts are only ever invoked
- * as subprocesses here, never imported into a route module — a fully dynamic
- * `import()` of an absolute path outside `web/` is invisible to Next's file
- * tracer and would ENOENT under `output: standalone` production builds even
- * though it works under `next dev`.
+ * WE DO NOT DERIVE THE LOCK DIRECTORY. The core computes it from a sha256 of the
+ * resolved path, entirely inside `followup-seed.mjs`. We import `withFollowupsLock`
+ * and pass our path; the core resolves the path and the lockDir. Recomputing the
+ * hash web-side would birth a second body of the same truth that has to stay in
+ * sync forever — the exact class of bug this whole change closes (#3034).
  *
- * That reimplementation is directly reusable here rather than needing its own
- * copy: `lockDirFor` is keyed by a sha256 of the CANONICALIZED PATH being
- * locked, with a fixed prefix — not specific to applications.md. And the
- * fork's own `followup-seed.mjs` already takes the identical lock, on the
- * identical derivation, imported straight from `tracker-lock.mjs`/
- * `tracker-utils.mjs` (see that script's own header: "Locking reuses
- * tracker-lock.mjs's acquireTrackerLock/lockDirFor ... one lock
- * implementation, two files"). So `acquireTrackerLock(lockDirFor(followupsPath))`
- * is already the correct cross-process exclusion for follow-ups.md — there is
- * no separate protocol left to port.
+ * THE LOCK IS NOT REENTRANT (no owner/pid self-check in the core). A caller
+ * holding it must never orchestrate a core script that also takes it — that
+ * self-deadlocks until the timeout. Our two routes write the file DIRECTLY, so
+ * this is safe today; it is a rule for any future followups writer that shells
+ * out.
  *
- * THE LOCK IS NOT REENTRANT (no owner/pid self-check). A caller holding it must
- * never orchestrate a core script that also takes it — that self-deadlocks
- * until the timeout. Our two routes write the file DIRECTLY, so this is safe
- * today; it is a rule for any future followups writer that shells out.
+ * `finally`-release lives in the core export, so it cannot be forgotten here.
+ * The web timeout is deliberately far shorter than the CLI's 60s default: a
+ * minute of silence inside an HTTP handler is indistinguishable from a hang, so
+ * we fail fast and answer the caller "busy, retry" (→ 409) instead.
  */
+
+type CoreWithFollowupsLock = (
+  followupsPath: string,
+  fn: () => unknown,
+  options?: Record<string, unknown>,
+) => Promise<unknown>;
+
+/** Cached per resolved module path; failures are NEVER cached, so a repaired or
+ *  newly-installed checkout is picked up on the next request. */
+const modCache = new Map<string, CoreWithFollowupsLock>();
+
+/** Resolve the core export, or null when this root has data but no scripts.
+ *  A data-only root cannot host the seeder either, so there is nothing to
+ *  exclude cross-process and the in-process queue alone is correct — see
+ *  `withFollowupsLock` below. */
+async function loadCoreLock(): Promise<CoreWithFollowupsLock | null> {
+  const file = path.join(engineRoot(), "followup-seed.mjs");
+  const cached = modCache.get(file);
+  if (cached) return cached;
+  if (!fs.existsSync(file)) return null;
+  const mod = await import(/* webpackIgnore: true */ pathToFileURL(file).href);
+  if (typeof mod.withFollowupsLock !== "function") {
+    throw new Error("followup-seed.mjs has no withFollowupsLock export");
+  }
+  const api = mod.withFollowupsLock as CoreWithFollowupsLock;
+  modCache.set(file, api);
+  return api;
+}
 
 /** Thrown when the lock is held by someone else for longer than we will wait. */
 export class FollowupsBusyError extends Error {
@@ -52,32 +74,33 @@ export class FollowupsBusyError extends Error {
 }
 
 /**
- * Run `fn` holding the cross-process follow-ups lock, releasing it on EVERY
- * path. When the lock is contended past the web timeout, throws
- * `FollowupsBusyError` so the route can answer 409 rather than hang.
+ * Run `fn` holding the core's follow-ups lock, releasing it on EVERY path.
  *
- * The web timeout is deliberately far shorter than the CLI's default: a
- * minute of silence inside an HTTP handler is indistinguishable from a hang, so
- * we fail fast and answer the caller "busy, retry" instead.
+ * When the core scripts are absent (data-only root), runs `fn` with no file
+ * lock: without the core there is no seeder to race, and `withLogLock` still
+ * serializes this process. When the lock is contended past the web timeout,
+ * throws `FollowupsBusyError` so the route can answer 409 rather than hang.
  *
- * @param followupsPath absolute path to data/follow-ups.md
+ * @param followupsPath absolute path to data/follow-ups.md (the core resolves
+ *   and normalizes it; do not pre-derive anything from it)
  * @param fn the read-modify-write to run under the lock
  */
 export async function withFollowupsLock<T>(followupsPath: string, fn: () => T | Promise<T>): Promise<T> {
-  let lock: { release: () => void };
+  const core = await loadCoreLock();
+  if (!core) return await fn();
   try {
-    lock = await acquireTrackerLock(lockDirFor(followupsPath), {
+    return (await core(followupsPath, fn as () => unknown, {
       timeoutMs: Number(process.env.CAREER_OPS_WEB_FOLLOWUPS_LOCK_TIMEOUT_MS) || 5_000,
-      tracker: followupsPath,
-    });
-  } catch {
-    // acquireTrackerLock only ever throws from the acquire itself (timeout),
-    // never from fn — so this is unambiguously "couldn't get the lock".
-    throw new FollowupsBusyError();
-  }
-  try {
-    return await fn();
-  } finally {
-    lock.release();
+    })) as T;
+  } catch (e) {
+    // The core throws SeedError('LOCK_TIMEOUT') only from the lock acquire,
+    // which runs BEFORE fn — and our fn does fs I/O, never mints a SeedError —
+    // so this match is unambiguous: it means "couldn't get the lock", not "the
+    // write failed". Anything else (a real fs error from fn) propagates as-is.
+    const err = e as { name?: string; code?: string } | null;
+    if (err && err.name === "SeedError" && err.code === "LOCK_TIMEOUT") {
+      throw new FollowupsBusyError();
+    }
+    throw e;
   }
 }

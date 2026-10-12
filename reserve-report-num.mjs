@@ -3,33 +3,10 @@
 /**
  * reserve-report-num.mjs - shared atomic report-number allocator.
  *
- * Fixes the race condition described in #749 (and its followups): when two
- * Claude Code windows, batch workers, or a worker racing a tracker write all
- * run simultaneously, `max(existing)+1` computed from reports/ ALONE can
- * collide with a number the tracker already claims (e.g. a report link
- * written before its file lands on disk). Reservations now account for BOTH
- * report files/sentinels in reports/ AND report numbers already referenced
- * by the tracker (row `#` and Report-column links), and sentinel creation
- * runs under the SAME lock merge-tracker.mjs/set-status.mjs use for tracker
- * writes (tracker-lock.mjs's acquireTrackerLock) — one lock, one source of
- * truth, instead of two independent mechanisms that could each be right on
- * their own and still collide with each other.
- *
- * `fs.writeFileSync(path, data, { flag: 'wx' })` (O_CREAT|O_EXCL) remains the
- * ground-truth atomicity primitive for the sentinel file itself; the tracker
- * lock closes the remaining gap where the tracker and reports/ disagree.
- *
- * The sentinel is `NNN-RESERVED.md` inside `reports/`, now holding a small
- * JSON body `{pid, token, created_at}` instead of being zero-byte: `token`
- * lets releaseReportNumbers() refuse to drop a sentinel it doesn't own, and
- * `pid` lets GC skip a sentinel whose owning process is still alive even past
- * the TTL. verify-pipeline.mjs's own stale-sentinel check only looks at the
- * filename suffix and mtime, so this body change doesn't affect it.
- *
- * The caller (mode file or agent) must:
- *   1. Run this script to get a number.
- *   2. Write the real report file `NNN-{slug}-{date}.md`.
- *   3. Delete the sentinel (or let verify-pipeline.mjs GC it on next run).
+ * The CLI and every evaluator use the exported API below. Reservations account
+ * for report files, reservation sentinels, tracker row IDs, and report links in
+ * the tracker. The tracker scan and sentinel creation run under the same lock
+ * as tracker writers, while O_CREAT|O_EXCL keeps claims atomic across processes.
  *
  * Usage:
  *   node reserve-report-num.mjs
@@ -38,32 +15,39 @@
  *   node reserve-report-num.mjs --release 042-049
  *   node reserve-report-num.mjs --gc
  *
- * Also usable as a module by future callers (evaluators, merge-tracker, etc.)
- * that want to skip the subprocess round-trip:
- *   import { reserveReportNumbers, releaseReportNumbers } from './reserve-report-num.mjs';
+ * Unrecognized arguments are rejected (exit 1, nothing reserved).
  */
 
 import {
-  existsSync, mkdirSync, readFileSync, readdirSync,
+  existsSync, mkdirSync, readFileSync, readdirSync, realpathSync,
   statSync, unlinkSync, writeFileSync,
 } from 'fs';
 import { randomUUID } from 'crypto';
 import { dirname, join, resolve } from 'path';
-import { parseTrackerRow, resolveColumns, extractTrackerReportNumbers } from './tracker-parse.mjs';
-import { resolveTrackerPath } from './tracker-utils.mjs';
-import { acquireTrackerLock, canonicalizeTrackerPath } from './tracker-utils.mjs';
-import { lockDirFor } from './tracker-lock.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import {
+  extractTrackerReportNumbers, parseTrackerRow, resolveColumns,
+} from './tracker-parse.mjs';
+import {
+  acquireTrackerLock, canonicalizeTrackerPath, resolveTrackerPath, trackerLockDirFor,
+} from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const ROOT = getCareerOpsRoot();
 const MAX_SENTINEL_AGE_MS = 4 * 60 * 60 * 1000;
 const MAX_RETRIES = 50;
 const MAX_COUNT = 50;
 const RESERVATION_TOKEN = Symbol('career-ops-report-reservation-token');
+const USAGE_LINES = [
+  'Usage: node reserve-report-num.mjs [--count <1-N>] [--release <NNN>[-<MMM>]] [--gc]',
+  '',
+  '  (no flags)                Reserve 1 report number (default)',
+  `  --count <1-${MAX_COUNT}>            Reserve N report numbers, printed as a range`,
+  '  --release <NNN>[-<MMM>]  Release a previously reserved number or range',
+  '  --gc                      Garbage-collect stale reservation sentinels',
+  '',
+];
 
 /** Format a report ID with a minimum width of three digits. */
 export function formatReportNumber(num) {
@@ -76,111 +60,44 @@ export function formatReportNumber(num) {
 function reportsDirFor(options = {}) {
   return resolve(options.reportsDir
     || process.env.CAREER_OPS_REPORTS_DIR
-    || join(options.rootDir || CAREER_OPS_DATA, 'reports'));
+    || join(options.rootDir || ROOT, 'reports'));
 }
 
 function trackerPathFor(options = {}) {
   return options.trackerPath
     ? canonicalizeTrackerPath(options.trackerPath)
-    : resolveTrackerPath(options.rootDir || CAREER_OPS_DATA);
+    : resolveTrackerPath(options.rootDir || ROOT);
 }
 
-function trackerLockOptions(trackerPath, options = {}) {
-  return {
-    timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
-    retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
-    staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
-    tracker: trackerPath,
-    ...options.lockOptions,
-  };
+function batchStateFileFor(options = {}) {
+  return resolve(options.batchStateFile
+    || process.env.CAREER_OPS_BATCH_STATE
+    || join(options.rootDir || ROOT, 'batch/batch-state.tsv'));
 }
 
-// ── tracker report-number extraction ────────────────────────────────────────
-// ponytail: tracker-parse.mjs (the shared home for tracker-row parsing used by
-// merge-tracker/dedup-tracker/followup-cadence) doesn't yet export an
-// extractTrackerReportNumbers() helper, and this port is scoped to this file
-// only. Kept local for now; hoist to tracker-parse.mjs as a shared export
-// (matching upstream career-ops 1.21.0) once that file is in scope, so this
-// copy doesn't drift from the one other tracker readers would use.
-
-/** Parse one Report-cell link destination (markdown `[label](target)` or `<target>`). */
-function markdownLinkDestination(raw) {
-  const value = String(raw).trimStart();
-  if (value.startsWith('<')) {
-    for (let i = 1; i < value.length; i++) {
-      if (value[i] === '\\') {
-        i++;
-      } else if (value[i] === '>') {
-        return value.slice(1, i).replace(/\\([\\()<> ])/g, '$1');
-      }
-    }
-    return null;
-  }
-
-  let depth = 0;
-  let end = value.length;
-  for (let i = 0; i < value.length; i++) {
-    if (value[i] === '\\') {
-      i++;
-      continue;
-    }
-    if (value[i] === '(') depth++;
-    else if (value[i] === ')' && depth > 0) depth--;
-    else if (/\s/.test(value[i]) && depth === 0) {
-      end = i;
-      break;
+// Mirrors merge-tracker.mjs's loadFailedReportNumbers: a report number the
+// batch runner itself recorded as "failed" must not be handed out again, or
+// the two scripts disagree by construction — this script re-issues the
+// number, then merge-tracker.mjs refuses to merge a tracker line for it.
+function occupiedFromFailedBatchState(batchStateFile) {
+  const failed = new Set();
+  if (!existsSync(batchStateFile)) return failed;
+  for (const line of readFileSync(batchStateFile, 'utf-8').split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith('id\t')) continue;
+    const cols = line.split('\t');
+    if (cols.length < 6) continue;
+    const status = cols[2];
+    const reportNum = cols[5];
+    if (status === 'failed' && reportNum && reportNum !== '-') {
+      // Digits only, positive, safe: parseInt would accept "12abc" and
+      // 9007199254740992, and an unsafe number in the occupied set makes
+      // reserveReportNumbers throw "No safe report-number range remains".
+      const n = /^\d+$/.test(reportNum) ? Number(reportNum) : NaN;
+      if (Number.isSafeInteger(n) && n > 0) failed.add(n);
     }
   }
-  const destination = value.slice(0, end).trim();
-  return destination ? destination.replace(/\\([\\()<> ])/g, '$1') : null;
+  return failed;
 }
-
-function parseMarkdownLinks(value) {
-  const links = [];
-  let cursor = 0;
-  while (cursor < value.length) {
-    const labelStart = value.indexOf('[', cursor);
-    if (labelStart === -1) break;
-
-    let labelEnd = -1;
-    for (let i = labelStart + 1; i < value.length; i++) {
-      if (value[i] === '\\') i++;
-      else if (value[i] === ']') {
-        labelEnd = i;
-        break;
-      }
-    }
-    if (labelEnd === -1 || value[labelEnd + 1] !== '(') {
-      cursor = labelStart + 1;
-      continue;
-    }
-
-    let depth = 1;
-    let linkEnd = -1;
-    for (let i = labelEnd + 2; i < value.length; i++) {
-      if (value[i] === '\\') {
-        i++;
-      } else if (value[i] === '(') {
-        depth++;
-      } else if (value[i] === ')' && --depth === 0) {
-        linkEnd = i;
-        break;
-      }
-    }
-    if (linkEnd === -1) {
-      cursor = labelStart + 1;
-      continue;
-    }
-
-    const target = markdownLinkDestination(value.slice(labelEnd + 2, linkEnd));
-    if (target != null) links.push({ label: value.slice(labelStart + 1, labelEnd), target });
-    cursor = linkEnd + 1;
-  }
-  return links;
-}
-
-
-// ── occupancy + slot claiming ────────────────────────────────────────────────
 
 // A bare date file is not a report. `scan-ats-full.mjs --md-out reports/` writes
 // its digest as `reports/YYYY-MM-DD.md`, which matches `/^(\d+)-/` and is read
@@ -223,9 +140,10 @@ function occupiedFromTracker(trackerPath) {
   return occupied;
 }
 
-function collectOccupied(reportsDir, trackerPath) {
+function collectOccupied(reportsDir, trackerPath, batchStateFile) {
   const occupied = occupiedFromReports(reportsDir);
   for (const num of occupiedFromTracker(trackerPath)) occupied.add(num);
+  for (const num of occupiedFromFailedBatchState(batchStateFile)) occupied.add(num);
   return occupied;
 }
 
@@ -246,11 +164,11 @@ function claimSlot(reportsDir, num, occupied, token) {
       pid: process.pid,
       token,
       created_at: new Date().toISOString(),
-    }), { flag: 'wx' }); // O_CREAT | O_EXCL — fails if the sentinel already exists.
+    }), { flag: 'wx' });
     return true;
   } catch (err) {
-    if (err?.code === 'EEXIST') return false; // another process beat us
-    throw err; // unexpected FS error
+    if (err?.code === 'EEXIST') return false;
+    throw err;
   }
 }
 
@@ -285,18 +203,11 @@ function processIsAlive(pid) {
 }
 
 /**
- * Reserve one or more contiguous report IDs. All-or-nothing per attempt: if
- * any slot in the candidate range is already taken, release what was claimed
- * so far and restart past the highest known occupant. Each slot claim is
- * individually atomic (O_CREAT|O_EXCL) under the shared tracker lock, so two
- * racing reservations (or a reservation racing a tracker write) can't settle
- * on the same number. Skipped numbers become permanent gaps — report numbers
- * are opaque IDs, so gaps are harmless.
+ * Reserve one or more contiguous report IDs.
  *
  * @param {number} [count=1] Number of IDs to reserve (1-50).
  * @param {object} [options] Path and lock overrides.
- * @returns {Promise<number[]>} Reserved numeric IDs (array carries a hidden
- *   ownership token consumed by releaseReportNumbers()).
+ * @returns {Promise<number[]>} Reserved numeric IDs.
  */
 export async function reserveReportNumbers(count = 1, options = {}) {
   if (!Number.isInteger(count) || count < 1 || count > MAX_COUNT) {
@@ -305,15 +216,19 @@ export async function reserveReportNumbers(count = 1, options = {}) {
 
   const reportsDir = reportsDirFor(options);
   const trackerPath = trackerPathFor(options);
+  const batchStateFile = batchStateFileFor(options);
   mkdirSync(reportsDir, { recursive: true });
 
-  const lock = await acquireTrackerLock(
-    lockDirFor(trackerPath, process.env.CAREER_OPS_TRACKER_LOCK),
-    trackerLockOptions(trackerPath, options),
-  );
+  const lock = await acquireTrackerLock(trackerLockDirFor(trackerPath), {
+    timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
+    retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+    staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: trackerPath,
+    ...options.lockOptions,
+  });
 
   try {
-    let occupied = collectOccupied(reportsDir, trackerPath);
+    let occupied = collectOccupied(reportsDir, trackerPath, batchStateFile);
     let base = highestNumber(occupied) + 1;
     const token = randomUUID();
 
@@ -338,7 +253,7 @@ export async function reserveReportNumbers(count = 1, options = {}) {
       }
 
       for (const num of claimed) releaseSlot(reportsDir, num, { token });
-      occupied = collectOccupied(reportsDir, trackerPath);
+      occupied = collectOccupied(reportsDir, trackerPath, batchStateFile);
       base = Math.max(failedAt + 1, highestNumber(occupied) + 1);
     }
   } finally {
@@ -349,10 +264,9 @@ export async function reserveReportNumbers(count = 1, options = {}) {
 }
 
 /**
- * Release reservation sentinels after report creation or on failure. Only the
- * array returned by reserveReportNumbers() owns its sentinels (its hidden
- * token authorizes release); `options.force: true` is the explicit
- * administrative override the `--release` CLI flag uses.
+ * Release reservation sentinels after report creation or on failure.
+ * Only the array returned by reserveReportNumbers owns its sentinels. The CLI
+ * uses force mode as an explicit administrative cleanup path.
  */
 export async function releaseReportNumbers(numbers, options = {}) {
   const reportsDir = reportsDirFor(options);
@@ -368,10 +282,13 @@ export async function releaseReportNumbers(numbers, options = {}) {
   if (!existsSync(reportsDir)) return 0;
 
   const trackerPath = trackerPathFor(options);
-  const lock = await acquireTrackerLock(
-    lockDirFor(trackerPath, process.env.CAREER_OPS_TRACKER_LOCK),
-    trackerLockOptions(trackerPath, options),
-  );
+  const lock = await acquireTrackerLock(trackerLockDirFor(trackerPath), {
+    timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
+    retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+    staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: trackerPath,
+    ...options.lockOptions,
+  });
   try {
     return values.reduce(
       (removed, num) => removed + Number(releaseSlot(reportsDir, num, { token, force })),
@@ -388,10 +305,13 @@ export async function gcStaleReportReservations(options = {}) {
   if (!existsSync(reportsDir)) return 0;
 
   const trackerPath = trackerPathFor(options);
-  const lock = await acquireTrackerLock(
-    lockDirFor(trackerPath, process.env.CAREER_OPS_TRACKER_LOCK),
-    trackerLockOptions(trackerPath, options),
-  );
+  const lock = await acquireTrackerLock(trackerLockDirFor(trackerPath), {
+    timeoutMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS) || 60_000,
+    retryMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_RETRY_MS) || 75,
+    staleMs: Number(process.env.CAREER_OPS_TRACKER_LOCK_STALE_MS) || 10 * 60_000,
+    tracker: trackerPath,
+    ...options.lockOptions,
+  });
   const maxAgeMs = options.maxAgeMs ?? MAX_SENTINEL_AGE_MS;
   const now = Date.now();
   let removed = 0;
@@ -420,27 +340,29 @@ export async function gcStaleReportReservations(options = {}) {
   return removed;
 }
 
-// ── CLI ──────────────────────────────────────────────────────────────────────
-
 async function runCli() {
-  const [,, cmd, arg] = process.argv;
+  const args = process.argv.slice(2);
+  const [cmd, arg] = args;
   const options = {};
 
   if (cmd === '--help' || cmd === '-h') {
-    process.stdout.write([
-      'Usage: node reserve-report-num.mjs [--count <1-N>] [--release <NNN>[-<MMM>]] [--gc]',
-      '',
-      '  (no flags)                Reserve 1 report number (default)',
-      `  --count <1-${MAX_COUNT}>            Reserve N report numbers, printed as a range`,
-      '  --release <NNN>[-<MMM>]  Release a previously reserved number or range',
-      '  --gc                      Garbage-collect stale reservation sentinels',
-      '',
-    ].join('\n'));
+    process.stdout.write(USAGE_LINES.join('\n'));
     return 0;
   }
 
+  // Each command takes a fixed number of arguments. Anything else (an unknown
+  // word, `--count=3`, a stray extra argument) would fall through to the
+  // reserve-1 path and claim a number the caller did not ask for.
+  const argCounts = new Map([['--count', 2], ['--release', 2], ['--gc', 1]]);
+  const allowed = cmd === undefined ? 0 : argCounts.get(cmd);
+  const offending = allowed === undefined ? cmd : args[allowed];
+  if (offending !== undefined) {
+    process.stderr.write(`reserve-report-num: unrecognized argument: ${offending}\n${USAGE_LINES.join('\n')}`);
+    return 1;
+  }
+
   if (cmd === '--release') {
-    const match = (arg || '').match(/^(\d{1,3})(?:-(\d{1,3}))?$/);
+    const match = (arg || '').match(/^(\d+)(?:-(\d+))?$/);
     if (!match) {
       process.stderr.write('Usage: node reserve-report-num.mjs --release <NNN>[-<MMM>]\n');
       return 1;
@@ -477,8 +399,6 @@ async function runCli() {
       return 1;
     }
   }
-  // Any other/unknown cmd falls through to a single reserve — unchanged
-  // legacy behavior.
 
   try {
     const numbers = await reserveReportNumbers(count, options);

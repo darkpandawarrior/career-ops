@@ -37,7 +37,7 @@ describe("GET /api/memory", () => {
     expect(body).toEqual({ memory: "" });
   });
 
-  it("reads back the managed notes block from modes/_profile.md", async () => {
+  it("reads back the whole modes/_profile.md (managed block included)", async () => {
     fs.mkdirSync(path.join(TMP, "modes"), { recursive: true });
     fs.writeFileSync(
       profilePath(),
@@ -46,7 +46,8 @@ describe("GET /api/memory", () => {
     );
     const res = await GET();
     const body = await res.json();
-    expect(body.memory).toBe("- prefers remote roles");
+    expect(body.memory).toContain("- prefers remote roles");
+    expect(body.memory).toContain("# Profile customization");
   });
 
   it("falls back to the legacy web-only memory file when no managed block exists", async () => {

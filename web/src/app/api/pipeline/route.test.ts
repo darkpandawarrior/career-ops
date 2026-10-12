@@ -122,6 +122,10 @@ describe("GET /api/pipeline", () => {
       pdf: "cv.pdf",
       report: "report.md",
       notes: "strong fit",
+      location: "",
+      applyLink: "",
+      followUp: "",
+      via: "",
     });
     expect(body.applications[1].company).toBe("Google");
     expect(body.applications[1].status).toBe("interview");

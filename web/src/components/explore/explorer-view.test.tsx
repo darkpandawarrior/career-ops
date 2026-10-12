@@ -11,6 +11,12 @@ vi.mock("@/lib/fonts", () => ({
   instrumentSerifItalic: { className: "instrument-serif-italic", variable: "--font-instrument-serif-italic" },
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/explore",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 // next/link renders an <a> in the real app; under jsdom we just want children +
 // href through, so a thin passthrough keeps the BlockedCard/FailedCard links happy.
 vi.mock("next/link", () => ({

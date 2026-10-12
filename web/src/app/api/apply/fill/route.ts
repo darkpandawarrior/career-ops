@@ -1,6 +1,6 @@
-import { fillSession, handoffSession, getSession } from "@/lib/apply/session";
-import { resolveTailoredCv, companyFromTitle } from "@/lib/apply/cv";
 import { requestRoot } from "@/lib/profile-registry";
+import { fillSession, handoffSession, getSession } from "@/lib/apply/session";
+import { resolveSessionCv } from "@/lib/apply/cv";
 import type { ApplyField } from "@/lib/apply/extract";
 
 export const runtime = "nodejs";
@@ -31,10 +31,7 @@ export async function POST(req: Request) {
   // the requesting profile's own root — never the fixed engine root, or one
   // profile's tailored CV could get attached to another profile's application.
   const session = getSession(sessionId);
-  const root = await requestRoot();
-  const cvPath = (await resolveTailoredCv(root, company, application))
-    ?? (application ? null : await resolveTailoredCv(root, companyFromTitle(session?.title)))
-    ?? undefined;
+  const cvPath = (await resolveSessionCv(await requestRoot(), { company, application, title: session?.title })) ?? undefined;
 
   try {
     const result = await fillSession(sessionId, answers, fields, cvPath);

@@ -42,6 +42,9 @@ vi.mock("node:child_process", () => ({ spawn: h.spawnMock }));
 
 vi.mock("@/lib/clis", () => ({
   resolveCli: vi.fn((id: string) => h.resolved),
+  resolveCliOrFallback: (id: string) => { const r = (h.resolved); return r ? { ...r, spec: { id, ...r.spec }, substitutedFrom: null } : null; },
+  cliSubstitutionNotice: () => null,
+  cliUnavailableError: (id: string) => ({ error: `CLI '${id}' not found on this machine` }),
 }));
 
 vi.mock("@/lib/career-ops", () => ({
@@ -55,6 +58,9 @@ vi.mock("@/lib/profile-registry", () => ({
 }));
 
 import { POST } from "./route";
+
+// Upstream prefixes a "cannot be permission-restricted" notice for CLIs the fence cannot certify.
+const unfenced = (t: string) => t.replace(/^⚠️[^\n]*\n\n/, "");
 
 // A passing resolveCli result for the "claude" path (stream-json parsing).
 function fakeResolved(name = "Claude Code") {
@@ -175,7 +181,7 @@ describe("POST /api/assistant — claude stream-json parsing", () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("text/plain; charset=utf-8");
-    expect(text).toBe("Hello, world");
+    expect(unfenced(text)).toBe("Hello, world");
   });
 
   it("reassembles a delta record split across stdout chunks (line buffering)", async () => {
@@ -186,7 +192,7 @@ describe("POST /api/assistant — claude stream-json parsing", () => {
       child.stdout.emit("data", Buffer.from(line.slice(cut)));
       child.emit("close");
     });
-    expect(text).toBe("buffered");
+    expect(unfenced(text)).toBe("buffered");
   });
 
   it("ignores non-delta stream-json events (tool_use, init) and partial/non-json lines", async () => {
@@ -197,14 +203,14 @@ describe("POST /api/assistant — claude stream-json parsing", () => {
       child.stdout.emit("data", Buffer.from(init + "not json at all\n" + toolUse + delta("only text")));
       child.emit("close");
     });
-    expect(text).toBe("only text");
+    expect(unfenced(text)).toBe("only text");
   });
 
   it("emits the no-output placeholder when the child closes without any text delta", async () => {
     const { text } = await run({ message: "hi", cliId: "claude" }, (child) => {
       child.emit("close");
     });
-    expect(text).toBe("_(no output — is the CLI authenticated?)_");
+    expect(unfenced(text)).toBe("_(no output — is the CLI authenticated?)_");
   });
 
   it("surfaces stderr lines that look like errors, prefixed with the cli name", async () => {
@@ -223,14 +229,14 @@ describe("POST /api/assistant — claude stream-json parsing", () => {
       child.stderr.emit("data", Buffer.from("loading model weights...\n"));
       child.emit("close");
     });
-    expect(text).toBe("hi");
+    expect(unfenced(text)).toBe("hi");
   });
 
   it("emits a launch error message and closes when the child errors", async () => {
     const { text } = await run({ message: "hi", cliId: "claude" }, (child) => {
       child.emit("error", new Error("ENOENT spawn claude"));
     });
-    expect(text).toBe("\n[error launching Claude Code: ENOENT spawn claude]");
+    expect(unfenced(text)).toBe("\n[error launching Claude Code: ENOENT spawn claude]");
   });
 });
 
@@ -242,7 +248,7 @@ describe("POST /api/assistant — non-claude raw passthrough", () => {
       child.stdout.emit("data", Buffer.from("raw line two"));
       child.emit("close");
     });
-    expect(text).toBe("raw line one\nraw line two");
+    expect(unfenced(text)).toBe("raw line one\nraw line two");
   });
 });
 
@@ -268,7 +274,7 @@ describe("POST /api/assistant — spawn wiring", () => {
     expect(args).toContain("--output-format");
     expect(args[args.indexOf("--output-format") + 1]).toBe("stream-json");
     expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read,WebFetch,Glob,Grep");
-    expect(args[args.indexOf("--disallowedTools") + 1]).toBe("Bash,Write,Edit,NotebookEdit,Task");
+    expect(args[args.indexOf("--disallowedTools") + 1]).toBe("Write,Edit,MultiEdit,NotebookEdit,Bash,WebSearch,Task");
     // The prompt is the first -p arg and carries the user's message.
     expect(args[args.indexOf("-p") + 1]).toContain("hello there");
     const env = opts.env as Record<string, string>;

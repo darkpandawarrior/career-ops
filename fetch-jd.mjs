@@ -11,13 +11,16 @@
  * provider is unknown or the API misses, so callers (batch-runner.sh) can fall
  * back to the worker's WebFetch path.
  *
- * Why: batch/in-session workers otherwise WebFetch the full HTML page (10-30k
- * tokens of nav/markup, and mis-fetches on SPAs). The provider APIs return just
- * the JD body — ~80-90% fewer tokens and far more reliable. Providers covered:
- * Greenhouse, Ashby, Lever (solid); Workday (best-effort). Anything else falls
- * back. Reuses providers/_http.mjs for the HTTP transport (timeout + UA +
- * error shape already shared by every scan provider) instead of a second
- * fetch wrapper.
+ * JD text on stdout, exit 0, when a known ATS answers with real content.
+ * Exit 1 with empty stdout and no stderr noise otherwise — a miss is the
+ * expected "fall back to the browser path" case, not an error condition, and
+ * a visible miss is the whole point: never a fabricated JD.
+ *
+ * Coverage is JD_TEXT_API_ATS (liveness-api.mjs): Greenhouse (including
+ * company careers pages that carry only `?gh_jid=`), Lever, Ashby, Workday,
+ * SmartRecruiters. Every fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
+ * — the same dispatch its own `jd` mode uses — so this script and the
+ * interactive extractor cannot drift on which ATS is API-fetchable.
  */
 
 import { fileURLToPath } from 'node:url';

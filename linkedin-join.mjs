@@ -76,7 +76,7 @@ import * as yaml from 'js-yaml';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 // Fork adaptation (rule 5): every path below is DATA, so it resolves through dataRoot rather than
@@ -85,7 +85,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 // tracker — silently, and with plausible-looking output.
 const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const DEFAULT_CSV = join(CAREER_OPS_DATA, 'data/Connections.csv');
-const TRACKER_PATH = join(CAREER_OPS_DATA, 'data/applications.md');
+export const TRACKER_PATH = resolveTrackerPath(CAREER_OPS_DATA);
 const PORTALS_PATH = join(CAREER_OPS_DATA, 'portals.yml');
 const CONTACTS_PATH = join(CAREER_OPS_DATA, 'data/contacts.tsv');
 

@@ -270,6 +270,14 @@ export async function runBroadSearch({ dryRun = false, cliPlatforms = null } = {
 
 async function main() {
   const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    // Paid sweep: --help must never fall through to a billed run.
+    console.log('Usage: node apify-search.mjs [--dry-run] [--platforms=linkedin,indeed,glassdoor,wellfound]\n\n' +
+      '  --dry-run      print the estimated cost and exit without calling Apify\n' +
+      '  --platforms=   comma-separated subset of platforms to sweep\n' +
+      '  --help         show this help\n\nReads broad_search: in config/profile.yml. Needs APIFY_TOKEN. COSTS MONEY.');
+    return;
+  }
   const dryRun = args.includes('--dry-run');
   const platformsArg = args.find(a => a.startsWith('--platforms='));
   const cliPlatforms = platformsArg ? platformsArg.split('=')[1].split(',') : null;

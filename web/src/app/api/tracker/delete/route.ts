@@ -3,6 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, rootScript, trackerCanDelete } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { isTrackerWriting } from "@/lib/core/run-registry";
+import { parseOrphanReport } from "@/lib/tracker-delete-output.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,15 +18,6 @@ export const dynamic = "force-dynamic";
 // One delete at a time (single local process). Real deletes only — dry-runs write
 // nothing and can overlap.
 let deleting = false;
-
-function parseOrphan(stderr: string): string | null {
-  // dry-run: "(report file would be orphaned: <path>)"
-  // real:    "Note: report file may now be orphaned — <path>" (note the space
-  // BEFORE the em dash — origin's regex omitted `\s*` here and never matched
-  // the real-delete message, only the dry-run one; fixed here).
-  const m = stderr.match(/orphaned\s*[:—-]\s*([^\n)]+)\)?\s*$/im);
-  return m ? m[1].trim() : null;
-}
 
 export async function POST(req: Request) {
   let body: { n?: string | number; dryRun?: boolean };
@@ -113,7 +105,7 @@ export async function POST(req: Request) {
         { status: notFound ? 404 : 400 },
       );
     }
-    return Response.json({ ok: true, dryRun, orphanReport: parseOrphan(result.err) });
+    return Response.json({ ok: true, dryRun, orphanReport: parseOrphanReport(result.err) });
   } finally {
     if (!dryRun) deleting = false;
   }

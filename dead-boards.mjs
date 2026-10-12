@@ -43,6 +43,9 @@ const HEADER = ['ats', 'slug', 'misses', 'last_checked'].join('\t');
  */
 export function isDeadBoardError(err) {
   if (!err) return false;
+  // A paged provider (providers/icims.mjs) marks `firstPage: false` when the board
+  // had already answered page 1: a later-page 404 is not "no board here".
+  if (err.firstPage === false) return false;
   if (err.status === 404) return true;
   if (err.cause?.status === 404) return true;
   return /(^|\s)HTTP 404(\s|$)/.test(String(err.message ?? ''));

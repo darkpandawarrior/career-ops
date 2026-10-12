@@ -30,14 +30,7 @@ const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/
 // Extract the curl prefetch block once so flag assertions target only that region,
 // not unrelated SRC matches that happen to share flag names.
 const curlPrefetchBlock = (() => {
-  // The closing `fi` must be matched at the SAME indentation as this `if`
-  // (4 spaces) — the non-greedy match otherwise stops at the first `  fi`
-  // (2 spaces) it finds, which is the OUTER `if node fetch-jd.mjs ... else
-  // ... fi` block's own close, not this one's. That grabbed one `fi` too
-  // many with no matching `if`/`else` for it, producing an unbalanced
-  // extracted snippet that failed with "syntax error near unexpected token
-  // `fi'" the moment any e2e test tried to run it standalone.
-  const m = SRC.match(/if command -v curl >\/dev\/null 2>&1; then[\s\S]*?\n    fi\n/);
+  const m = SRC.match(/if command -v curl >\/dev\/null 2>&1; then[\s\S]*?\n  fi\n/);
   if (!m) throw new Error('Missing curl prefetch block');
   return m[0];
 })();

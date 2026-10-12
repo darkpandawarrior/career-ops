@@ -71,6 +71,9 @@ function appOf(company: string): Application {
     pdf: "",
     report: "",
     notes: "",
+    location: "",
+    applyLink: "",
+    followUp: "",
   };
 }
 

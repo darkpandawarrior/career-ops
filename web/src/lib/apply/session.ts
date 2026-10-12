@@ -1,5 +1,4 @@
 import { chromium, type Browser, type BrowserContext, type Page, type Frame, type Locator, type Response } from "playwright-core";
-
 /** Type like a HUMAN — real keystrokes + small jitter + a focus pause — instead of
  *  an instant `loc.fill()`. The instant value-set (no key events, zero timing) is
  *  the #1 automation tell that trips ATS bot/captcha checks; typing is far safer.
@@ -16,7 +15,10 @@ async function humanType(page: Page, loc: Locator, value: string): Promise<void>
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, knockoutWarnings, type ApplyIssue } from "./diagnose";
-import { agentInterpretForm } from "./agent-interpret";
+import { interpretFormWithAgent } from "./agent-interpret";
+import { resolveCli } from "../clis";
+import { fencingReport } from "../cli-fencing.mjs";
+import { CAPS } from "../worker-capabilities.mjs";
 
 /** The frame with the most interactive controls — where the agentic interpreter
  *  should look when deterministic extraction found nothing usable. */
@@ -31,6 +33,13 @@ async function richestControlFrame(page: Page): Promise<Frame> {
     }
   }
   return best;
+}
+
+/** Escape a value for use inside a double-quoted CSS attribute selector.
+ *  Backslash FIRST, then quote — escaping only the quote would let a trailing
+ *  backslash neutralize the closing quote (CodeQL js/incomplete-sanitization). */
+function cssAttr(v: string): string {
+  return v.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 /** Navigate resiliently: a transient nav error / slow ATS shouldn't fail the
@@ -91,28 +100,6 @@ async function pickFormFrame(page: Page): Promise<{ frame: Frame; form: Extracte
   return best;
 }
 
-/** Enrich generically-extracted fields with an ATS's published schema (clean
- *  labels, correct types, real options) — Greenhouse renders react-select
- *  widgets whose options aren't in the DOM. Matched by native id/name, then label. */
-async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
-  const gh = parseGreenhouse(url);
-  if (!gh) return;
-  const schema = await fetchGreenhouseSchema(gh.token, gh.jobId);
-  if (!schema) return;
-  for (const f of fields) {
-    const hit =
-      (f.nativeName && schema.get(f.nativeName)) ||
-      (f.nativeId && schema.get(f.nativeId)) ||
-      (f.label && schema.get(`label:${f.label.toLowerCase()}`));
-    if (!hit) continue;
-    if (hit.label) f.label = hit.label;
-    if (hit.type) f.type = hit.type as ApplyField["type"];
-    if (hit.options.length) f.options = hit.options;
-    if (hit.required) f.required = true;
-    if (hit.type === "select") f.combobox = true;
-  }
-}
-
 /** Greenhouse-style dropdowns (gender / veteran / disability / "Are you Hispanic?"
  *  + the yes-no questions) render as `input[role=combobox]` (react-select) whose
  *  options aren't in the DOM until OPENED — so they'd otherwise degrade to a
@@ -149,6 +136,28 @@ async function enrichComboboxOptionsFromDom(frame: Frame, fields: ApplyField[]):
   await page.keyboard.press("Escape").catch(() => {});
 }
 
+/** Enrich generically-extracted fields with an ATS's published schema (clean
+ *  labels, correct types, real options) — Greenhouse renders react-select
+ *  widgets whose options aren't in the DOM. Matched by native id/name, then label. */
+async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
+  const gh = parseGreenhouse(url);
+  if (!gh) return;
+  const schema = await fetchGreenhouseSchema(gh.token, gh.jobId);
+  if (!schema) return;
+  for (const f of fields) {
+    const hit =
+      (f.nativeName && schema.get(f.nativeName)) ||
+      (f.nativeId && schema.get(f.nativeId)) ||
+      (f.label && schema.get(`label:${f.label.toLowerCase()}`));
+    if (!hit) continue;
+    if (hit.label) f.label = hit.label;
+    if (hit.type) f.type = hit.type as ApplyField["type"];
+    if (hit.options.length) f.options = hit.options;
+    if (hit.required) f.required = true;
+    if (hit.type === "select") f.combobox = true;
+  }
+}
+
 // A persistent apply SESSION keeps one real-form page open (headed-but-off-screen)
 // so we can: extract → (user verifies pre-filled answers) → FILL the real form →
 // bringToFront() for the human to submit it themselves. Headed (channel:chrome) =
@@ -173,10 +182,8 @@ async function headedBrowser(): Promise<Browser> {
     nb = await chromium.launch({
       channel: "chrome",
       headless: false,
-      // ON-SCREEN: the user watches their REAL form fill + can review and Submit it
-      // themselves — reliable, with no fragile off-screen→on-screen CDP reposition
-      // (that move could silently fail on macOS, leaving the window invisible = "it
-      // closed"). Honest too: it's clearly the user's own Chrome doing the work.
+      // ON-SCREEN: the user watches their REAL form fill and can review and Submit it
+      // themselves; no fragile off-screen to on-screen CDP reposition.
       args: ["--window-position=120,80", "--window-size=1200,900"],
     });
   } catch {
@@ -220,7 +227,7 @@ async function nudgeScroll(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 }
 
-export async function openSession(url: string, cliId?: string, forceAgent?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
   prune();
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer); // someone's active
   const browser = await headedBrowser();
@@ -272,7 +279,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     await page.waitForTimeout(400);
     ({ frame, form } = await pickFormFrame(page));
   }
-  if (!looksLikeApplicationForm(form) && (await tryApplyTrigger(page))) {
+  if (!noApplyBtn && !looksLikeApplicationForm(form) && (await tryApplyTrigger(page))) {
     await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
     await page.waitForTimeout(800);
     await dropNewTabs(page);
@@ -280,15 +287,23 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     await snap();
   }
   await enrichFromAts(url, form.fields); // clean labels + real options for known ATS (Greenhouse)
-  await enrichComboboxOptionsFromDom(frame, form.fields); // open react-select dropdowns → read their real options (demographic / yes-no), so they don't degrade to text
+  await enrichComboboxOptionsFromDom(frame, form.fields); // open react-select dropdowns, read their real options (demographic / yes-no) so they do not degrade to text
   await snap();
 
   let aiInterpreted = false;
+  // Whether the user's CLI was actually LAUNCHED over the form, as reported by
+  // the interpreter. Kept apart from aiInterpreted: a launched agent can come
+  // back empty, and the fencing notice below is about the launch, not about the
+  // result. A missing CLI, an empty form or a fencing refusal (the throw the
+  // catch below absorbs) never launched anything, so no notice is owed.
+  let agentSpawned = false;
   // Opt-in: ALWAYS interpret with AI (max robustness, ignores the deterministic
   // result) — for users who'd rather pay tokens than risk a heuristic miss.
   if (forceAgent && cliId) {
     const aiFrame = await richestControlFrame(page);
-    const aiFields = await agentInterpretForm(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => [] as ApplyField[]);
+    const ai = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
+    agentSpawned = ai.spawned;
+    const aiFields = ai.fields;
     if (aiFields.length) {
       frame = aiFrame;
       form = { ...form, fields: aiFields };
@@ -308,7 +323,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     // session open and hand off to the STREAMED drive route, so the user watches
     // the agent reach the form live (/api/apply/drive). Otherwise abort.
     if (cliId && why.code === "no-form") {
-      const id = `apply-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
+      const id = `apply-${crypto.randomUUID()}`;
       const title = form.title || (await page.title().catch(() => "")) || "Application";
       SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
       return { id, title, fields: [], shots, issues: [], needsDrive: true };
@@ -323,9 +338,19 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (cap) issues.push(cap);
   if (multi) issues.push(multi);
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "This form had an uncommon layout, so AI read its fields live — give them an extra check before submitting." });
+  // agentInterpretForm just ran the user's chosen CLI over this form. If that
+  // runtime has no verified fencing mechanism it read the page with its default
+  // access, and the user should know — agent-interpret.ts has no stream of its
+  // own, so the notice belongs here, where its callers already surface soft
+  // issues (#2507). warn, not info: this is "proceeded, but look". Keyed on the
+  // LAUNCH the interpreter reports, not on aiInterpreted: an empty
+  // interpretation still ran the agent, and an interpreter that never launched
+  // it (no CLI, no controls, refused argv) owes no warning.
+  const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
+  if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
-  const id = `apply-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
+  const id = `apply-${crypto.randomUUID()}`;
   SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
   return { id, title: form.title, fields: form.fields, shots, issues };
 }
@@ -368,9 +393,12 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   let { frame, form } = await pickFormFrame(s.page);
   await enrichFromAts(s.url, form.fields);
   let aiInterpreted = false;
+  let agentSpawned = false; // see openSession: launch, not result
   if (!looksLikeApplicationForm(form) && cliId) {
     const aiFrame = await richestControlFrame(s.page);
-    const aiFields = await agentInterpretForm(aiFrame, cliId, form.title || s.title).catch(() => [] as ApplyField[]);
+    const ai = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
+    agentSpawned = ai.spawned;
+    const aiFields = ai.fields;
     if (aiFields.length && looksLikeApplicationForm({ title: form.title, url: form.url, fields: aiFields })) {
       frame = aiFrame;
       form = { ...form, fields: aiFields };
@@ -383,6 +411,16 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   if (form.title) s.title = form.title;
   const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }, ...knockoutWarnings(s.fields)];
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "AI also read the fields live (uncommon layout) — give them an extra check." });
+  // agentInterpretForm just ran the user's chosen CLI over this form. If that
+  // runtime has no verified fencing mechanism it read the page with its default
+  // access, and the user should know — agent-interpret.ts has no stream of its
+  // own, so the notice belongs here, where its callers already surface soft
+  // issues (#2507). warn, not info: this is "proceeded, but look". Keyed on the
+  // LAUNCH the interpreter reports, not on aiInterpreted: an empty
+  // interpretation still ran the agent, and an interpreter that never launched
+  // it (no CLI, no controls, refused argv) owes no warning.
+  const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
+  if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
   const cap = await captchaWarning(s.page);
   if (cap) issues.push(cap);
   return { title: s.title, fields: s.fields, issues };
@@ -445,7 +483,7 @@ export async function fillSession(
       if (!isResumeField(meta)) continue;
       let ok = false;
       try {
-        await s.frame.locator(`[data-co-field="${meta.id}"]`).first().setInputFiles(cvPath);
+        await s.frame.locator(`[data-co-field="${cssAttr(meta.id)}"]`).first().setInputFiles(cvPath);
         ok = true;
       } catch {
         // fallback: any file input inside the same field container
@@ -475,7 +513,7 @@ export async function fillSession(
     let ok = false;
     let gaveUp = false;
     try {
-      const loc = s.frame.locator(`[data-co-field="${fid}"]`).first();
+      const loc = s.frame.locator(`[data-co-field="${cssAttr(fid)}"]`).first();
       if (meta.combobox) {
         // react-select: open, type to filter, CLICK the matching option. We never
         // press Enter — in a form, Enter can submit. Clicking an option can't.
@@ -518,7 +556,7 @@ export async function fillSession(
             done = true;
           } else {
             const cid = await loc.getAttribute("id").catch(() => null);
-            const lab = cid ? s.frame.locator(`label[for="${cid.replace(/"/g, '\\"')}"]`).first() : null;
+            const lab = cid ? s.frame.locator(`label[for="${cssAttr(cid)}"]`).first() : null;
             if (lab && (await lab.count())) {
               await lab.click().catch(() => {});
               done = true;
@@ -534,11 +572,11 @@ export async function fillSession(
         }
         gaveUp = !done;
       } else if (meta.type === "radio") {
-        const r = s.frame.locator(`[data-co-field="${fid}"][data-co-option="${value.replace(/"/g, '\\"')}"]`).first();
+        const r = s.frame.locator(`[data-co-field="${cssAttr(fid)}"][data-co-option="${cssAttr(value)}"]`).first();
         await r.check({ timeout: 3000 }).catch(async () => {
           await r.check({ force: true }).catch(async () => {
             const rid = await r.getAttribute("id").catch(() => null);
-            if (rid) await s.frame.locator(`label[for="${rid.replace(/"/g, '\\"')}"]`).first().click().catch(() => { gaveUp = true; });
+            if (rid) await s.frame.locator(`label[for="${cssAttr(rid)}"]`).first().click().catch(() => { gaveUp = true; });
             else gaveUp = true;
           });
         });
@@ -565,9 +603,9 @@ export async function fillSession(
   return { steps, navigated: endPath !== startPath, issues };
 }
 
-/** Bring the real (pre-filled) form window to the FRONT for the HUMAN to review +
- *  submit. The window is already on-screen; we re-raise it (CDP setWindowBounds +
- *  bringToFront) in case it slipped behind other windows. We never submit. */
+/** Hand the real (now pre-filled) form to the HUMAN to review + submit. The
+ *  window was kept OFF-SCREEN during fill, so bringToFront alone wouldn't make it
+ *  visible — we reposition it on-screen via CDP first. We never submit. */
 export async function handoffSession(id: string): Promise<void> {
   const s = SESSIONS.get(id);
   if (!s) throw new Error("apply session not found");

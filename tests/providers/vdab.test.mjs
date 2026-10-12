@@ -1,5 +1,5 @@
 // tests/providers/vdab.test.mjs
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, rmSync } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
@@ -258,21 +258,18 @@ try {
     const withTmpCwd = async (setup, run) => {
       const tmp = mkdtempSync(join(tmpdir(), 'career-ops-vdab-fallback-'));
       const cwdBefore = process.cwd();
-      // CAREER_OPS_ROOT, not just cwd: _profile-keywords.mjs resolves
-      // config/profile.yml from the ACTIVE PROFILE's data root (it used to read
-      // it cwd-relative, which is the bug that made `./profile <name>` fall back
-      // to another profile's target_roles). cwd stays pinned too, so a path that
-      // quietly goes back to following the shell is still caught elsewhere.
       const rootBefore = process.env.CAREER_OPS_ROOT;
       try {
         setup(tmp);
         process.chdir(tmp);
+        // fork: the profile default resolves from the data root, not the cwd
         process.env.CAREER_OPS_ROOT = tmp;
         return await run();
       } finally {
         process.chdir(cwdBefore);
         if (rootBefore === undefined) delete process.env.CAREER_OPS_ROOT;
         else process.env.CAREER_OPS_ROOT = rootBefore;
+        rmSync(tmp, { recursive: true, force: true });
       }
     };
 

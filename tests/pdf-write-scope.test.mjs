@@ -3,8 +3,9 @@
 // apart from the harness imports and one level of dedent.
 
 import { pass, fail, warn, run, lastRunFailure, ROOT, NODE } from './helpers.mjs';
-import { join, sep } from 'path';
-import { existsSync, readFileSync, readdirSync } from 'fs';
+import { join, relative, sep } from 'path';
+import { listTree } from '../lib/walk-tree.mjs';
+import { existsSync, readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 
@@ -33,6 +34,7 @@ if (!existsSync(webLib)) {
   // than skip, because a skip is how this freeze would silently stop guarding.
   const required = {
     'claude-invocation.mjs': join(webLib, 'claude-invocation.mjs'),
+    'worker-capabilities.mjs': join(webLib, 'worker-capabilities.mjs'),
     'cv-envelope.mjs': join(webLib, 'cv-envelope.mjs'),
     'run-prompts.mjs': join(webLib, 'run-prompts.mjs'),
     'api/run/route.ts': runRoutePath,
@@ -42,9 +44,12 @@ if (!existsSync(webLib)) {
     fail(`web/ exists but ${missing.join(', ')} is missing — the #2185 write-scope freeze cannot verify (was it moved?)`);
   } else {
     let invocation;
+    let capabilities;
     let prompts;
     try {
       invocation = await import(pathToFileURL(required['claude-invocation.mjs']).href);
+      // KNOWN_KINDS moved to worker-capabilities.mjs (#2507).
+      capabilities = await import(pathToFileURL(required['worker-capabilities.mjs']).href);
       prompts = await import(pathToFileURL(required['run-prompts.mjs']).href);
       // Imported for its side effect of resolving: run-prompts pulls cv-envelope
       // for CV_ENVELOPE_INSTRUCTION, so a break there would surface here anyway,
@@ -68,9 +73,10 @@ if (!existsSync(webLib)) {
       // nothing invokes test:engine. That is how a core/ suite sat broken and unrun
       // since the v1.29.0 sync, and how an onboarding/ suite kept a failing
       // assertion nobody saw.
-      webUnits = readdirSync(join(ROOT, 'web', 'src', 'lib'), { recursive: true })
-        .map((f) => String(f).split(sep).join('/'))
-        .filter((f) => f.endsWith('.test.mjs'))
+      // listTree, not a recursive readdir: it applies the nested-checkout guard.
+      const webLibRoot = join(ROOT, 'web', 'src', 'lib');
+      webUnits = listTree(webLibRoot, { match: /\.test\.mjs$/ })
+        .map((abs) => relative(webLibRoot, abs).split(sep).join('/'))
         .sort()
         .map((f) => `web/src/lib/${f}`);
     } catch (err) {
@@ -121,7 +127,7 @@ if (!existsSync(webLib)) {
       // can still be auto-approved by --permission-mode acceptEdits, and a
       // pdf-only probe let exactly that ship for the persisting kinds.
       const unmentioned = [];
-      for (const kind of invocation.KNOWN_KINDS) {
+      for (const kind of capabilities.KNOWN_KINDS) {
         const scope = invocation.toolScopeFor(kind);
         const named = [...toolNames(scope.allowed), ...toolNames(scope.disallowed)];
         for (const tool of WRITE_CAPABLE_TOOLS) {

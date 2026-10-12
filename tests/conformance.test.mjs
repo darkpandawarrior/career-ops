@@ -19,14 +19,17 @@
 // child-process indirection. Keep the two in sync by hand if either changes
 // its matching rule — conformance/README.md says as much.
 import { pass, fail } from './helpers.mjs';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
+import { pathToFileURL } from 'url';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { sanitizeTsvField, sanitizeMarkdownField, sanitizePipelineUrl } from '../scan.mjs';
-import { canonStatus } from '../web/src/lib/status-alias.mjs';
 import { lockDirFor } from '../tracker-lock.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// web/ is optional in a checkout (#3269): load its canonStatus lazily and skip that fixture without it.
+const STATUS_ALIAS = join(__dirname, '..', 'web', 'src', 'lib', 'status-alias.mjs');
+const canonStatus = existsSync(STATUS_ALIAS) ? (await import(pathToFileURL(STATUS_ALIAS).href)).canonStatus : null;
 const FIXTURES_DIR = join(__dirname, '..', 'conformance', 'fixtures');
 
 console.log('\nconformance/ — fixture corpus matches the live JS');
@@ -64,7 +67,9 @@ const SANITIZER_FNS = { sanitizeTsvField, sanitizeMarkdownField, sanitizePipelin
 // ── status-aliases.json ─────────────────────────────────────────────
 {
   const doc = JSON.parse(readFileSync(join(FIXTURES_DIR, 'status-aliases.json'), 'utf8'));
-  if (doc.schemaVersion !== 1) {
+  if (!canonStatus) {
+    pass('canonStatus fixtures skipped: web/ is not in this checkout');
+  } else if (doc.schemaVersion !== 1) {
     fail(`conformance/fixtures/status-aliases.json: unsupported schemaVersion ${doc.schemaVersion}`);
   } else if (doc.function !== 'canonStatus') {
     fail(`conformance/fixtures/status-aliases.json: names unknown function "${doc.function}"`);

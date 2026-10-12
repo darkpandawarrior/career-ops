@@ -70,7 +70,7 @@ export async function setAppCell(
       } catch {
         return "error";
       }
-    }, { timeoutMs: 8_000 });
+    });
   } catch {
     return "error";
   }

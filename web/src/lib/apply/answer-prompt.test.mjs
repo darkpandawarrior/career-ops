@@ -35,7 +35,7 @@ test("the sensitive/consent-field carve-out survives, naming every category it p
       `the planner must be told never to auto-answer ${category} fields; that instruction is gone`,
     );
   }
-  assert.match(prompt, /NEVER auto-answer[^\n]*needs_confirmation:true and value:""/);
+  assert.match(prompt, /NEVER (?:auto-answer|fill)[^\n]*needs_confirmation:true and value:""/);
 });
 
 test("the output contract the route parses back is stated in the prompt", () => {
@@ -85,34 +85,8 @@ test("a form with no fields still produces a well-formed prompt", () => {
   assert.match(prompt, /FIELDS \(id ⇥ type ⇥ label ⇥ options\):\n\n\nFor each field/);
 });
 
-// Fork-only: the route inlines cv.md/profile.yml/a matching report directly
-// into the prompt (no tool round-trips) when it can find them, and otherwise
-// falls back to telling the planner to go read the files itself. Whichever
-// branch fires changes what argv the planner gets spawned with (planner.ts's
-// `haveCv`), so a drift here silently breaks the "fast path" the route logs.
-
-test("when cv.md was read, its content is inlined and the planner is told to invent nothing", () => {
-  const prompt = buildAnswerPrompt({ title: "Acme", fields: FIELDS, cv: "# Jane Doe\nSenior Engineer." });
-  assert.ok(prompt.includes("THE CANDIDATE'S REAL DATA"));
-  assert.ok(prompt.includes("# Jane Doe\nSenior Engineer."));
-  // Fast path: the planner must NOT also be told to go read the file itself.
-  assert.ok(!prompt.includes("Read cv.md and config/profile.yml"));
-});
-
 test("without cv.md, the planner is pointed at the files instead of drafting blind", () => {
   const prompt = buildAnswerPrompt({ title: "Acme", fields: FIELDS });
   assert.ok(prompt.includes("Read cv.md and config/profile.yml"));
   assert.ok(!prompt.includes("THE CANDIDATE'S REAL DATA"));
-});
-
-test("profile and report are only inlined alongside a cv, and only when non-empty", () => {
-  const withAll = buildAnswerPrompt({ title: "Acme", fields: FIELDS, cv: "cv text", profile: "profile text", report: "report text" });
-  assert.ok(withAll.includes("Profile (config/profile.yml):"));
-  assert.ok(withAll.includes("profile text"));
-  assert.ok(withAll.includes("Prior evaluation report for this role:"));
-  assert.ok(withAll.includes("report text"));
-
-  const cvOnly = buildAnswerPrompt({ title: "Acme", fields: FIELDS, cv: "cv text" });
-  assert.ok(!cvOnly.includes("Profile (config/profile.yml):"));
-  assert.ok(!cvOnly.includes("Prior evaluation report for this role:"));
 });

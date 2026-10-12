@@ -1,186 +1,119 @@
-import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
-import crypto from "node:crypto";
+import { pathToFileURL } from "node:url";
+import { engineRoot } from "@/lib/career-ops";
 
 /**
- * ACL for the cross-process tracker lock. This is a PARALLEL TypeScript
- * implementation of the engine's tracker-lock.mjs — not a literal import.
- * Root-level `.mjs` scripts in this repo are only ever invoked from web/ as
- * subprocesses (see `@/lib/career-ops`'s `rootScript()`/`engineScript()`),
- * never imported directly into a route module, and the web app runs as a
- * separate long-lived Next.js process from any CLI script anyway — so a
- * filesystem lock is the only mechanism that can coordinate them, same
- * language or not.
+ * ACL for the core's tracker lock (`tracker-utils.mjs`).
  *
- * Both sides MUST agree on:
- *   - the lock directory path for a given tracker file (sha256(realpath) under
- *     the OS temp dir, prefixed `career-ops-merge-tracker-`)
- *   - the acquire protocol (mkdirSync + owner.json + retry/backoff/stale-recovery)
- *   - the release protocol (only the token-matching owner may remove the lock)
- * If you change one side's protocol, change the other (career-ops/tracker-lock.mjs)
- * the same way.
- */
-
-type LockHandle = {
-  attempts: number;
-  waitMs: number;
-  staleRecovered: boolean;
-  release: () => void;
-};
-
-type AcquireOptions = {
-  timeoutMs?: number;
-  retryMs?: number;
-  staleMs?: number;
-  tracker?: string;
-};
-
-/** Canonicalize a tracker path the same way the engine side does (realpath when it exists). */
-function canonicalizeTrackerPath(p: string): string {
-  const abs = path.resolve(p);
-  try {
-    return fs.realpathSync(abs);
-  } catch {
-    return abs;
-  }
-}
-
-/** Deterministic lock directory for a tracker file — same derivation as career-ops/tracker-lock.mjs. */
-export function lockDirFor(appsFile: string): string {
-  const lockKey = crypto.createHash("sha256").update(canonicalizeTrackerPath(appsFile)).digest("hex").slice(0, 16);
-  const tmpRoot = fs.realpathSync(os.tmpdir());
-  return path.join(tmpRoot, `career-ops-merge-tracker-${lockKey}.lock`);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function processIsAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException)?.code === "EPERM";
-  }
-}
-
-function readLockOwner(lockDir: string): { pid?: number; token?: string } | null {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(lockDir, "owner.json"), "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function lockCanRecover(lockDir: string, staleMs: number): boolean {
-  const owner = readLockOwner(lockDir);
-  if (owner?.pid) return !processIsAlive(owner.pid);
-  try {
-    return Date.now() - fs.statSync(lockDir).mtimeMs > staleMs;
-  } catch {
-    return true;
-  }
-}
-
-/** One non-blocking acquisition attempt. Returns a handle on success, or a
- *  reason to retry ("held" = someone else's live lock; "recovered-stale" =
- *  we just cleared a dead owner's lock, caller should immediately retry). */
-function tryAcquireOnce(lockDir: string, staleMs: number, token: string, tracker: string | null):
-  | { ok: true; release: () => void }
-  | { ok: false; reason: "held" | "recovered-stale" } {
-  const recoverGuardDir = `${lockDir}.recover`;
-  try {
-    fs.mkdirSync(lockDir);
-    fs.writeFileSync(
-      path.join(lockDir, "owner.json"),
-      JSON.stringify({ pid: process.pid, token, started_at: new Date().toISOString(), tracker }, null, 2),
-    );
-    let released = false;
-    return {
-      ok: true,
-      release() {
-        if (released) return;
-        released = true;
-        const owner = readLockOwner(lockDir);
-        if (owner?.token === token) {
-          fs.rmSync(lockDir, { recursive: true, force: true });
-        }
-      },
-    };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code !== "EEXIST") throw err;
-
-    let hasRecoverGuard = false;
-    try {
-      fs.mkdirSync(recoverGuardDir);
-      hasRecoverGuard = true;
-    } catch (guardErr) {
-      if ((guardErr as NodeJS.ErrnoException)?.code !== "EEXIST") throw guardErr;
-    }
-
-    if (hasRecoverGuard) {
-      try {
-        if (lockCanRecover(lockDir, staleMs)) {
-          fs.rmSync(lockDir, { recursive: true, force: true });
-          return { ok: false, reason: "recovered-stale" };
-        }
-      } finally {
-        fs.rmSync(recoverGuardDir, { recursive: true, force: true });
-      }
-    }
-    return { ok: false, reason: "held" };
-  }
-}
-
-/**
- * Acquire the exclusive tracker lock. Bounded by `timeoutMs` (default 8s) —
- * short on purpose: a web request must fail fast with a clear error rather
- * than hang indefinitely behind a batch run's lock.
- */
-export async function acquireTrackerLock(lockDir: string, options: AcquireOptions = {}): Promise<LockHandle> {
-  const timeoutMs = options.timeoutMs ?? 8_000;
-  const retryMs = options.retryMs ?? 75;
-  const staleMs = options.staleMs ?? 10 * 60_000;
-  const token = crypto.randomUUID();
-  const startedAt = Date.now();
-  let attempts = 0;
-  let staleRecovered = false;
-
-  while (Date.now() - startedAt < timeoutMs) {
-    attempts++;
-    const result = tryAcquireOnce(lockDir, staleMs, token, options.tracker ?? null);
-    if (result.ok) {
-      return { attempts, waitMs: Date.now() - startedAt, staleRecovered, release: result.release };
-    }
-    if (result.reason === "recovered-stale") {
-      staleRecovered = true;
-      continue;
-    }
-    await sleep(retryMs);
-  }
-
-  throw new Error(`Timed out waiting for tracker lock at ${lockDir}`);
-}
-
-/**
- * Convenience wrapper: acquire the lock for `appsFile`, run `fn`, always
- * release. Use this from route handlers instead of calling acquire/release
- * directly so a thrown error can never leak a held lock.
+ * WHY A WEB ROUTE NEEDS IT. `atomicWrite` makes the WRITE atomic, not the
+ * read-modify-write around it. Two writers each read the whole tracker, each
+ * edit their own row, each rename their full copy back: the second discards the
+ * first's change. Every call succeeds, the file is well-formed at every instant,
+ * and one row silently reverts (#2900). Reproduced before fixing:
  *
- * Deliberately async-only, no sync variant: a synchronous busy-wait (e.g. via
- * Atomics.wait) would block the ENTIRE Next.js request-handling thread while
- * waiting for a batch run's lock, freezing every other concurrent request —
- * worse than the race this module exists to fix. Callers that are currently
- * synchronous (setAppCell) become async instead.
+ *   row 1 → Applied     (wanted Applied)
+ *   row 2 → Evaluated   (wanted Interview)   ← lost, no error anywhere
+ *
+ * The other writer is not hypothetical: the web exists to be used ALONGSIDE the
+ * CLI, and `set-status.mjs`, `mark-pdf-ready.mjs` and `reserve-report-num.mjs`
+ * all take this lock already.
+ *
+ * NOT `run-registry`'s acquireTrackerWrite(): that is an in-memory counter which
+ * tells this process whether a run is in flight. It cannot see another process.
+ * Two guards, different scopes — the reason this survived review is that the
+ * route looked protected.
+ *
+ * THE LOCK IS NOT REENTRANT (checked: no owner/pid self-check in
+ * tracker-utils.mjs). So a caller holding it must never invoke a core script
+ * that takes it too — that self-deadlocks until the timeout. Direct writers only.
+ *
+ * A crashed holder does NOT wedge the tracker: `lockCanRecover` reads the
+ * owner's pid and recovers when that process is gone. But a LIVE process that
+ * leaks the lock (a throw with no `finally`) keeps its pid alive, so recovery
+ * waits out staleMs — hence the mandatory `finally` in withTrackerLock.
  */
-export async function withTrackerLock<T>(appsFile: string, fn: () => Promise<T> | T, options: AcquireOptions = {}): Promise<T> {
-  const lock = await acquireTrackerLock(lockDirFor(appsFile), { ...options, tracker: appsFile });
+type CoreLock = { release: () => void | Promise<void> };
+type AcquireFn = (lockDir: string, options: Record<string, unknown>) => Promise<CoreLock>;
+type LockDirFn = (trackerPath: string) => string;
+
+/** Cached per resolved module path; failures are NEVER cached, so a repaired or
+ *  newly-installed checkout is picked up on the next request (#2590). */
+const modCache = new Map<string, { acquire: AcquireFn; lockDirFor: LockDirFn }>();
+
+async function loadCoreLock() {
+  const file = path.join(engineRoot(), "tracker-utils.mjs");
+  const cached = modCache.get(file);
+  if (cached) return cached;
+  const mod = await import(/* webpackIgnore: true */ pathToFileURL(file).href);
+  if (typeof mod.acquireTrackerLock !== "function" || typeof mod.trackerLockDirFor !== "function") {
+    throw new Error("tracker-utils.mjs has no acquireTrackerLock/trackerLockDirFor");
+  }
+  const api = { acquire: mod.acquireTrackerLock as AcquireFn, lockDirFor: mod.trackerLockDirFor as LockDirFn };
+  modCache.set(file, api);
+  return api;
+}
+
+/** Thrown when the lock is held by someone else for longer than we will wait. */
+export class TrackerBusyError extends Error {
+  constructor() {
+    super("tracker is being written by another process");
+    this.name = "TrackerBusyError";
+  }
+}
+
+/**
+ * Run `fn` holding the core's tracker lock, and release it on EVERY path.
+ *
+ * The timeout is deliberately far shorter than the CLI's 60s: this runs inside
+ * an HTTP handler, where a minute of silence is indistinguishable from a hang.
+ * Failing fast lets the caller answer 409 and the user retry, which is a better
+ * experience than a request that eventually succeeds after the user gave up.
+ *
+ * @param trackerFile absolute path to data/applications.md
+ * @param fn the read-modify-write to run under the lock
+ */
+export async function withTrackerLock<T>(trackerFile: string, fn: () => T | Promise<T>): Promise<T> {
+  const { acquire, lockDirFor } = await loadCoreLock();
+  let lock: CoreLock;
+  try {
+    lock = await acquire(lockDirFor(trackerFile), {
+      timeoutMs: Number(process.env.CAREER_OPS_WEB_LOCK_TIMEOUT_MS) || 5_000,
+      retryMs: 50,
+      tracker: trackerFile,
+    });
+  } catch (e) {
+    // The core tags ONLY the genuine-contention timeout with code LOCK_TIMEOUT
+    // (tracker-utils.mjs's own comment: "so callers can tell 'lock is busy,
+    // retry later' apart from filesystem/configuration failures rethrown out
+    // of the loop above"). A bare catch here converted EVERY error — including
+    // ENOENT from a missing lock-dir parent, a broken checkout — into
+    // "tracker is being written by another process, retry", which is false:
+    // those never resolve by retrying. Anything not tagged propagates as-is.
+    //
+    // EACCES/EPERM is its own case, not "propagates as-is" like ENOENT: the
+    // core's isMkdirContention (pipeline-lock.mjs) treats EACCES/EPERM as
+    // contention too, because on Windows a lock dir mid-create/mid-remove by
+    // another process answers with exactly those codes (#2777) — there is no
+    // way to tell that apart from a genuine permission problem by code alone.
+    // So a PERSISTENT EACCES/EPERM (not another writer, just no permission)
+    // still retries inside the core's loop and, after timeoutMs, surfaces as
+    // LOCK_TIMEOUT — which this catch then reports as TrackerBusyError, same
+    // as real contention. That is a known, accepted characteristic of the
+    // shared lock machinery (see the PR discussion), not a gap in this catch:
+    // fixing it means changing isMkdirContention itself, which every lock in
+    // the repo shares, not something scoped to this wrapper.
+    const err = e as { code?: string } | null;
+    if (err && err.code === "LOCK_TIMEOUT") {
+      throw new TrackerBusyError();
+    }
+    throw e;
+  }
   try {
     return await fn();
   } finally {
-    lock.release();
+    // MANDATORY. A leaked lock on a long-lived server process is worse than the
+    // bug this fixes: the holder's pid stays alive, so the core's stale-recovery
+    // will not reclaim it and the user's own CLI is locked out until staleMs.
+    await lock.release();
   }
 }

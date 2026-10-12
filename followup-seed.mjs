@@ -45,37 +45,34 @@
  *   2 row not found (or tracker missing)
  *   4 lock timeout
  *
- * Locking reuses tracker-lock.mjs's acquireTrackerLock/lockDirFor (the same
- * protocol merge-tracker.mjs and set-status.mjs use for applications.md),
- * scoped to data/follow-ups.md instead — one lock implementation, two files.
- *
  * Env overrides (mirroring merge-tracker.mjs / followup-cadence.mjs):
- *   CAREER_OPS_ROOT                         data root (multi-profile)
- *   CAREER_OPS_TRACKER                       tracker path
- *   CAREER_OPS_FOLLOWUPS                     follow-ups path
- *   CAREER_OPS_PROFILE                       profile.yml path (cadence overrides)
- *   CAREER_OPS_FOLLOWUPS_LOCK                 lock directory override
- *   CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS      lock acquire timeout
- *   CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS        lock retry interval
- *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS        stale-lock recovery threshold
+ *   CAREER_OPS_TRACKER                     tracker path
+ *   CAREER_OPS_FOLLOWUPS                   follow-ups path
+ *   CAREER_OPS_PROFILE                     profile.yml path (cadence overrides)
+ *   CAREER_OPS_FOLLOWUPS_LOCK              lock directory override
+ *   CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS   lock acquire timeout
+ *   CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS     lock retry interval
+ *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS     stale-lock recovery threshold
+ *   CAREER_OPS_OWNERLESS_GRACE_MS          ownerless-lock floor (pipeline-lock.mjs; shared, not per-script)
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync } from 'fs';
-import { join, dirname, basename } from 'path';
-import { randomUUID } from 'crypto';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { resolveCareerOpsRoot, resolveTrackerPath as sharedResolveTrackerPath } from './path-resolver.mjs';
-import { isMainModule } from './lib/is-main-module.mjs';
-import { acquireTrackerLock, canonicalizeTrackerPath, renameSyncWithRetry } from './tracker-utils.mjs';
-import { lockDirFor } from './tracker-lock.mjs';
-// Fourth copy of the directory-lock protocol in this repo. The classifiers,
-// the recovery judgment and the wait policy come from pipeline-lock.mjs so a
-// Windows-contention finding lands in one place instead of four (#2777/#2984);
-// a private second copy is how lock behaviour drifts in silence.
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync, realpathSync } from 'fs';
+import { join, dirname, basename, resolve, isAbsolute, relative, sep } from 'path';
+import { fileURLToPath } from 'url';
+import { createHash, randomUUID } from 'crypto';
+// Third copy of the directory-lock protocol in this repo, and the one #2984
+// missed: that fix declared "one definition, no sibling drift" while patching
+// pipeline-lock.mjs and tracker-utils.mjs, and this file was carrying all three
+// faces of #2777 the whole time. The classifiers come from pipeline-lock now,
+// so the next Windows-contention finding lands in one place instead of three.
 import {
-  isMkdirContention, rmLockArtifactSync, createLockWaitPolicy,
+  isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy,
   sameLockDirectory, lockRecoveryVerdict, RECOVER_STALE,
 } from './pipeline-lock.mjs';
+import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { tmpdir } from 'os';
+import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { localToday } from './lib/local-today.mjs';
 import {
   resolveCadenceConfig,
   normalizeStatus,
@@ -84,23 +81,29 @@ import {
   parseDate,
   addDays,
 } from './followup-cadence.mjs';
+import { getCareerOpsRoot, canonicalizeTrackerPath, resolveTrackerPath as sharedResolveTrackerPath } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const CAREER_OPS = getCareerOpsRoot();
 
 /** Canonical header written when data/follow-ups.md doesn't exist yet. */
-// Divergence from upstream: upstream renamed the header to lowercase
-// `num|appNum|date|company|role|channel|contact|notes` (#1430's machine-
-// parseable header). Both versions' parseFollowups() is purely POSITIONAL
-// (fixed `split('|')` indices, not header-driven — see followup-cadence.mjs),
-// so the header text is cosmetic only. Keeping our own fork's existing
-// capitalized header (matches modes/followup.md's documented table) rather
-// than adopting upstream's casing for no functional gain.
 export const FOLLOWUPS_HEADER = [
   '# Follow-ups',
   '',
-  '| # | App# | Date | Company | Role | Channel | Contact | Notes |',
+  '| num | appNum | date | company | role | channel | contact | notes |',
   '|---|---|---|---|---|---|---|---|',
 ].join('\n');
+
+const FOLLOWUPS_LOCK_PREFIX = 'career-ops-followups-';
+
+/**
+ * Minimum age before directory age alone may condemn an ownerless lock.
+ * See `lockRecoveryVerdict` for why the age check needs a floor.
+ *
+ * Re-exported rather than redeclared: the floor is applied inside that function
+ * now, so a local copy would be a constant this file no longer enforces.
+ */
+export { OWNERLESS_GRACE_MS } from './pipeline-lock.mjs';
 
 /** Structured error carrying an exit-code-mapping `code`. */
 export class SeedError extends Error {
@@ -112,21 +115,7 @@ export class SeedError extends Error {
 }
 
 function todayStr() {
-  // LOCAL date, never UTC. `toISOString()` returns the UTC day, so anywhere
-  // west of Greenwich an evening run answers "today" with tomorrow: at 20:00
-  // US Eastern this returned the next calendar day. That lands in two places
-  // that both matter — the fallback applied date when a row carries no
-  // "Applied YYYY-MM-DD" note, and the `(set …)` stamp on the pin — so an
-  // application seeded on a US evening got a follow-up schedule built off a
-  // day that had not happened yet.
-  //
-  // Only "what day is it here" changes. Date ARITHMETIC elsewhere in this file
-  // and in followup-cadence.mjs stays on UTC-midnight parsing, which is
-  // internally consistent and unaffected: `parseDate('2026-06-20')` and
-  // `isValidCalendarDate()` round-trip through UTC on purpose.
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return localToday();
 }
 
 /**
@@ -213,15 +202,17 @@ export function formatPinLine(appNum, nextDate, setDate) {
   return `- next #${appNum} ${nextDate} (set ${setDate})`;
 }
 
-// --- Path resolution (env override → default, same style as followup-cadence.mjs) --
+// --- Path resolution (env override → option override → default) -----------
 
-function resolveTrackerPath() {
-  return sharedResolveTrackerPath(CAREER_OPS_DATA);
+function resolveTrackerPath(override) {
+  if (override) return override;
+  return sharedResolveTrackerPath(CAREER_OPS);
 }
 
-function resolveFollowupsPath() {
+function resolveFollowupsPath(override) {
+  if (override) return override;
   if (process.env.CAREER_OPS_FOLLOWUPS) return process.env.CAREER_OPS_FOLLOWUPS;
-  return join(CAREER_OPS_DATA, 'data/follow-ups.md');
+  return join(CAREER_OPS, 'data/follow-ups.md');
 }
 
 function envInt(name, fallback) {
@@ -236,10 +227,11 @@ function envInt(name, fallback) {
 function readTrackerRows(trackerPath) {
   const content = readFileSync(trackerPath, 'utf-8');
   const lines = content.split('\n');
-  const colmap = resolveColumns(lines);
+  const parseOptions = { allowTabs: true, allowIndentation: true };
+  const colmap = resolveColumns(lines, parseOptions);
   const rows = [];
   for (const line of lines) {
-    const row = parseTrackerRow(line, colmap);
+    const row = parseTrackerRow(line, colmap, parseOptions);
     if (row) rows.push(row);
   }
   return rows;
@@ -289,7 +281,9 @@ function resolveFollowupsLockDir(envValue, lockKey) {
 
 function resolveLockDir(explicitLockDir, followupsPath) {
   if (explicitLockDir) return explicitLockDir;
-  const lockKey = createHash('sha256').update(followupsPath).digest('hex').slice(0, 16);
+  // Canonicalize the parent so the key stays stable when the file is first created.
+  const lockPath = join(canonicalizeTrackerPath(dirname(followupsPath)), basename(followupsPath));
+  const lockKey = createHash('sha256').update(lockPath).digest('hex').slice(0, 16);
   return resolveFollowupsLockDir(process.env.CAREER_OPS_FOLLOWUPS_LOCK, lockKey);
 }
 
@@ -467,27 +461,6 @@ function appendPins(existingContent, pinLines) {
   return existingContent + (existingContent.endsWith('\n') ? '' : '\n') + joined + '\n';
 }
 
-export async function withFollowupsLock(followupsPath, options, fn) {
-  const lockDir = options.lockDir || lockDirFor(canonicalizeTrackerPath(followupsPath), process.env.CAREER_OPS_FOLLOWUPS_LOCK);
-  let lock;
-  try {
-    lock = await acquireTrackerLock(lockDir, {
-      timeoutMs: options.lockTimeoutMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS', 60_000),
-      retryMs: options.lockRetryMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS', 75),
-      staleMs: options.lockStaleMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS', 10 * 60_000),
-      tracker: followupsPath,
-    });
-  } catch (err) {
-    if (err?.code === 'LOCK_TIMEOUT') throw new SeedError('LOCK_TIMEOUT', err.message);
-    throw err;
-  }
-  try {
-    return await fn();
-  } finally {
-    lock.release();
-  }
-}
-
 // --- Core: seed one application --------------------------------------------
 
 /**
@@ -507,12 +480,70 @@ export async function withFollowupsLock(followupsPath, options, fn) {
  *   suppressing `already-seeded`, so the preview would promise a pin the real run then
  *   declines to write. This says "treat the status as Applied", not "write regardless".
  * @param {boolean} [options.dryRun] - Compute and report, but write nothing (no lock taken).
+ * @param {string} [options.trackerPath]
+ * @param {string} [options.followupsPath]
+ * @param {string} [options.profilePath]
  * @param {string} [options.lockDir]
  * @param {number} [options.lockTimeoutMs]
  * @param {number} [options.lockRetryMs]
  * @param {number} [options.lockStaleMs]
  * @returns {Promise<object>}
  */
+/**
+ * Run `fn` while holding the cross-process lock on a follow-ups file.
+ *
+ * EXISTS BECAUSE "TAKE A LOCK" IS NOT ENOUGH HERE (#3034). The lock directory
+ * is DERIVED — sha256 of the resolved follow-ups path, under tmpdir — so two
+ * writers that each take "a lock" on separately computed directories exclude
+ * nothing at all. Any second implementation has to reproduce that derivation
+ * exactly, and a derivation copied into another codebase is a second body of
+ * the same truth: it works until the day one side changes.
+ *
+ * So the derivation never leaves this file. Callers outside the core (the web
+ * dashboard's follow-up log and override routes) import this function and get
+ * the same directory by construction.
+ *
+ * TWO PROPERTIES CALLERS DEPEND ON, both deliberate:
+ *
+ *   1. The lock is released on EVERY path, including a throw. A long-lived
+ *      process that returns a 500 without releasing would block the user's own
+ *      CLI until staleMs elapses, so the `finally` lives here rather than in
+ *      each caller's hands.
+ *
+ *   2. It is NOT reentrant. Holding this lock and then invoking a core script
+ *      that also takes it (`followup-seed.mjs` itself) self-deadlocks until the
+ *      timeout. Callers that write the file directly are safe; callers that
+ *      orchestrate core scripts must not wrap them in this.
+ *
+ * An in-process queue is not a substitute: it serialises one process against
+ * itself and is blind to every other one. The two compose — queue inside this
+ * lock — and neither replaces the other.
+ *
+ * @param {string} followupsPath - Path to the follow-ups file to guard.
+ * @param {() => Promise<T>|T} fn - Runs while the lock is held.
+ * @param {object} [options]
+ * @param {string} [options.lockDir] - Explicit lock directory (tests).
+ * @param {number} [options.timeoutMs=60000]
+ * @param {number} [options.retryMs=75]
+ * @param {number} [options.staleMs=600000]
+ * @returns {Promise<T>} Whatever `fn` returned.
+ * @template T
+ */
+export async function withFollowupsLock(followupsPath, fn, options = {}) {
+  const resolvedPath = resolveFollowupsPath(followupsPath);
+  const lockDir = resolveLockDir(options.lockDir, resolvedPath);
+  const lock = await acquireFollowupsLock(lockDir, resolvedPath, {
+    timeoutMs: options.timeoutMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS', 60_000),
+    retryMs: options.retryMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS', 75),
+    staleMs: options.staleMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS', 10 * 60_000),
+  });
+  try {
+    return await fn();
+  } finally {
+    lock.release();
+  }
+}
+
 export async function seedFollowup(appNum, options = {}) {
   if (!Number.isInteger(appNum) || appNum <= 0) {
     throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
@@ -521,8 +552,8 @@ export async function seedFollowup(appNum, options = {}) {
     throw new SeedError('INVALID_DATE', `--date must be a real calendar date in YYYY-MM-DD form: ${options.date}`);
   }
 
-  const trackerPath = resolveTrackerPath();
-  const followupsPath = resolveFollowupsPath();
+  const trackerPath = resolveTrackerPath(options.trackerPath);
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
 
   if (!existsSync(trackerPath)) {
     throw new SeedError('ROW_NOT_FOUND', `Tracker not found at ${trackerPath}`);
@@ -542,7 +573,7 @@ export async function seedFollowup(appNum, options = {}) {
   // date from a proxy or a guess — the same contract followup-cadence.mjs and
   // company-history.mjs already expose.
   const { appliedDate, appDateSource } = resolveAppliedDate(row, options.date);
-  const cadence = resolveCadenceConfig();
+  const cadence = resolveCadenceConfig({ profilePath: options.profilePath });
   const nextDate = addDays(parseDate(appliedDate), cadence.applied_first);
   const setDate = todayStr();
   const pin = formatPinLine(appNum, nextDate, setDate);
@@ -555,7 +586,14 @@ export async function seedFollowup(appNum, options = {}) {
     return { seeded: true, appNum, pin, nextDate, appliedDate, appDateSource, setDate, dryRun: true };
   }
 
-  return withFollowupsLock(followupsPath, options, () => {
+  const lockDir = resolveLockDir(options.lockDir, followupsPath);
+  const lock = await acquireFollowupsLock(lockDir, followupsPath, {
+    timeoutMs: options.lockTimeoutMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS', 60_000),
+    retryMs: options.lockRetryMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS', 75),
+    staleMs: options.lockStaleMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS', 10 * 60_000),
+  });
+
+  try {
     const existingContent = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf-8') : null;
     if (existingContent != null && isAlreadySeeded(existingContent, appNum) && !options.force) {
       return { seeded: false, appNum, pin: null, nextDate, appliedDate, appDateSource, setDate, reason: 'already-seeded' };
@@ -564,7 +602,9 @@ export async function seedFollowup(appNum, options = {}) {
     mkdirSync(dirname(followupsPath), { recursive: true });
     writeFileAtomic(followupsPath, appendPins(existingContent, [pin]));
     return { seeded: true, appNum, pin, nextDate, appliedDate, appDateSource, setDate };
-  });
+  } finally {
+    lock.release();
+  }
 }
 
 // --- Core: backfill all Applied rows ---------------------------------------
@@ -578,15 +618,15 @@ export async function seedFollowup(appNum, options = {}) {
  * @returns {Promise<{seeded: object[], skipped: object[]}>}
  */
 export async function seedBackfill(options = {}) {
-  const trackerPath = resolveTrackerPath();
-  const followupsPath = resolveFollowupsPath();
+  const trackerPath = resolveTrackerPath(options.trackerPath);
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
 
   if (!existsSync(trackerPath)) {
     throw new SeedError('ROW_NOT_FOUND', `Tracker not found at ${trackerPath}`);
   }
   const rows = readTrackerRows(trackerPath);
   const appliedRows = rows.filter(r => normalizeStatus(r.status) === 'applied');
-  const cadence = resolveCadenceConfig();
+  const cadence = resolveCadenceConfig({ profilePath: options.profilePath });
   const setDate = todayStr();
 
   function planFor(row) {
@@ -617,7 +657,14 @@ export async function seedBackfill(options = {}) {
     return { seeded, skipped, dryRun: true };
   }
 
-  return withFollowupsLock(followupsPath, options, () => {
+  const lockDir = resolveLockDir(options.lockDir, followupsPath);
+  const lock = await acquireFollowupsLock(lockDir, followupsPath, {
+    timeoutMs: options.lockTimeoutMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS', 60_000),
+    retryMs: options.lockRetryMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS', 75),
+    staleMs: options.lockStaleMs ?? envInt('CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS', 10 * 60_000),
+  });
+
+  try {
     const existingContent = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf-8') : null;
     const checkContent = existingContent ?? '';
     const seeded = [];
@@ -648,7 +695,9 @@ export async function seedBackfill(options = {}) {
     }
 
     return { seeded, skipped };
-  });
+  } finally {
+    lock.release();
+  }
 }
 
 // --- CLI ---------------------------------------------------------------

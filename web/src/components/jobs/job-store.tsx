@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { scoreTone } from "@/lib/format";
+import { readJobStream } from "@/lib/job-stream.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
@@ -18,6 +19,7 @@ export type Job = {
   steps: JobStep[];
   text: string;
   result?: JobResult;
+  cost?: { tokens: number; usd?: number }; // per-run token cost (Claude result event) — local only
   startedAt: number;
   endedAt?: number;
 };
@@ -37,6 +39,7 @@ export function useJobs() {
   if (!c) throw new Error("useJobs must be used within <JobsProvider>");
   return c;
 }
+
 const JOBS_KEY = "career-ops:jobs";
 
 function parseVerdict(text: string): JobResult {
@@ -64,12 +67,12 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(JOBS_KEY);
       const arr = raw ? JSON.parse(raw) : null;
       if (Array.isArray(arr)) {
-        // Validate shape — a malformed entry (missing id / non-array steps) would
+        // anything left "running" from a previous session is stale → mark interrupted
+        // Validate shape - a malformed entry (missing id / non-array steps) would
         // otherwise crash consumers that index job.steps and white-screen the app.
         const restored: Job[] = arr
           .filter((j: unknown): j is Job => !!j && typeof (j as Job).id === "string")
           .map((j: Job) => ({ ...j, steps: Array.isArray(j.steps) ? j.steps : [] }));
-        // anything left "running" from a previous session is stale → mark interrupted
         setJobs(restored.map((j) => (j.status === "running" ? { ...j, status: "error", steps: [...j.steps, { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
       }
     } catch {
@@ -110,11 +113,13 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       };
       setJobs((js) => [job, ...js]);
 
+      // Seeded with the initial "Starting..." step so /api/runs/save matches the UI.
+      const steps: JobStep[] = [...job.steps];
       (async () => {
         // The CLI that runs this worker is PER-PROFILE (config/cli.yml via /api/cli),
-        // which auto-defaults to the first installed CLI — so workers run without the
+        // which auto-defaults to the first installed CLI - so workers run without the
         // user first saving a config. Never the global localStorage key (would be
-        // empty / another profile's choice → the spurious "No CLI configured").
+        // empty / another profile's choice, the spurious "No CLI configured").
         let cliId: string | null = null;
         try {
           const r = await fetch("/api/cli");
@@ -123,21 +128,26 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           cliId = null;
         }
         if (!cliId) {
-          patch(id, (j) => ({ ...j, status: "error", endedAt: Date.now(), steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config", ts: Date.now() }] }));
+          patch(id, (j) => ({
+            ...j,
+            status: "error",
+            endedAt: Date.now(),
+            steps: [...j.steps, { kind: "status", label: "No CLI configured — open Config and click Save config", ts: Date.now() }],
+          }));
           return;
         }
-
         let text = "";
         let verdictLine = ""; // latched separately so the 8000-char tail can't drop it
-        let sawTerminal = false;
-        const steps: JobStep[] = [...job.steps]; // seed with the initial "Starting…" step so /api/runs/save matches the UI
+        let doneTokens = 0; // per-run token cost, forwarded on the done event (#6)
+        let doneCostUsd: number | null = null;
         const finish = (status: "done" | "error", lastLabel?: string) => {
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
-          if (lastLabel) steps.push({ kind: "status", label: lastLabel, ts: Date.now() });
+          const cost = status === "done" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
           patch(id, (j) => ({
             ...j,
             status,
             result,
+            cost,
             endedAt: Date.now(),
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
@@ -146,7 +156,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             fetch("/api/runs/save", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, steps, output: text }),
+              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, steps, output: text }),
             }).catch(() => {});
             // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
             // worker just wrote a real tracker row / report they don't yet see.
@@ -167,49 +177,28 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             finish("error", e.error || "Failed to start");
             return;
           }
-          const reader = res.body.getReader();
-          const dec = new TextDecoder();
-          let buf = "";
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += dec.decode(value, { stream: true });
-            let nl: number;
-            while ((nl = buf.indexOf("\n")) !== -1) {
-              const line = buf.slice(0, nl).trim();
-              buf = buf.slice(nl + 1);
-              if (!line) continue;
-              try {
-                const ev = JSON.parse(line);
-                if (ev.type === "tool") {
-                  steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
-                  patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }] }));
-                } else if (ev.type === "status") {
-                  steps.push({ kind: "status", label: ev.label, ts: Date.now() });
-                  patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
-                } else if (ev.type === "text") {
-                  const full = text + ev.text;
-                  const vm = full.match(/VERDICT:[^\n]*/i);
-                  if (vm) verdictLine = vm[0];
-                  text = full.slice(-8000);
-                  patch(id, (j) => ({ ...j, text }));
-                } else if (ev.type === "done") {
-                  sawTerminal = true; // handled on close
-                } else if (ev.type === "error") {
-                  sawTerminal = true;
-                  finish("error", ev.msg || "Error");
-                  return;
-                }
-              } catch {
-                /* skip */
-              }
+          const completion = await readJobStream(res.body, (ev) => {
+            if (ev.type === "tool") {
+              steps.push({ kind: "tool", label: ev.name, ts: Date.now() });
+              patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "tool", label: ev.name, ts: Date.now() }] }));
+            } else if (ev.type === "status") {
+              steps.push({ kind: "status", label: ev.label, ts: Date.now() });
+              patch(id, (j) => ({ ...j, steps: [...j.steps, { kind: "status", label: ev.label, ts: Date.now() }] }));
+            } else if (ev.type === "text") {
+              const full = text + ev.text;
+              const vm = full.match(/VERDICT:[^\n]*/i);
+              if (vm) verdictLine = vm[0];
+              text = full.slice(-8000);
+              patch(id, (j) => ({ ...j, text }));
             }
+          });
+          if (completion.status === "error") {
+            finish("error", completion.message);
+            return;
           }
-          if (sawTerminal) {
-            finish("done", "Done");
-          } else {
-            finish("error", "Stream ended unexpectedly");
-          }
+          doneTokens = completion.tokens ?? 0;
+          doneCostUsd = completion.costUsd ?? null;
+          finish("done", "Done");
         } catch {
           finish("error", "Connection error");
         }

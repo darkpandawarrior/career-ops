@@ -20,6 +20,8 @@
 //   graphqlQuery    — Custom GraphQL query string. If not provided, the
 //                     built-in default query is used.
 
+import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
+
 const DEFAULT_API = 'https://glints.com/api/v2-alc/graphql';
 const DEFAULT_COUNTRY = 'ID';
 const DEFAULT_PAGE_SIZE = 30;
@@ -240,7 +242,7 @@ export default {
       if (jobsInPage.length < pageSize) break;
 
       // Rate-limit courtesy delay
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await sleep(300, ctx);
     }
 
     return allJobs;

@@ -45,6 +45,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { join, relative } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname } from 'path';
+import { listTree } from './lib/walk-tree.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -53,18 +54,11 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build', 'co
 /** Every .mjs/.ts/.tsx file the fork owns, repo-relative, excluding vendor trees. */
 export function sourceFiles(root = ROOT) {
   const out = [];
-  (function walk(dir) {
-    let entries;
-    try { entries = readdirSync(dir); } catch { return; }
-    for (const name of entries) {
-      if (SKIP_DIRS.has(name) || name.startsWith('.')) continue;
-      const full = join(dir, name);
-      let st;
-      try { st = statSync(full); } catch { continue; }
-      if (st.isDirectory()) walk(full);
-      else if (/\.(mjs|ts|tsx)$/.test(name)) out.push(relative(root, full));
-    }
-  })(root);
+  // The one walker (lib/walk-tree.mjs) applies the nested-checkout guard on every descent.
+  for (const abs of listTree(root, {
+    match: /\.(mjs|ts|tsx)$/,
+    skip: (ent) => SKIP_DIRS.has(ent.name) || ent.name.startsWith('.'),
+  })) out.push(relative(root, abs));
   // .gitignore is not source, but one rule asserts a line in it.
   out.push('.gitignore');
   // Mode prose is not source either, but two upstream-owned mode files carry fork-only workflow
@@ -274,7 +268,7 @@ export const ADAPTATIONS = [
       if (/(^|\/)modes\/oferta\.md$/.test(file) && !/Do not stop at the report/.test(src)) {
         return [`${file}: lost the apply handoff — evaluations would go back to ending at a report`];
       }
-      if (/(^|\/)modes\/apply\.md$/.test(file) && !/Step 7b — Reviewer pass/.test(src)) {
+      if (/(^|\/)modes\/apply\.md$/.test(file) && !/Step 7[ab] — Reviewer pass/.test(src)) {
         return [`${file}: lost the adversarial reviewer pass before submit`];
       }
       return [];

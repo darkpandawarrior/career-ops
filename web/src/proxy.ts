@@ -1,9 +1,24 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { checkRequest, parseAllowedHosts, parseAllowedOrigins } from "@/lib/origin-guard.mjs";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import {
+  checkRequest,
+  parseAllowedHosts,
+  parseAllowedOrigins,
+} from "@/lib/origin-guard.mjs";
 
-// Opt in to extra *origins* with CAREER_OPS_ALLOWED_ORIGINS (comma/space
-// separated); unset means none. A browser extension calls from a
-// chrome-extension:// origin, which Fetch Metadata always reports as
+// Single choke point over everything the dashboard serves. Every request is
+// gated on the same-origin + loopback guard before it can reach a route handler
+// (which may spawn a child process or write the user's files) or a page (which
+// renders the user's CV, pipeline and reports). See origin-guard.mjs for the
+// two-layer rationale (F1 drive-by CSRF, F2 LAN reachability).
+//
+// Opt in to extra hosts (e.g. a trusted LAN box) with a comma/space separated
+// CAREER_OPS_WEB_ALLOWED_HOSTS; unset means loopback only.
+//
+// Opt in to extra *origins* the same way with CAREER_OPS_ALLOWED_ORIGINS;
+// unset means none, which is the default and leaves the guard as strict as it
+// was. It is what a local companion client needs: a browser extension calls
+// from a chrome-extension:// origin, which Fetch Metadata always reports as
 // "cross-site", so every one of its requests is refused otherwise.
 
 /**
@@ -41,7 +56,7 @@ export function proxy(req: NextRequest) {
   // is bound to 0.0.0.0). See origin-guard.mjs for the two-layer rationale.
   // Opt in to extra hosts with CAREER_OPS_WEB_ALLOWED_HOSTS; unset means
   // loopback only.
-  if (req.nextUrl.pathname.startsWith("/api/")) {
+  {
     const decision = checkRequest({
       secFetchSite: req.headers.get("sec-fetch-site"),
       origin: req.headers.get("origin"),
@@ -76,17 +91,12 @@ export function proxy(req: NextRequest) {
   return res;
 }
 
-export const config = {
-  // Run on app routes + API; skip the whole _next/ tree (static, image, RSC data)
-  // and favicon so we don't resolve a profile for internal assets. This is a perf/
-  // correctness nicety only.
-  //
-  // NOTE: this matcher has NOTHING to do with the dev HMR WebSocket. In Next 16 the
-  // HMR upgrade (_next/webpack-hmr) is handled in the server's `upgrade` event and is
-  // routed straight to the hot-reloader before the proxy/middleware pipeline ever runs
-  // — `config.matcher` is never consulted for it. If HMR fails the handshake with
-  // ERR_INVALID_HTTP_RESPONSE, the cause is Next's cross-origin dev guard rejecting the
-  // origin (e.g. loading via 127.0.0.1), not this proxy. The fix lives in
-  // `next.config.mjs` (allowedDevOrigins), not here.
-  matcher: ["/((?!_next/|favicon.ico).*)"],
-};
+// Everything except build assets. Scoping this to /api left every page route
+// ungated, which loopback does not cover: a page that re-resolves its own domain
+// to 127.0.0.1 (DNS rebinding) fetches /pipeline same-origin from the user's own
+// browser, and force-dynamic pages read the tracker off disk on each request.
+// The Host header carries the attacker's domain there, so the guard refuses it —
+// but only if it runs. Build assets stay out: they are the same for every user,
+// carry nothing of theirs, and a caller who cannot read a page has no use for
+// the chunk that renders it.
+export const config = { matcher: "/((?!_next/static|_next/image|favicon.ico).*)" };

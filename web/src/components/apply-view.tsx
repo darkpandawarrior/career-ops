@@ -8,7 +8,7 @@ import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs"
 import type { ApplyField } from "@/lib/apply/extract";
 import { isRememberable } from "@/lib/apply/remember";
 import { cn } from "@/lib/cn";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 
 // Co-located UI animations (HMR-proof vs Tailwind v4's stale globals.css):
 // field cascade-in, per-field "just drafted" flash, skeleton shimmer, hero orb.
@@ -627,7 +627,18 @@ function DrivePanel({ steps, filling }: { steps: DriveStep[]; filling?: boolean 
               <span className="grid size-5 shrink-0 place-items-center rounded-full bg-brand-soft text-[10px] font-semibold text-brand">{s.turn}</span>
               <span className="shrink-0 font-medium">{DRIVE_VERB[s.action] ?? s.action}</span>
               <span className="truncate text-faint">{s.detail}</span>
-              {s.note && <span className="shrink-0 text-amber-500">· {s.note}</span>}
+              {/* `submit-control` is the guard doing its job (good news, distinct
+                  color); `not-offered`/`gone` are the page moving under us
+                  (a caution, not a protection) — same amber as before this
+                  field had a consumer at all. */}
+              {s.note &&
+                (s.refusal === "submit-control" ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                    <ShieldCheck className="size-3" /> {s.note}
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-amber-500">· {s.note}</span>
+                ))}
             </li>
           ))}
         </ol>
@@ -869,6 +880,17 @@ function FieldRow({
   onRemember?: (on: boolean) => void;
   onChange: (v: string) => void;
 }) {
+  const controlId = useId();
+  const confirmationId = `${controlId}-confirmation`;
+  // Announce the employer's requirement without imposing native validation on
+  // this draft editor; the user still reviews/submits the real form separately.
+  const controlProps = {
+    id: controlId,
+    "aria-required": f.required || undefined,
+    "aria-describedby": needs ? confirmationId : undefined,
+  };
+  const labelText = f.label || "Untitled field";
+
   // Flash brand-orange the moment a drafted answer first lands (empty → value).
   const prev = useRef(value);
   const [flash, setFlash] = useState(false);
@@ -893,17 +915,21 @@ function FieldRow({
   const Icon = fieldIcon(f);
   return (
     <div className={flash ? "co-flash" : ""} style={flash ? { animationDelay: `${Math.min(index * 70, 900)}ms` } : undefined}>
-      <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
-        <Icon className={cn("size-3.5 shrink-0 transition-colors", active ? "text-brand" : "text-faint")} />
-        {f.label || <span className="text-faint">Untitled field</span>}
-        {f.required && <Asterisk className="size-3 text-brand" />}
-        {needs && <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">you confirm</span>}
+      <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium">
+        <Icon aria-hidden="true" className={cn("size-3.5 shrink-0 transition-colors", active ? "text-brand" : "text-faint")} />
+        {f.type === "file" || f.type === "checkbox" ? (
+          <span className={f.label ? undefined : "text-faint"}>{labelText}</span>
+        ) : (
+          <label htmlFor={controlId} className={f.label ? undefined : "text-faint"}>{labelText}</label>
+        )}
+        {f.required && <Asterisk aria-hidden="true" className="size-3 text-brand" />}
+        {needs && <span id={confirmationId} className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">you confirm</span>}
         {ai && !!value && (
           <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-brand-soft px-1.5 py-0.5 text-[10px] font-medium text-brand" title="Drafted by AI — edit the text and it becomes yours">
-            <Sparkles className="size-3" /> AI
+            <Sparkles aria-hidden="true" className="size-3" /> AI
           </span>
         )}
-      </label>
+      </div>
       {/* consent/sensitive: show the real descriptive text + any link so the user
           READS before agreeing — career-ops never agrees on their behalf */}
       {needs && (f.description || f.link) && (
@@ -920,9 +946,9 @@ function FieldRow({
       {writing ? (
         <div className={cn("co-skel", active && "co-skel-brand", f.type === "textarea" ? "h-[68px]" : "h-9")} />
       ) : f.type === "textarea" ? (
-        <textarea rows={3} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={cn(base, "resize-none")} />
+        <textarea {...controlProps} rows={3} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={cn(base, "resize-none")} />
       ) : (f.type === "select" || f.type === "radio") && f.options && f.options.length > 0 ? (
-        <select value={value} onChange={(e) => onChange(e.target.value)} className={base}>
+        <select {...controlProps} value={value} onChange={(e) => onChange(e.target.value)} className={base}>
           <option value="">Choose…</option>
           {f.options.map((o, i) => (
             <option key={i} value={o}>
@@ -932,7 +958,7 @@ function FieldRow({
         </select>
       ) : f.type === "checkbox" ? (
         <label className="flex items-center gap-2 text-sm text-muted">
-          <input type="checkbox" checked={value === "true" || value === "yes"} onChange={(e) => onChange(e.target.checked ? "true" : "")} className="size-4 accent-brand" /> {f.label || "Yes"}
+          <input {...controlProps} type="checkbox" checked={value === "true" || value === "yes"} onChange={(e) => onChange(e.target.checked ? "true" : "")} className="size-4 accent-brand" /> {f.label || "Yes"}
         </label>
       ) : f.type === "file" ? (
         /resume|résumé|\bcv\b|curriculum|currículum|lebenslauf/i.test(f.label || "") ? (
@@ -945,7 +971,7 @@ function FieldRow({
           </div>
         )
       ) : (
-        <input type={["email", "tel", "url", "number", "date"].includes(f.type) ? f.type : "text"} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={base} />
+        <input {...controlProps} type={["email", "tel", "url", "number", "date"].includes(f.type) ? f.type : "text"} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={base} />
       )}
       {/* an open answer the user surfaced (a talk/podcast link, a niche fact) → offer
           to remember it for FUTURE applications (pre-checked); saved to canonical memory */}

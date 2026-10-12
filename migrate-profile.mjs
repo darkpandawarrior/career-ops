@@ -40,6 +40,7 @@
  * Exit codes: 0 = success, non-zero = error.
  */
 
+import { listTree } from './lib/walk-tree.mjs';
 import {
   existsSync,
   mkdirSync,
@@ -169,16 +170,7 @@ function printUsage() {
 // ── fs helpers ────────────────────────────────────────────────────────────────
 /** Recursively enumerate files under `abs` (a dir), returning paths relative to it. */
 function walkFiles(abs) {
-  const out = [];
-  for (const ent of readdirSync(abs, { withFileTypes: true })) {
-    const childAbs = path.join(abs, ent.name);
-    if (ent.isDirectory()) {
-      for (const sub of walkFiles(childAbs)) out.push(path.join(ent.name, sub));
-    } else if (ent.isFile() || ent.isSymbolicLink()) {
-      out.push(ent.name);
-    }
-  }
-  return out;
+  return listTree(abs, { links: 'follow' }).map((f) => path.relative(abs, f));
 }
 
 /** mtime in ms, or 0 if the path is missing. */
