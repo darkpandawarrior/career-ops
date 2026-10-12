@@ -1,75 +1,38 @@
-// tests/zh-minimal-template.test.mjs — templates/cv-template.zh-minimal.html
-// (#1990) must be discoverable through cv-templates.mjs and keep its
-// restrained single-accent design (no leftover hsl(270...) purple from the
-// base template, chip-free competency tags).
-//
-// Upstream also covers full-payload rendering and A4 print-layout overflow.
-// The rendering check is ported below: this fork DID carry build-cv-html.mjs in
-// the end, so the older note here claiming it had no renderer to run was stale.
-// The A4 overflow check stays unported — it needs a Chromium download that this
-// fork's suite does not require, and upstream itself skips it when Chromium is
-// absent, so it would be a permanent no-op here.
-import { readFileSync, mkdtempSync, writeFileSync } from 'fs';
-import { execFileSync } from 'child_process';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { pass, fail, ROOT } from './helpers.mjs';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listTemplates, resolveTemplate, validateTemplate } from '../cv-templates.mjs';
+import { chromium } from 'playwright';
 
-console.log('\ntemplates/cv-template.zh-minimal.html — Chinese Minimal CV template');
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const TEMPLATE = join(ROOT, 'templates', 'cv-template.zh-minimal.html');
+const HAS_PDFTOTEXT = spawnSync('pdftotext', ['-v'], { stdio: 'ignore' }).status === 0;
+// Probe the launch the extraction test makes: chromium.executablePath() names the
+// headed binary, while a headless launch may use chrome-headless-shell instead.
+const CAN_EXTRACT_PDF = HAS_PDFTOTEXT && await chromium.launch({ headless: true })
+  .then((browser) => browser.close().then(() => true), () => false);
 
-const TEMPLATE_PATH = join(ROOT, 'templates', 'cv-template.zh-minimal.html');
+test('Chinese Minimal template is discoverable and valid', () => {
+  const listed = listTemplates('cv');
+  const entry = listed.find((item) => item.name === 'zh-minimal');
+  assert.equal(entry?.displayName, 'Chinese Minimal');
+  assert.equal(resolveTemplate('cv', 'zh-minimal'), TEMPLATE);
+  assert.deepEqual(validateTemplate(TEMPLATE, 'cv'), { ok: true, missing: [] });
+});
 
-const listed = listTemplates('cv').find((item) => item.name === 'zh-minimal');
-if (listed?.displayName === 'Chinese Minimal') {
-  pass('zh-minimal template is discoverable via listTemplates("cv")');
-} else {
-  fail(`zh-minimal template not discoverable or wrong displayName: ${JSON.stringify(listed)}`);
-}
+test('Chinese Minimal uses one restrained accent and removes chip styling', () => {
+  const html = readFileSync(TEMPLATE, 'utf8');
+  assert.match(html, /--zhm-accent:\s*var\(--accent-color,\s*#174a7e\)/);
+  assert.match(html, /\.header-gradient\s*\{[^}]*height:\s*1px[^}]*background:\s*var\(--zhm-ink\)/s);
+  assert.match(html, /\.competency-tag\s*\{[^}]*background:\s*none[^}]*border:\s*0/s);
+  assert.doesNotMatch(html.slice(html.indexOf('CHINESE MINIMAL DESIGN')), /hsl\(270/);
+});
 
-if (resolveTemplate('cv', 'zh-minimal') === TEMPLATE_PATH) {
-  pass('resolveTemplate("cv", "zh-minimal") resolves to the shipped template file');
-} else {
-  fail('resolveTemplate("cv", "zh-minimal") did not resolve to templates/cv-template.zh-minimal.html');
-}
-
-const validation = validateTemplate(TEMPLATE_PATH, 'cv');
-if (validation.ok) {
-  pass('zh-minimal template has all required placeholders (NAME, EXPERIENCE, EDUCATION)');
-} else {
-  fail(`zh-minimal template missing required placeholders: ${validation.missing.join(', ')}`);
-}
-
-const html = readFileSync(TEMPLATE_PATH, 'utf8');
-
-if (/--zhm-accent:\s*#174a7e/.test(html)) {
-  pass('zh-minimal template defines its single restrained accent color');
-} else {
-  fail('zh-minimal template is missing the expected --zhm-accent color');
-}
-
-if (/\.header-gradient\s*\{[^}]*height:\s*1px[^}]*background:\s*var\(--zhm-ink\)/s.test(html)) {
-  pass('zh-minimal template replaces the gradient header rule with a flat 1px ink line');
-} else {
-  fail('zh-minimal template header-gradient rule does not match the restrained single-line design');
-}
-
-if (/\.competency-tag\s*\{[^}]*background:\s*none[^}]*border:\s*0/s.test(html)) {
-  pass('zh-minimal template removes chip styling from competency tags');
-} else {
-  fail('zh-minimal template still has chip-styled competency tags');
-}
-
-const designSection = html.slice(html.indexOf('CHINESE MINIMAL DESIGN'));
-if (!/hsl\(270/.test(designSection)) {
-  pass('zh-minimal template does not carry over the base template\'s purple accent (hsl(270...))');
-} else {
-  fail('zh-minimal template still references the base template\'s hsl(270...) purple accent');
-}
-
-// Full mixed-language payload renders: language attribute, Chinese content and
-// English-in-Chinese phrases survive, and no placeholder is left unresolved.
-{
+test('Chinese Minimal renders a complete mixed-language payload', () => {
   const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-'));
   const input = join(dir, 'cv.json');
   const output = join(dir, 'cv.html');
@@ -91,24 +54,111 @@ if (!/hsl\(270/.test(designSection)) {
     education: [{ title: '计算机科学与技术', org: '示例大学', year: '2025' }],
     certifications: [],
     skills: [{ category: '工程能力', items: ['TypeScript', 'FastAPI', 'Docker'] }],
-  }), 'utf-8');
+  }));
 
+  execFileSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT });
+  const rendered = readFileSync(output, 'utf8');
+  assert.match(rendered, /<html lang="zh-CN">/);
+  assert.match(rendered, /测试候选人/);
+  assert.match(rendered, /AI Agent 工作流/);
+  assert.doesNotMatch(rendered, /Certifications/);
+  assert.doesNotMatch(rendered, /\{\{[A-Z_]+\}\}/);
+});
+
+test('Chinese Minimal preserves mixed-language and job order in PDF text extraction', {
+  skip: !CAN_EXTRACT_PDF && 'Chromium cannot launch or pdftotext is not installed',
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-extraction-'));
+  const input = join(dir, 'cv.json');
+  const output = join(dir, 'cv.html');
+  const pdf = join(dir, 'cv.pdf');
+  writeFileSync(input, JSON.stringify({
+    lang: 'zh-CN',
+    page_format: 'a4',
+    candidate: { name: '测试候选人', email: 'candidate@example.com', location: '深圳' },
+    sections: {
+      summary: '职业概述', competencies: '核心能力', experience: '工作经历',
+      projects: '项目', education: '教育背景', certifications: '认证', skills: '技能',
+    },
+    summary: '6 年企业数字化经验，服务 ACME、Globex、Initech、Umbrella、Hooli、Vandelay。',
+    competencies: ['项目交付'],
+    experience: [
+      {
+        company: '示例甲公司', role: '产品经理', dates: '2025 至今',
+        bullets: ['交付 AI agent 产品。'],
+      },
+      {
+        company: '示例乙公司', role: '客户经理', dates: '2022 - 2024',
+        bullets: ['主导 CRM 项目。'],
+      },
+    ],
+    projects: [],
+    education: [{ title: '管理学硕士', org: '示例大学', year: '2021' }],
+    certifications: [],
+    skills: [{ category: '工具', items: ['CRM', 'AI agent'] }],
+  }));
+  execFileSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT });
+
+  const browser = await chromium.launch({ headless: true });
   try {
-    execFileSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE_PATH], { cwd: ROOT, stdio: 'pipe' });
-    const rendered = readFileSync(output, 'utf8');
-    const checks = [
-      [/<html lang="zh-CN"/, 'declares lang="zh-CN"'],
-      [/测试候选人/, 'renders the candidate name'],
-      [/AI Agent 工作流/, 'renders a mixed Chinese/English competency'],
-    ];
-    const missing = checks.filter(([re]) => !re.test(rendered)).map(([, why]) => why);
-    const leftover = rendered.match(/\{\{[A-Z_]+\}\}/g);
-    if (missing.length === 0 && !leftover) {
-      pass('a full zh-CN payload renders through build-cv-html.mjs with no unresolved placeholders');
-    } else {
-      fail(`zh-minimal render: missing=${JSON.stringify(missing)} leftover=${JSON.stringify(leftover)}`);
-    }
-  } catch (e) {
-    fail(`build-cv-html.mjs failed on the zh-minimal template: ${e.message}`);
+    const page = await browser.newPage();
+    await page.goto(pathToFileURL(output).href);
+    await page.pdf({
+      path: pdf,
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '0.6in', right: '0.6in', bottom: '0.6in', left: '0.6in' },
+    });
+  } finally {
+    await browser.close();
   }
-}
+
+  const text = execFileSync('pdftotext', [pdf, '-'], { encoding: 'utf8' })
+    .replace(/\s+/g, ' ')
+    .trim();
+  assert.match(text, /6 年.*ACME.*Globex.*Initech.*Umbrella.*Hooli.*Vandelay/);
+  assert.match(text,
+    /示例甲公司 2025 至今.*产品经理.*交付 AI agent 产品.*示例乙公司 2022 - 2024.*客户经理.*主导 CRM 项目/);
+  assert.doesNotMatch(text, /Certifications/);
+});
+
+test('Chinese Minimal keeps long mixed-language contacts inside the A4 page', {
+  skip: !existsSync(chromium.executablePath()) && 'Chromium is not installed',
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zh-minimal-layout-'));
+  const input = join(dir, 'cv.json');
+  const output = join(dir, 'cv.html');
+  writeFileSync(input, JSON.stringify({
+    lang: 'zh-CN', page_format: 'a4',
+    candidate: {
+      name: '测试候选人',
+      email: 'candidate-with-an-intentionally-long-address-for-print-regression@example-company.cn',
+      location: '中国｜杭州',
+      portfolio: 'https://example.com/一个很长的中英文混合项目地址/remote-agent-production-delivery',
+    },
+    summary: '全栈工程师，负责 AI Agent 工作流与生产部署。',
+    competencies: ['AI Agent 工作流'],
+    experience: [{ company: '示例科技有限公司', role: '工程师', dates: '2025 至今', bullets: ['交付生产系统。'] }],
+    projects: [], education: [], certifications: [], skills: [],
+  }));
+  execFileSync(process.execPath, ['build-cv-html.mjs', input, output, TEMPLATE], { cwd: ROOT });
+
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 794, height: 1123 } });
+    await page.emulateMedia({ media: 'print' });
+    await page.goto(pathToFileURL(output).href);
+    const layout = await page.evaluate(() => {
+      const printable = document.querySelector('.page');
+      const right = printable.getBoundingClientRect().right;
+      const overflow = [...printable.querySelectorAll('*')]
+        .filter((element) => element.getBoundingClientRect().right > right + 0.5)
+        .map((element) => element.className || element.tagName);
+      return { documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, overflow };
+    });
+    assert.equal(layout.documentOverflow, false);
+    assert.deepEqual(layout.overflow, []);
+  } finally {
+    await browser.close();
+  }
+});

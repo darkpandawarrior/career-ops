@@ -8,7 +8,6 @@ const entrypoints = [
   '.agents',
   '.antigravitycli',
   '.claude',
-  '.cursor',
   '.grok',
   '.kimi',
   '.opencode',

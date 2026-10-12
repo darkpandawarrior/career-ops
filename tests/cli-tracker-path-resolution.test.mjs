@@ -177,8 +177,7 @@ try {
 
   // 8. paste-reply.mjs appends candidate to DATA_ROOT default path
   try {
-    const appendTestScript = `
-    import { appendCandidate, CANDIDATES_PATH } from './paste-reply.mjs';
+    const appendTestScript = `import { appendCandidate, CANDIDATES_PATH } from './paste-reply.mjs';
     await appendCandidate({
       message_id: 'test-cli-msg',
       subject: 'Interview Confirmation',

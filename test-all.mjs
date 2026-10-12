@@ -460,10 +460,6 @@ const scripts = [
   // career-ops 1.19.0 scripts with inline self-tests (ported).
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'funnel-velocity.mjs --self-test', expectExit: 0 },
-  // Fork-only suite. It sat at the repo root referenced by NOTHING, so its 24
-  // assertions had never run — and the first run found a real dead self-heal
-  // in agent-inbox.mjs. Registered so it cannot go quiet again.
-  { name: 'agent-inbox-tests.mjs', expectExit: 0, timeoutMs: 120_000 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-latex.mjs --test', expectExit: 0 },

@@ -57,7 +57,15 @@ const HARD_EXPIRED_PATTERNS = [
   /(?<!\bbe\s)closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
   /(?<!\bbe\s)closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
   /diese stelle (ist )?(nicht mehr|bereits) besetzt/i,
-  /offre (expirée|n'est plus disponible)/i,
+  // French closure banners. Spelled accent-free on purpose: normalizeForMatch
+  // strips diacritics, so "expiree" here matches "expirée" on the page.
+  /offre (expiree|n'est plus disponible)/i,
+  /(cette )?offre n'est plus (disponible|en ligne|active)/i,
+  /(offre|poste|annonce) (deja )?pourvu(e)?/i,
+  /offre (cloturee|desactivee|terminee)/i,
+  /ce poste n'est plus (disponible|a pourvoir|ouvert)/i,
+  /recrutement (termine|cloture)/i,
+  /candidatures (closes|cloturees)/i,
 ];
 
 const LISTING_PAGE_PATTERNS = [
@@ -127,7 +135,13 @@ const APPLY_PATTERNS = [
   // Polish posting has no recognized apply control and falls to no_apply_control.
   /\baplikuj\b/i,
   /panelu aplikowania/i,
-  /wyślij (cv|aplikacj)/i,
+  // Accent-free: apply controls go through normalizeForMatch too ("wyślij" → "wyslij").
+  /wyslij (cv|aplikacj)/i,
+  // Chinese MokaHR and Feishu Jobs detail pages use these exact control texts.
+  // Keep them narrow: bare “申请” appears in descriptive prose, while longer
+  // labels containing “投递” can be status/history controls rather than Apply.
+  /^申请职位$/,
+  /^投递$/,
 ];
 
 const MIN_CONTENT_CHARS = 300;

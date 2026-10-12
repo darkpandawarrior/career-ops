@@ -1647,6 +1647,7 @@ const DEDUP_STRIP_PARAMS = new Set([
   ...URL_LANGUAGE_PARAMS,
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
   'ref', 'src', 'source', 'gh_src', 'lever-origin', 'lever-source',
+  'rltr', // StepStone: regenerated per request, so one posting returns as new every scan
 ]);
 
 /**
@@ -1692,7 +1693,7 @@ export function normalizeUrlForDedup(url) {
   }
   promoteKnownFragmentIdentity(parsed);
   parsed.hash = '';
-  parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
   return parsed.toString();
 }
 
