@@ -902,7 +902,11 @@ export function analyzeFromContent(trackerContent, followupsContent = '') {
     // an owed action means the process is blocked on the user and will time out silently. There is
     // no waiting period on a question already asked — a screening questionnaire is owed the day it
     // arrives, and four applications have died in exactly this gap.
-    const owedAction = owedApps.has(app.num);
+    // The tracker note is the newer record: an `OWED:` note makes a row owed on its own, and a
+    // RESOLVED after the last OWED clears it even while owed-actions.md still lists the row.
+    const notes = app.notes || '';
+    const lastOwed = notes.lastIndexOf('OWED:');
+    const owedAction = (owedApps.has(app.num) || lastOwed >= 0) && !(notes.lastIndexOf('RESOLVED') > lastOwed);
     if (owedAction) urgency = 'urgent';
     let nextFollowupDate = computeNextFollowupDate(normalized, appliedDate, lastFollowupDate, followupCount);
 

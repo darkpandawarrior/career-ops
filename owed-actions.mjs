@@ -40,7 +40,14 @@ const DONE_RE = /[☑✅]|\[x\]/i;
 export function parseOwedActions(text) {
   if (!text) return [];
   const out = [];
+  // The real file also keeps history tables (Cleared, Drafted, Sent) whose rows start with an app
+  // number too, so once a `## ` heading appears only an `## Owed…` section counts. Read
+  // unsectioned, #60/#74/#75/#100 surfaced as urgent from the "Cleared" table on 2026-10-13.
+  let inOwed = true;
   for (const line of text.split('\n')) {
+    const h = /^##\s+(.*)/.exec(line);
+    if (h) { inOwed = /^owed\b/i.test(h[1].trim()); continue; }
+    if (!inOwed) continue;
     const m = ROW_RE.exec(line.trim());
     if (!m) continue;
     const appNum = Number(m[1]);

@@ -39,6 +39,18 @@ else fail(`owed = ${talentPro && talentPro.owed}`);
 if (!rows.some((r) => Number.isNaN(r.appNum))) pass('header and delimiter rows are not parsed as entries');
 else fail('a non-data row was parsed');
 
+// History tables share the row shape; only the `## Owed…` section is the queue.
+const SECTIONED = `${TABLE}
+## Cleared since 2026-08-25
+
+| # | Company | Outcome |
+|---|---------|---------|
+| 74 | ModalX | Closed, nothing owed. |
+`;
+const sectioned = parseOwedActions(`## Owed now\n${SECTIONED}`).map((r) => r.appNum);
+if (sectioned.includes(84) && !sectioned.includes(74)) pass('rows under a non-Owed ## heading are history, not owed');
+else fail(`sectioned parse = ${sectioned}`);
+
 // Fail open. This feeds urgency; a parse problem must never invent work.
 if (parseOwedActions('').length === 0) pass('empty input yields no owed actions');
 else fail('empty input produced rows');
