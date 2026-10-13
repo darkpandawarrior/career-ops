@@ -508,7 +508,9 @@ const scripts = [
   // which is network-dependent. Same graceful-on-no-portals.yml smoke check
   // as the bare verify-portals.mjs run directly above: confirms the module
   // loads and its default-path guard exits cleanly without touching network.
-  { name: 'fix-slugs.mjs', expectExit: 0 },
+  // With a real portals.yml present (any working checkout) it DOES probe live boards: 23s measured,
+  // so it gets verify-portals' budget rather than the 30s default.
+  { name: 'fix-slugs.mjs', expectExit: 0, timeoutMs: 120_000 },
   // career-ops 1.27.0 sync: new standalone tool with an inline self-test.
   { name: 'negotiation-roi.mjs --self-test', expectExit: 0 },
   // career-ops 1.30.0 sync: ATS-friendliness scorer (#2064) ships an inline
