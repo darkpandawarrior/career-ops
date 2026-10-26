@@ -29,6 +29,22 @@
  *   node scan.mjs --verify --throttle          # jittered ~5-10s gap between browser checks
  *   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
  *   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
+  node scan.mjs --agent-handoff              # probe Greenhouse/Ashby/Lever slugs for scan_method:websearch companies
+  node scan.mjs --apify                      # after the zero-token scan, also run a paid broad search (costs money)
+  node scan.mjs --doctor                     # read-only health sweep, never touches pipeline.md/scan-history.tsv
+ *   node scan.mjs --agent-handoff              # for scan_method:websearch companies, probe Greenhouse/Ashby/Lever
+ *                                               # slug candidates (same logic as `verify-portals.mjs --add`) and print
+ *                                               # suggested portals.yml edits — never writes the file, since a
+ *                                               # name-derived slug can collide with an unrelated company
+ *   node scan.mjs --apify                      # after the zero-token scan, also run a broad paid search across
+ *                                               # LinkedIn/Indeed/Glassdoor/Wellfound via Apify actors (apify-search.mjs).
+ *                                               # Off by default — costs real money per run. See broad_search: in
+ *                                               # config/profile.yml and APIFY_TOKEN in .env.example.
+ *   node scan.mjs --doctor                     # read-only health sweep: reuses verify-portals.mjs's probing
+ *                                               # (ATS slug probes + provider-layer probes) instead of a full
+ *                                               # scan-and-persist run. Prints the same report as
+ *                                               # `node verify-portals.mjs` and exits — never touches pipeline.md
+ *                                               # or scan-history.tsv.
  *   node scan.mjs --since 7                    # postings from the last 7 days
  *   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
  *   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
@@ -62,7 +78,7 @@ import { buildTrustValidator } from './providers/_trust-validator.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
-import { classifyFetchError } from './verify-portals.mjs';
+import { classifyFetchError, discoverAlternates, verifyPortalsFile } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
@@ -4014,6 +4030,10 @@ const KNOWN_FLAGS = [
   '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',
   '--include-blacklisted', '--company', '--posted-after', '--posted-before',
   '--since', '--quiet', '--json', '--help', '-h',
+  // Fork-only flags (not part of upstream's KNOWN_FLAGS list) — kept here so
+  // this fork's own capabilities don't get rejected as "unrecognized" now that
+  // every flag has to be named to pass validateFlags.
+  '--agent-handoff', '--apify', '--doctor',
 ];
 
 // Flags whose space-separated value is the NEXT argv token (the `--flag=value`
@@ -4064,6 +4084,22 @@ async function main() {
   // --include-blacklisted: bypass the data/blacklist.md filter for auditing.
   // Matching postings flow through annotated instead of being counted out.
   const includeBlacklisted = args.includes('--include-blacklisted');
+  // --agent-handoff: for each scan_method:websearch company, probe Greenhouse/
+  // Ashby/Lever slug candidates the SAME way `verify-portals.mjs --add` does,
+  // instead of only printing an inert console list. Opt-in — this makes extra
+  // network calls beyond the normal zero-token scan, so it doesn't run by
+  // default on every routine scan.
+  const agentHandoffProbe = args.includes('--agent-handoff');
+  // --apify: after the normal zero-token scan completes, run a broad,
+  // query-driven search across LinkedIn/Indeed/Glassdoor/Wellfound via paid
+  // Apify actors (see apify-search.mjs). Opt-in and OFF by default — it costs
+  // real money per run, unlike every zero-token provider in this file.
+  const runApifySearch = args.includes('--apify');
+  // --doctor: read-only health sweep. Reuses verify-portals.mjs's probing
+  // (ATS slug probes tier + provider-layer probes tier) instead of a full
+  // scan-and-persist run — no pipeline.md/scan-history.tsv writes, no dry-run
+  // flag needed. Short-circuits main() right after providers/portals load.
+  const doctor = args.includes('--doctor');
   // flagValue reads both `--flag value` and `--flag=value`; a bare indexOf misses
   // the second form entirely and silently falls back to the unfiltered default.
   //
@@ -4134,6 +4170,33 @@ async function main() {
   if (providers.size === 0) {
     console.error('Error: no providers loaded from providers/');
     process.exit(1);
+  }
+
+  // --doctor: stop here. Read-only health sweep via verify-portals.mjs's own
+  // sweep function (ATS slug probes + provider-layer probes) — same report as
+  // `node verify-portals.mjs`, just invokable from scan.mjs. No portals.yml
+  // parsing/target-resolution/scan-and-persist below this point.
+  if (doctor) {
+    const httpCtx = makeHttpCtx();
+    const { found, results } = await verifyPortalsFile(PORTALS_PATH, { providers, httpCtx });
+    if (!found) {
+      console.log(`scan --doctor: no portals file at ${PORTALS_PATH} — nothing to verify (run onboarding first).`);
+      return;
+    }
+    console.log(`scan --doctor: ${PORTALS_PATH}\n`);
+    const live = results.filter((r) => r.status === 'live').length;
+    const empty = results.filter((r) => r.status === 'empty').length;
+    const missing = results.filter((r) => r.status === 'missing');
+    const skipped = results.filter((r) => r.status === 'skipped').length;
+    for (const r of results) {
+      const icon = { live: '✅', empty: '🟡', missing: '❌', skipped: '➖' }[r.status] || '?';
+      const source = r.ats ? `${r.ats}/${r.slug}` : (r.provider || '?');
+      const detail = r.status === 'missing' ? `${source} — ${r.reason || 'unresolved'}` : source;
+      console.log(`  ${icon} ${r.name} — ${detail}`);
+    }
+    console.log(`\n${live} live, ${empty} live-but-empty, ${missing.length} unresolved, ${skipped} no-provider (skipped)`);
+    if (missing.length > 0) process.exitCode = 1;
+    return;
   }
 
   // 2. Read portals.yml
@@ -5000,6 +5063,40 @@ async function main() {
     if (agentHandoff.length > 25) {
       console.log(`  … ${agentHandoff.length - 25} more omitted; narrow with --company or inspect portals.yml`);
     }
+
+    if (agentHandoffProbe) {
+      // Deterministic, zero-LLM auto-detection: probe Greenhouse/Ashby/Lever
+      // slug candidates derived from the company name — the SAME mechanism
+      // `verify-portals.mjs --add` uses. This can NEVER write to portals.yml:
+      // a name-derived slug can collide with an unrelated company that
+      // happens to share the guessed slug (e.g. "Hevo" the SaaS vs. an
+      // unrelated "hevo" on lever.co), so every hit is a suggestion for the
+      // user to verify and apply by hand, not an auto-applied config change.
+      console.log(`\nProbing ATS slugs for ${agentHandoff.length} websearch-only compan${agentHandoff.length === 1 ? 'y' : 'ies'} (--agent-handoff)...`);
+      let suggested = 0;
+      for (const item of agentHandoff) {
+        let hit;
+        try {
+          hit = await discoverAlternates(item.company, {});
+        } catch (err) {
+          console.log(`  ✗ ${item.company}: probe failed — ${err.message}`);
+          continue;
+        }
+        if (!hit) continue;
+        suggested++;
+        const jobsHint = hit.status === 'live' ? `${hit.jobCount} live job(s)` : 'live but empty — verify before adding';
+        console.log(`  → ${item.company}: possible ${hit.ats} board at slug "${hit.slug}" (${jobsHint})`);
+        console.log(`      Suggested portals.yml change — verify this is really ${item.company}, then replace:`);
+        console.log(`        careers_url: ${item.careersUrl || '(none set)'}  (remove scan_method/scan_query)`);
+        console.log(`      with:`);
+        console.log(`        careers_url: ${hit.url}`);
+      }
+      if (suggested === 0) {
+        console.log(`  No ATS slug matches found for any websearch-only company — these likely are genuinely custom/token-gated.`);
+      } else {
+        console.log(`\n${suggested} suggestion(s) above — a name-derived slug can collide with an unrelated company, so verify each before editing portals.yml.`);
+      }
+    }
   }
 
   const unreachableTargets = errors.filter((e) => e.kind === 'slug_gone');
@@ -5124,6 +5221,15 @@ async function main() {
   }
   // The run completed (or was a dry run) — disarm the failure row.
   registerRunFailureSnapshot(null);
+
+  // --apify: broad paid search, opt-in, runs after the zero-token scan above.
+  if (runApifySearch) {
+    console.log(`\n${'━'.repeat(45)}`);
+    console.log('Broad search via Apify (--apify, paid)');
+    console.log(`${'━'.repeat(45)}`);
+    const { runBroadSearch } = await import('./apify-search.mjs');
+    await runBroadSearch({ dryRun });
+  }
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');

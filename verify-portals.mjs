@@ -694,7 +694,7 @@ function sanitizeForTerminal(text) {
  * to begin with, so dropping them here costs nothing and they stay available to
  * `--add`, where an operator sees the slug beside the name before adopting it.
  */
-async function discoverAlternates(name, { fetchJson, fetchText }) {
+export async function discoverAlternates(name, { fetchJson, fetchText }) {
   let bestEmpty = null;
   // A live board whose identity could not be confirmed is NOT a suggestion: it is
   // never adopted, and `fix-slugs` still refuses to write it. It is worth

@@ -38,7 +38,7 @@
 
 import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
 import { checkSyntax, NODE_CHECK_TIMEOUT_MS } from './lib/syntax-check.mjs';
-import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync as _rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync as _rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync, cpSync } from 'fs';
 
 // Windows keeps a handle open on a just-exited child process's working files
 // for a short window (antivirus and Search Indexer widen it), so removing a
@@ -1078,7 +1078,11 @@ if (
   fail('apply mode missing liveness/role-match preflight gate');
 }
 
-const ofertaMode = readFile('modes/oferta.md');
+function readOfertaMode() {
+  return readFile('modes/oferta.md')
+    .replace(/^\*\*\d+\. .+?\*\*\. Read `(modes\/oferta-signals\/[^`]+)` when .*$/gm, (_, file) => readFile(file));
+}
+const ofertaMode = readOfertaMode();
 const autoPipelineMode = readFile('modes/auto-pipeline.md');
 if (
   ofertaMode.includes('## Liveness gate (URL inputs)') &&
@@ -1704,7 +1708,7 @@ try {
     await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
 
   const slugs = deriveSlugCandidates('Acme Corp!');
-  if (JSON.stringify(slugs) === JSON.stringify(['acmecorp', 'acme-corp', 'acme_corp', 'acme'])) {
+  if (['acmecorp', 'acme-corp', 'acme_corp', 'acme'].every((x) => slugs.includes(x)) && slugs.includes('acmeai') && slugs.includes('acme.tech')) {
     pass('verify-portals derives slug candidates from a company name');
   } else {
     fail(`verify-portals slug candidates wrong: ${JSON.stringify(slugs)}`);
@@ -2843,6 +2847,8 @@ try {
       // ...and followup-cadence now delegates flag validation to the shared
       // lib/cli-flags.mjs helper, so the fixture carries that too.
       copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
+      // ...and the rest of lib/ (yaml-document, dir-lock, ... reached through owed-actions and tracker-utils).
+      cpSync(join(ROOT, 'lib'), join(e2eTmp, 'lib'), { recursive: true });
       // ...and its main-guard now comes from lib/is-main-module.mjs (#3170),
       // which is what lets the copy answer "am I main?" correctly from a
       // symlinked tmpdir in the first place.
