@@ -30,22 +30,28 @@ import { decodeEntities } from './_html-entities.mjs';
 //
 // ── CSB (Career Site Builder) variant ────────────────────────────────────────
 // Newer SF tenants run the Career Site Builder "unified" search (jobs2web's
-// searchResultsUnify.js). Their /tile-search-results/ endpoint returns an empty
-// shell — the jobs are loaded client-side from a JSON API instead:
+// searchResultsUnify.js). Their /tile-search-results/ endpoint returns only a
+// 16-byte empty <!DOCTYPE html> shell — the jobs are loaded client-side from a
+// JSON API instead:
 //   POST {origin}/services/recruiting/v1/jobs
+//   Content-Type: application/json
 //   {"keywords":"","locale":"de_DE","location":"","pageNumber":0,"sortBy":"recent"}
 //   → {"jobSearchResult":[{"response":{id,unifiedStandardTitle,unifiedUrlTitle,
 //        jobLocationShort:[…],unifiedStandardStart:"6/18/26",…}}], "totalJobs":N}
-// 10 results/page; pageNumber is 0-based. Detail URL: {origin}/job/{urlTitle}/{id}-{locale}.
+// 10 results/page; pageNumber is 0-based. The detail URL the site itself builds
+// (from searchResultsUnify.js) is {origin}/job/{urlTitle}/{id}-{locale}.
 //
-// Locale gating: the API only returns a posting under a locale it was published
-// in, and totals vary wildly per locale per tenant. We discover the tenant's
-// advertised locales from the language switcher on {origin}/search/ (falls back
-// to a small default set), query each, and dedup by job id. CSB carries a real
-// posting date, so postedAt is set (RMK's is always omitted).
+// CRITICAL — locale gating: the API only returns a posting under a locale it was
+// published in (each record carries `supportedLocales`). The same tenant reports
+// wildly different totals per locale — MAN: de_DE=601 but en_US=8; TRATON: en_US
+// only; Hexagon: en_GB only (de_DE/en_US both 0). A hardcoded locale would miss
+// entire tenants, so we DISCOVER each tenant's advertised locales from the
+// language switcher on {origin}/search/ (the `locale=xx_XX` links), query every
+// one, and dedup by job id. CSB carries a real posting date, so postedAt is set.
 //
-// Strategy selection: RMK runs first (the majority case); only when it yields
-// zero postings (the CSB empty-shell signature) do we fall back to CSB.
+// Strategy selection: `sfVariant: csb` on the portal entry forces CSB directly;
+// otherwise the RMK tile path runs first and, only if it yields zero postings
+// (the empty-shell signature), we fall back to CSB automatically.
 
 const MAX_PAGES = 40; // safety cap on request count (RMK tile pagination)
 const MAX_JOBS = 1000; // cap total postings pulled per site (both strategies)
@@ -54,11 +60,21 @@ const MAX_JOBS = 1000; // cap total postings pulled per site (both strategies)
 const CSB_PAGE_SIZE = 10; // fixed by the /services/recruiting/v1/jobs API
 const CSB_MAX_PAGES_PER_LOCALE = 100; // safety cap per locale (100*10 = 1000 postings)
 const CSB_MAX_LOCALES = 16; // guard against a tenant advertising an absurd locale list
+// The API's own default sort ("recent", which the site itself sends) is not a
+// stable order: each page request reshuffles ties, so offset paging returned
+// only ~400 distinct ids of BMW's 521 per pass. "date" is nearly stable; a
+// second sweep picks up the few same-day ties it still shuffles across pages.
+const CSB_SORT = 'date';
+const CSB_SWEEPS = 2;
+// Pages per locale fetched in parallel once page 0 has reported totalJobs. Each
+// call returns only 10 postings, so a 500-job tenant was ~50 calls in a row.
+const CSB_PAGE_CONCURRENCY = 6;
 // Locales tried when /search/ discovery yields nothing (fetch failed / markup
 // changed). de_DE + en_US cover the DACH targets this provider is aimed at.
 const CSB_DEFAULT_LOCALES = ['de_DE', 'en_US'];
-// Query order: DACH-relevant, usually job-rich locales first, so a bounded
-// probe (ctx.maxPages:1 / max_pages:1) hits real postings early.
+// Query order: the DACH-relevant, usually job-rich locales first, so a bounded
+// probe (max_pages:1) hits real postings early and dedup keeps a sensible URL
+// locale for jobs published in several languages.
 const CSB_LOCALE_PRIORITY = ['de_DE', 'en_US', 'en_GB', 'en_EN'];
 
 /** @param {import('./_types.js').PortalEntry} entry */
@@ -208,32 +224,39 @@ export function extractLocales(html) {
   return all.slice(0, CSB_MAX_LOCALES);
 }
 
-// CSB posting dates are rendered in the query locale's short format: US tenants
-// send M/D/YY with slashes ("6/18/26"), European (de_DE) tenants send D.M.YY
-// with dots ("20.11.23"). Infer the field order from the separator, treat a
-// 2-digit year as 20YY, and return epoch ms. Anything unexpected yields
-// undefined so a consumer sees "unknown date" rather than a bogus timestamp.
-/** @param {unknown} raw */
-export function parseCsbDate(raw) {
+// CSB posting dates are rendered in the query locale's short format: en_US
+// sends M/D/YY ("6/18/26"), de_DE D.M.YY ("20.11.23"), fr_FR and pt_BR
+// D/M/YYYY ("05/10/2026"), hu_HU "2025. 07. 03.". Slashes are month-first only
+// for the US locales; with no locale they stay month-first as before. A 2-digit
+// year is 20YY. Anything unexpected yields undefined so a consumer sees
+// "unknown date" rather than a bogus timestamp.
+const CSB_MONTH_FIRST_LOCALES = new Set(['en_US', 'es_US']);
+
+/** @param {unknown} raw @param {string} [locale] */
+export function parseCsbDate(raw, locale) {
   if (typeof raw !== 'string') return undefined;
   const s = raw.trim();
-  let a, b, year;
+  let month, day, year;
   const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   const dot = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/);
+  const yearFirst = s.match(/^(\d{4})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})\.?$/);
   if (slash) {
-    [, a, b, year] = slash; // M/D/Y
+    [, month, day, year] = slash;
+    if (locale && !CSB_MONTH_FIRST_LOCALES.has(locale)) [month, day] = [day, month];
   } else if (dot) {
-    [, b, a, year] = dot; // D.M.Y — swap to month/day
+    [, day, month, year] = dot;
+  } else if (yearFirst) {
+    [, year, month, day] = yearFirst;
   } else {
     return undefined;
   }
-  const month = Number(a);
-  const day = Number(b);
+  const m = Number(month);
+  const d = Number(day);
   let y = Number(year);
   if (y < 100) y += 2000;
-  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
-  const ms = Date.UTC(y, month - 1, day);
-  return Number.isFinite(ms) ? ms : undefined;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return undefined;
+  const ms = Date.UTC(y, m - 1, d);
+  return new Date(ms).getUTCDate() === d ? ms : undefined;
 }
 
 // jobLocationShort is an array of strings like "Karlovy Vary, CZE, 36004<br/>"
@@ -263,9 +286,13 @@ export function parseCsbJobs(json, cfg, locale) {
     const id = r.id != null ? String(r.id) : '';
     const title = clean(String(r.unifiedStandardTitle || r.jobTitle || ''));
     if (!id || !title) continue;
-    // The slug is cosmetic (server keys on {id}-{locale}), but tenants render it
-    // inconsistently (percent-encoded, or with raw HTML entities). Decode
-    // entities, then drop URL-structural chars a raw entity would inject.
+    // The site builds the slug from urlTitle/unifiedUrlTitle. The slug is purely
+    // cosmetic — the server keys only on the {id}-{locale} tail (a stub slug
+    // resolves the same posting) — but tenants render it inconsistently: some
+    // percent-encode it ("Oper%C3%A1tor-…"), others leave HTML entities in
+    // ("Mergers-&amp;-Acquisitions"). Decode entities, then drop the URL-
+    // structural chars (& ? #) a raw entity would otherwise inject into the
+    // path, leaving any existing %XX escapes untouched.
     const slug = decodeEntities(String(r.unifiedUrlTitle || r.urlTitle || 'job'))
       .replace(/[?#&]+/g, '-')
       .replace(/-{2,}/g, '-');
@@ -275,7 +302,7 @@ export function parseCsbJobs(json, cfg, locale) {
       title,
       url,
       location: cleanCsbLocation(r.jobLocationShort),
-      postedAt: parseCsbDate(r.unifiedStandardStart),
+      postedAt: parseCsbDate(r.unifiedStandardStart, locale),
     });
   }
   return out;
@@ -290,9 +317,7 @@ function resolveCsbMaxPages(entry) {
 
 // CSB strategy: discover locales, paginate the JSON jobs API per locale, dedup
 // by id across locales+pages. `total` from the first page bounds pagination;
-// an empty/short page also stops the loop. `ctx.maxPages` (set by
-// verify-portals' bounded health probe) caps pages per locale on top of the
-// entry/default cap, so a liveness check never walks a full paginated crawl.
+// an empty/short page also stops the loop.
 //
 // `probe: true` marks the post-RMK fallback probe: RMK already answered (the
 // board is reachable, just empty of tiles), so an all-locales CSB failure must
@@ -308,8 +333,7 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
     // Discovery is best-effort; fall back to the default locale set.
   }
 
-  const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
-  const maxPages = Math.min(resolveCsbMaxPages(entry), ctxCap);
+  const maxPages = resolveCsbMaxPages(entry);
   const jobs = [];
   const seen = new Set();
   // When EVERY locale fails without a single successful request the board is
@@ -322,44 +346,63 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
 
   for (const locale of locales) {
     if (jobs.length >= MAX_JOBS) break;
+    const fetchPage = (page) => ctx.fetchJson(cfg.jobsApi, {
+      method: 'POST',
+      redirect: 'error',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: CSB_SORT }),
+    });
     let total = null;
-    for (let page = 0; page < maxPages; page++) {
-      let json;
-      try {
-        json = await ctx.fetchJson(cfg.jobsApi, {
-          method: 'POST',
-          redirect: 'error',
-          headers: { 'content-type': 'application/json', accept: 'application/json' },
-          body: JSON.stringify({ keywords: '', locale, location: '', pageNumber: page, sortBy: 'recent' }),
-        });
-      } catch (err) {
-        firstErr ??= err;
-        break; // this locale failed (e.g. 307 legacy redirect) — try the next
-      }
-      succeededOnce = true;
-      if (total === null) {
-        total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
-      }
-      // Page-fullness checks below use the raw response count, not rows.length:
-      // parseCsbJobs drops id/title-less records, and a full API page with a
-      // few dropped records would otherwise look "short" and stop pagination
-      // before reaching later pages that still hold valid jobs.
-      const rawCount = Array.isArray(json?.jobSearchResult) ? json.jobSearchResult.length : 0;
-      if (rawCount === 0) break;
-      const rows = parseCsbJobs(json, cfg, locale);
+    let failed = false;
+    const localeIds = new Set();
+    for (let sweep = 0; sweep < CSB_SWEEPS; sweep++) {
+      const lastPageFor = (count) => Math.min(maxPages - 1, Math.ceil(count / CSB_PAGE_SIZE) - 1);
+      let lastPage = total === null ? maxPages - 1 : lastPageFor(total);
+      let page = 0;
+      // Page 0 carries totalJobs. With a total known, the remaining pages go out
+      // CSB_PAGE_CONCURRENCY at a time; without one we cannot tell where the
+      // board ends, so pages stay one at a time and a short page stops the loop.
+      pages: while (page <= lastPage) {
+        const width = total === null ? 1 : CSB_PAGE_CONCURRENCY;
+        const batch = Array.from({ length: Math.min(width, lastPage - page + 1) }, (_, i) => page + i);
+        const results = await Promise.allSettled(batch.map(fetchPage));
+        for (let i = 0; i < batch.length; i++) {
+          const result = results[i];
+          if (result.status === 'rejected') {
+            firstErr ??= result.reason;
+            failed = true;
+            break pages; // this locale failed (e.g. 307 legacy redirect) — try the next
+          }
+          succeededOnce = true;
+          const json = result.value;
+          if (total === null) {
+            total = typeof json?.totalJobs === 'number' ? json.totalJobs : null;
+            if (total !== null) lastPage = lastPageFor(total);
+          }
+          // Page-fullness checks below use the raw response count, not rows.length:
+          // parseCsbJobs drops id/title-less records, and a full API page with a
+          // few dropped records would otherwise look "short" and stop pagination
+          // before reaching later pages that still hold valid jobs.
+          const rawCount = Array.isArray(json?.jobSearchResult) ? json.jobSearchResult.length : 0;
+          if (rawCount === 0) break pages;
+          const rows = parseCsbJobs(json, cfg, locale);
 
-      for (const row of rows) {
-        if (seen.has(row.id)) continue;
-        seen.add(row.id);
-        const job = { title: row.title, url: row.url, company: entry.name, location: row.location };
-        if (typeof row.postedAt === 'number') job.postedAt = row.postedAt;
-        jobs.push(job);
-        if (jobs.length >= MAX_JOBS) break;
+          for (const row of rows) {
+            localeIds.add(row.id);
+            if (seen.has(row.id)) continue;
+            seen.add(row.id);
+            const job = { title: row.title, url: row.url, company: entry.name, location: row.location };
+            if (typeof row.postedAt === 'number') job.postedAt = row.postedAt;
+            jobs.push(job);
+            if (jobs.length >= MAX_JOBS) break pages;
+          }
+          // Stop once we've covered the reported total, or on a short page.
+          if (total !== null && (batch[i] + 1) * CSB_PAGE_SIZE >= total) break pages;
+          if (rawCount < CSB_PAGE_SIZE) break pages;
+        }
+        page = batch[batch.length - 1] + 1;
       }
-      if (jobs.length >= MAX_JOBS) break;
-      // Stop once we've covered the reported total, or on a short page.
-      if (total !== null && (page + 1) * CSB_PAGE_SIZE >= total) break;
-      if (rawCount < CSB_PAGE_SIZE) break;
+      if (failed || total === null || localeIds.size >= total || jobs.length >= MAX_JOBS) break;
     }
   }
   if (!probe && !succeededOnce && firstErr) throw firstErr;
@@ -367,15 +410,12 @@ async function fetchCsb(entry, cfg, ctx, { probe = false } = {}) {
 }
 
 // RMK strategy: the original /tile-search-results/ HTML-fragment scraper.
-// `ctx.maxPages` (health-probe budget) caps pages fetched on top of MAX_PAGES.
 /** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx */
 async function fetchRmk(entry, cfg, ctx) {
-  const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
-  const maxPages = Math.min(MAX_PAGES, ctxCap);
   const jobs = [];
   const seen = new Set();
   let startrow = 0;
-  for (let page = 0; page < maxPages; page++) {
+  for (let page = 0; page < MAX_PAGES; page++) {
     const htmlText = await ctx.fetchText(`${cfg.tileApi}?startrow=${startrow}`, {
       redirect: 'error',
       headers: { accept: 'text/html' },

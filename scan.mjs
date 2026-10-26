@@ -33,24 +33,11 @@
  *   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
  *   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
  *   node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
+ *   node scan.mjs --quiet                      # suppress the manifesto footer
  *   node scan.mjs --help                       # print this usage block and exit
- *   node scan.mjs --agent-handoff              # for scan_method:websearch companies, probe Greenhouse/Ashby/Lever
- *                                               # slug candidates (same logic as `verify-portals.mjs --add`) and print
- *                                               # suggested portals.yml edits — never writes the file, since a
- *                                               # name-derived slug can collide with an unrelated company
- *   node scan.mjs --apify                      # after the zero-token scan, also run a broad paid search across
- *                                               # LinkedIn/Indeed/Glassdoor/Wellfound via Apify actors (apify-search.mjs).
- *                                               # Off by default — costs real money per run. See broad_search: in
- *                                               # config/profile.yml and APIFY_TOKEN in .env.example.
- *   node scan.mjs --doctor                     # read-only health sweep: reuses verify-portals.mjs's probing
- *                                               # (ATS slug probes + provider-layer probes) instead of a full
- *                                               # scan-and-persist run. Prints the same report as
- *                                               # `node verify-portals.mjs` and exits — never touches pipeline.md
- *                                               # or scan-history.tsv.
  */
 
 import {
-  appendFileSync,
   closeSync,
   existsSync,
   fchmodSync,
@@ -66,60 +53,59 @@ import {
   writeFileSync,
 } from 'fs';
 import { randomUUID } from 'crypto';
+import { fileURLToPath } from 'url';
 import path from 'path';
-import * as yaml from 'js-yaml';
-
-// ---------------------------------------------------------------------------
-// Bootstrap: load .env before anything else
-// ---------------------------------------------------------------------------
-try {
-  const { config } = await import('dotenv');
-  // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
-  // single JSON object (#1906).
-  // Secrets are user-layer data: read them beside the ACTIVE data root, not the caller cwd.
-  config({ path: path.join(resolveCareerOpsRoot(import.meta.url).dataRoot, '.env'), quiet: true });
-} catch {
-  // dotenv is optional — fall back to process.env if not installed
-}
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTrustValidator } from './providers/_trust-validator.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
+import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
-import { classifyFetchError, discoverAlternates, verifyPortalsFile } from './verify-portals.mjs';
+import { classifyFetchError } from './verify-portals.mjs';
 import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
 import { computeListingFingerprint } from './listing-fingerprint.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey, extractReqNumber, REQ_NUMBER_RE } from './tracker-parse.mjs';
 import { workdayDedupKey, stripWorkdayRepostSuffix, isWorkdayJobUrl } from './providers/workday.mjs';
-import { normalizeCompany } from './tracker-utils.mjs';
+import { normalizeCompany, appendLedgerRows } from './tracker-utils.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
-import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
-import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldAccents } from './title-keywords.mjs';
+import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTitleFilter, foldTitle } from './title-keywords.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine } from './lib/scan-history-columns.mjs';
+import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
-import { promoteKnownFragmentIdentity } from './url-key.mjs';
-import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { sectionKind } from './lib/pipeline-sections.mjs';
+import { promoteKnownFragmentIdentity, LANGUAGE_PARAMS, languageSubtag } from './url-key.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 
+const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
-const parseYaml = yaml.load;
+try {
+  const { config } = await import('dotenv');
+  // quiet: dotenv's startup banner goes to stdout, which --json reserves for a
+  // single JSON object (#1906). Secrets are user-layer data, so a split
+  // checkout reads them beside the configured data root rather than from the
+  // caller's cwd (which may be the code checkout or an unrelated directory).
+  config({ path: path.join(DATA_ROOT, '.env'), quiet: true });
+} catch {
+  // dotenv is optional — fall back to process.env if not installed
+}
+
+const parseYaml = loadYaml;
 
 // ── Config ──────────────────────────────────────────────────────────
-
-// Fork rule 5: every input below belongs to the ACTIVE PROFILE's data root, not
-// to the directory this script sits in. Upstream derives both from the script
-// directory, which under multi-profile reads one profile's portals against
-// another profile's tracker — silently, with entirely plausible output.
-// Named DATA_ROOT/CODE_ROOT to match upstream's spelling downstream.
-const { engineRoot: CODE_ROOT, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+import { resolveTrackerPath } from './path-resolver.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(DATA_ROOT, 'config/profile.yml');
+// An explicit override wins; otherwise the root fixed above, since the .env just
+// loaded may name another CAREER_OPS_ROOT that getProfilePath() would follow.
+const PROFILE_PATH = hasProfileOverride() ? getProfilePath() : getProfilePath(DATA_ROOT);
 // Overridable for the same reason the two inputs above are (#2271). A second
 // search lane - a bridge/income track, a career-change track, a partner sharing
 // the checkout - already gets its own portals.yml and profile, but without these
@@ -146,6 +132,7 @@ const PROVIDERS_DIR = path.resolve(CODE_ROOT, 'providers');
 // to leave a stray data/ in whatever cwd it ran from.
 
 const CONCURRENCY = 10;
+const PROGRESS_EVERY = 25;
 
 export function isIgnorableDirectoryFsyncError(err, platform = process.platform) {
   return ['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(err?.code)
@@ -195,7 +182,7 @@ export function emitJsonReceipt(receipt, exitCode) {
 
 // ── Title filter ────────────────────────────────────────────────────
 
-// How a title_filter matches a title lives in title-keywords.mjs, because
+// How a keyword matches text lives in title-keywords.mjs, because
 // openrouter-runner.mjs filters titles too and cannot import this file (scan.mjs
 // creates data/ at import time). It called a second, hand-kept copy of this
 // logic until the two drifted; there is now one implementation and this file
@@ -351,7 +338,7 @@ function compiledPositiveMatchers(positiveList) {
   if (compiledPositiveCache.has(positiveList)) return compiledPositiveCache.get(positiveList);
   const compiled = positiveList
     .filter(k => typeof k === 'string' && k.trim().length > 0)
-    .map(k => ({ raw: k, match: compilePositiveKeyword(foldAccents(k.trim().toLowerCase())) }));
+    .map(k => ({ raw: k, match: compilePositiveKeyword(foldTitle(k).trim()) }));
   compiledPositiveCache.set(positiveList, compiled);
   return compiled;
 }
@@ -363,7 +350,7 @@ function compiledPositiveMatchers(positiveList) {
 // `by_title_keyword` key must be written exactly as the positive entry is.
 export function matchedTitleKeywords(title, titleFilter) {
   const raw = Array.isArray(titleFilter?.positive) ? titleFilter.positive : [];
-  const lower = foldAccents((title || '').toLowerCase());
+  const lower = foldTitle(title || '');
   return compiledPositiveMatchers(raw)
     .filter(({ match }) => match(lower))
     .map(({ raw: kw }) => kw);
@@ -390,7 +377,8 @@ export function matchedTitleKeywords(title, titleFilter) {
 //   - `block` matches → reject
 //   - `allow` empty → pass (already cleared block)
 //   - `allow` non-empty → must match at least one keyword, OR the TITLE carries
-//     an explicit remote marker (see titleSignalsRemote below)
+//     an explicit remote marker (see titleSignalsRemote below), unless
+//     `remote_title_fallback: false` disables that final rescue.
 
 // Normalize a keyword list from portals.yml: tolerates a bare string
 // (wrapped to a 1-item array), null/undefined (→ []), and non-string
@@ -509,7 +497,18 @@ const USPS_STATES = Object.freeze([
 function compileUsStateAbbrev(abbr) {
   const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`(?:,\\s*${escaped}(?![\\p{L}\\p{M}\\p{N}])|(?:^|[^\\p{L}\\p{M}\\p{N}])${escaped}[^\\p{L}\\p{M}\\p{N}]*$)`, 'u');
-  return (lower) => re.test(lower);
+  return (lower) => re.test(withoutCountryCodeSlot(lower));
+}
+
+// "City, Region, CC" ends in an ISO country code, and several of those are
+// also USPS codes: "Bengaluru, Karnataka, IN" read as Indiana and "Toronto,
+// ON, CA" as California, so always_allow beat the user's own block entry.
+// A two-letter last part after two or more parts is the country slot, never
+// a state. "Austin, TX, US" still keeps TX.
+function withoutCountryCodeSlot(lower) {
+  const parts = lower.split(',');
+  if (parts.length < 3 || !/^\s*\p{L}{2}\s*$/u.test(parts.at(-1))) return lower;
+  return parts.slice(0, -1).join(',');
 }
 
 const US_STATE_ALWAYS_ALLOW_MATCHERS = USPS_STATES.flatMap(([name, abbr]) => [
@@ -653,7 +652,7 @@ export function buildLocationFilter(locationFilter) {
     // Last resort only. Deliberately placed AFTER `block` so a remote title can
     // never rescue a blocked location — "Program Manager - Remote" in Bengaluru
     // stays rejected. This widens `allow`, never `block`.
-    return titleSignalsRemote(title);
+    return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
 }
 
@@ -803,10 +802,29 @@ export function buildPostedDateFilter(afterIso, beforeIso) {
 //   - `positive` empty → pass (already cleared negatives)
 //   - `positive` non-empty → at least one keyword must be present
 //
-// Provider support: only providers whose list API ships the description for
-// free (no extra per-job request, which would break the zero-token design)
-// populate `job.description`. Lever (`descriptionPlain`) does today; others
-// leave it empty and therefore always pass this filter.
+// A keyword may opt in to boundary-anchored matching with a `word:` or `stem:`
+// prefix (identical to `title_filter` — see title-keywords.mjs). Without a
+// prefix an entry is a plain substring, so a bare negative `java` rejects every
+// posting mentioning "JavaScript" and `ios` rejects "curiosity"; `word:java` /
+// `stem:ios` fix that one entry while leaving the rest of the list untouched
+// (#3274). The substring default is deliberate and unchanged: flipping it would
+// silently narrow every configured install.
+//
+// `content_filter.by_title_keyword` (optional): scopes a stricter positive/
+// negative pair to only the jobs whose title matched a specific
+// `title_filter.positive` keyword, so e.g. an "AI Engineer" title-match can
+// require the description to actually mention a concrete AI tool, without
+// that requirement leaking onto unrelated categories like "Instructional
+// Designer". When one or more of a job's matched title keywords has an
+// override, the overrides govern (any override passing is enough); the
+// global `positive`/`negative` pair is the fallback for jobs whose matched
+// keyword(s) have no override entry.
+//
+// Provider support: `job.description` is populated only when the provider's
+// list API returns the description body without a per-job request (the
+// zero-token constraint). Providers that don't supply one leave it empty, and
+// those jobs always pass this filter. The set shifts as providers are updated
+// — check it with `grep -l 'description:' providers/*.mjs`.
 
 // Normalize a keyword list (lowercase/trim/drop-empties) and compile each
 // survivor into a matcher, so a `word:`/`stem:` prefix is honoured and a bare
@@ -852,6 +870,77 @@ export function buildContentFilter(contentFilter) {
     if (negative.length > 0 && negative.some(m => m(lower))) return false;
     if (positive.length === 0) return true;
     return positive.some(m => m(lower));
+  };
+}
+
+// ── Country-eligibility filter (#2093) ──────────────────────────────
+// Optional, opt-in. If `country_eligibility_filter` is absent from
+// portals.yml, all jobs pass — byte-identical to pre-#2093 behavior.
+//
+// Problem it solves: `location_filter` only reads the ATS provider's
+// STRUCTURED location field (e.g. "Remote"), which many US companies use
+// identically regardless of actual country eligibility. The real
+// restriction — "US-based candidates only" vs. "US or Canada eligible" —
+// often lives only in the JD DESCRIPTION body text, which this filter reads
+// (same field `content_filter` already reads — `job.description`).
+//
+// Semantics (case-insensitive substring), mirroring location_filter's
+// "don't penalize missing data" discipline exactly:
+//   - Candidate's own `location.country` (config/profile.yml) is "United
+//     States" → always pass, unconditionally. An exclusionary "US only"
+//     phrase can never legitimately block a US-based candidate, so the
+//     filter no-ops entirely rather than special-casing every keyword check.
+//   - Empty / whitespace-only / non-string description → pass (no signal).
+//   - No `exclusionary` phrase matched → pass (ambiguous stays ambiguous,
+//     never guessed — this also means an `inclusive`-only match with no
+//     exclusionary wording present is a no-op pass, same as having no
+//     signal at all).
+//   - `exclusionary` phrase matched AND an `inclusive` phrase is also
+//     present → pass (the posting explicitly widens eligibility).
+//   - `exclusionary` phrase matched AND the candidate's own country is
+//     literally named in the JD text (e.g. a Canadian candidate scanning a
+//     posting that separately mentions "Canada" elsewhere) → pass.
+//   - `exclusionary` phrase matched, no `inclusive` phrase, and the
+//     candidate's own country isn't named → reject.
+//
+// Config shape (portals.yml):
+//   country_eligibility_filter:
+//     exclusionary: ["must be located in the united states", ...]
+//     inclusive: ["united states or canada", "north america", ...]
+//
+// Kept as a sibling block to `content_filter` rather than folded into its
+// positive/negative shape: this filter cross-references
+// `config/profile.yml`'s `location.country` and has its own three-way
+// exclusionary/inclusive/candidate-country-named semantics, which doesn't
+// fit content_filter's simpler two-list reject/require shape.
+
+export function buildCountryEligibilityFilter(countryEligibilityFilter, candidateCountry) {
+  if (!countryEligibilityFilter) return () => true;
+
+  const candidateCountryLower = typeof candidateCountry === 'string'
+    ? candidateCountry.toLowerCase().trim()
+    : '';
+
+  // A "US-based candidates only" restriction can never legitimately exclude
+  // a candidate who is themselves US-based — no-op the whole filter rather
+  // than relying on the literal-country-name check below (which would miss
+  // phrasing like "US-based candidates only" that never spells out "united
+  // states").
+  if (candidateCountryLower === 'united states') return () => true;
+
+  const exclusionary = normalizeKeywordList(countryEligibilityFilter.exclusionary);
+  const inclusive = normalizeKeywordList(countryEligibilityFilter.inclusive);
+
+  return (description) => {
+    if (typeof description !== 'string' || description.trim() === '') return true;
+    const lower = description.toLowerCase();
+
+    if (exclusionary.length === 0) return true;
+    if (!exclusionary.some(k => lower.includes(k))) return true;
+    if (inclusive.length > 0 && inclusive.some(k => lower.includes(k))) return true;
+    if (candidateCountryLower && lower.includes(candidateCountryLower)) return true;
+
+    return false;
   };
 }
 
@@ -936,96 +1025,6 @@ export const DEFAULT_VISA_NEGATIVE = [
   'permanent residents only',
 ];
 
-// ── Country-eligibility filter (#2093) ──────────────────────────────
-// Optional, opt-in. If `country_eligibility_filter` is absent from
-// portals.yml, all jobs pass — byte-identical to pre-#2093 behavior.
-//
-// Problem it solves: `location_filter` only reads the ATS provider's
-// STRUCTURED location field (e.g. "Remote"), which many US companies use
-// identically regardless of actual country eligibility. The real
-// restriction — "US-based candidates only" vs. "US or Canada eligible" —
-// often lives only in the JD DESCRIPTION body text, which this filter reads
-// (same field `content_filter` already reads — `job.description`).
-//
-// Semantics (case-insensitive substring), mirroring location_filter's
-// "don't penalize missing data" discipline exactly:
-//   - Candidate's own `location.country` (config/profile.yml) is "United
-//     States" → always pass, unconditionally. An exclusionary "US only"
-//     phrase can never legitimately block a US-based candidate, so the
-//     filter no-ops entirely rather than special-casing every keyword check.
-//   - Empty / whitespace-only / non-string description → pass (no signal).
-//   - No `exclusionary` phrase matched → pass (ambiguous stays ambiguous,
-//     never guessed — this also means an `inclusive`-only match with no
-//     exclusionary wording present is a no-op pass, same as having no
-//     signal at all).
-//   - `exclusionary` phrase matched AND an `inclusive` phrase is also
-//     present → pass (the posting explicitly widens eligibility).
-//   - `exclusionary` phrase matched AND the candidate's own country is
-//     literally named in the JD text (e.g. a Canadian candidate scanning a
-//     posting that separately mentions "Canada" elsewhere) → pass.
-//   - `exclusionary` phrase matched, no `inclusive` phrase, and the
-//     candidate's own country isn't named → reject.
-//
-// Config shape (portals.yml):
-//   country_eligibility_filter:
-//     exclusionary: ["must be located in the united states", ...]
-//     inclusive: ["united states or canada", "north america", ...]
-//
-// Kept as a sibling block to `content_filter` rather than folded into its
-// positive/negative shape: this filter cross-references
-// `config/profile.yml`'s `location.country` and has its own three-way
-// exclusionary/inclusive/candidate-country-named semantics, which doesn't
-// fit content_filter's simpler two-list reject/require shape.
-
-export function buildCountryEligibilityFilter(countryEligibilityFilter, candidateCountry) {
-  if (!countryEligibilityFilter) return () => true;
-
-  const candidateCountryLower = typeof candidateCountry === 'string'
-    ? candidateCountry.toLowerCase().trim()
-    : '';
-
-  // A "US-based candidates only" restriction can never legitimately exclude
-  // a candidate who is themselves US-based — no-op the whole filter rather
-  // than relying on the literal-country-name check below (which would miss
-  // phrasing like "US-based candidates only" that never spells out "united
-  // states").
-  if (candidateCountryLower === 'united states') return () => true;
-
-  const exclusionary = normalizeKeywordList(countryEligibilityFilter.exclusionary);
-  const inclusive = normalizeKeywordList(countryEligibilityFilter.inclusive);
-
-  return (description) => {
-    if (typeof description !== 'string' || description.trim() === '') return true;
-    const lower = description.toLowerCase();
-
-    if (exclusionary.length === 0) return true;
-    if (!exclusionary.some(k => lower.includes(k))) return true;
-    if (inclusive.length > 0 && inclusive.some(k => lower.includes(k))) return true;
-    if (candidateCountryLower && lower.includes(candidateCountryLower)) return true;
-
-    return false;
-  };
-}
-
-// Reads config/profile.yml's `location.country` (already a documented
-// profile field — see config/profile.example.yml) for the country-
-// eligibility filter (#2093). Missing file, missing field, or a malformed
-// profile all resolve to '' — buildCountryEligibilityFilter treats an empty
-// candidate country the same as "not the candidate's own country's US
-// no-op" and simply skips the literal-country-name pass-through, which is
-// the same conservative "don't penalize missing data" default used
-// throughout this file.
-export function loadCandidateCountry(profilePath = PROFILE_PATH) {
-  if (!existsSync(profilePath)) return '';
-  try {
-    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
-    const country = raw?.location?.country;
-    return typeof country === 'string' ? country.trim() : '';
-  } catch {
-    return '';
-  }
-}
-
 export function buildVisaFilter(visaFilter) {
   if (!visaFilter || visaFilter.enabled === false) return () => true;
   const positive = visaFilter.positive != null
@@ -1059,33 +1058,6 @@ export function buildVisaFilter(visaFilter) {
 
 export function buildSalaryFilter(salaryFilter) {
   if (!salaryFilter) return () => true;
-
-  // `min_by_currency` — a floor per currency, for anyone whose target differs by market.
-  // The flat `min`/`currency` pair below cannot express that: setting currency:INR rejects every
-  // USD-quoted job on the currency-mismatch rule, and leaving currency empty compares a USD figure
-  // against an INR floor numerically, which rejects it too. Either way an international pipeline
-  // silently disappears. Here a job in an unlisted currency PASSES (same conservative default as
-  // "no salary data"), and a job with no salary data always passes.
-  if (salaryFilter.min_by_currency && typeof salaryFilter.min_by_currency === 'object') {
-    const floors = new Map();
-    for (const [cur, val] of Object.entries(salaryFilter.min_by_currency)) {
-      const n = Number(val);
-      if (!Number.isFinite(n) || n < 0) {
-        console.error(`Warning: salary_filter.min_by_currency.${cur} must be a non-negative number — entry ignored`);
-        continue;
-      }
-      floors.set(String(cur).trim().toUpperCase(), n);
-    }
-    if (floors.size === 0) return () => true;
-    return (salary) => {
-      if (!salary) return true;
-      const jobMax = salary.max ?? salary.min ?? null;
-      if (jobMax == null) return true;
-      const cur = (salary.currency || '').trim().toUpperCase();
-      if (!cur || !floors.has(cur)) return true; // unknown/unlisted currency → pass
-      return jobMax >= floors.get(cur);
-    };
-  }
 
   // Coerce and validate bounds — malformed YAML must not silently mis-filter
   const min = Number(salaryFilter.min ?? 0);
@@ -1293,10 +1265,29 @@ export function addDays(dateStr, days) {
   return date.toISOString().slice(0, 10);
 }
 
+// Reads config/profile.yml's `location.country` (already a documented
+// profile field — see config/profile.example.yml) for the country-
+// eligibility filter (#2093). Missing file, missing field, or a malformed
+// profile all resolve to '' — buildCountryEligibilityFilter treats an empty
+// candidate country the same as "not the candidate's own country's US
+// no-op" and simply skips the literal-country-name pass-through, which is
+// the same conservative "don't penalize missing data" default used
+// throughout this file.
+export function loadCandidateCountry(profilePath = PROFILE_PATH) {
+  if (!existsSync(profilePath)) return '';
+  try {
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+    const country = raw?.location?.country;
+    return typeof country === 'string' ? country.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
 export function loadReApplyWindows(profilePath = PROFILE_PATH) {
   if (!existsSync(profilePath)) return {};
   try {
-    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
     const windows = raw.re_apply_windows || {};
     const validWindows = {};
     for (const [company, win] of Object.entries(windows)) {
@@ -1304,7 +1295,7 @@ export function loadReApplyWindows(profilePath = PROFILE_PATH) {
       const lastApplyDate = win.last_apply_date;
       if (typeof lastApplyDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(lastApplyDate)) continue;
       if (isNaN(Date.parse(lastApplyDate))) continue;
-      
+
       const sameRoleDays = win.same_role_days;
       if (sameRoleDays !== undefined && (!Number.isInteger(sameRoleDays) || sameRoleDays < 0)) continue;
 
@@ -1493,28 +1484,51 @@ const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
  * Every other skipped status describes the posting: a dead URL stays dead
  * until the configured recheck window releases it (see
  * RECHECKABLE_SCAN_HISTORY_STATUSES), a blocked host stays blocked, so pinning
- * saves a later scan the work. These
- * two describe the user's CONFIG instead — `location_filter` and
- * `max_posting_age_days` are thresholds they edit. Pinning would mean a role
- * dropped under the old threshold never resurfaces under the new one, which is
- * the opposite of what recording the drop is for.
+ * saves a later scan the work. These four describe something else.
  *
- * Pinning would also buy nothing: both cuts run on data the provider already
- * returned, before any liveness verification, so a re-scan of one of these URLs
- * costs no extra request.
+ * `skipped_title`, `skipped_location` and `skipped_age` describe the user's
+ * CONFIG — `title_filter`, `location_filter` and `max_posting_age_days` are
+ * settings they edit. Pinning would mean a role dropped under the old setting
+ * never resurfaces under the new one, which is the opposite of what recording
+ * the drop is for: a keyword added to `title_filter.positive` has to hand back
+ * the titles it now matches. For those three, not pinning is also free: each
+ * cut runs on data the provider already returned, before any liveness
+ * verification, so a re-scan of one of these URLs costs no extra request.
+ *
+ * `skipped_no_apply_control` describes the CHECK: the browser classifier did
+ * not see an Apply control, which is not proof the posting is closed. On
+ * boards whose button it does not recognise, pinning would drop a live posting
+ * once and never offer it again (#4832). Unlike the other two, this verdict
+ * comes from a browser load, so every `--verify` scan re-opens the posting for
+ * as long as the provider lists it. That is the accepted price: a slower
+ * `--verify` beats a posting lost for good, and it shrinks as the classifier
+ * learns each board, since a posting that reads `active` gets an `added` row
+ * and stops coming back.
+ *
+ * `skipped_content`, `skipped_visa` and `skipped_country_eligibility` are
+ * scan-dayforce.mjs's rows for its `content_filter`, visa and
+ * `country_eligibility_filter` cuts: CONFIG again, by the same reasoning as the
+ * first three. They were missing here, so they fell through to the permanent
+ * pin, and widening one of those filters never handed back a Dayforce posting
+ * it had dropped. (scan.mjs counts the same cuts and records no row for them.)
  *
  * `collectSeenCompanyRoles` needs no companion change — it already seeds from
  * `added` rows alone.
  */
 const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
+  'skipped_title',
   'skipped_location',
   'skipped_age',
+  'skipped_no_apply_control',
+  'skipped_content',
+  'skipped_visa',
+  'skipped_country_eligibility',
 ]);
 
 /**
  * The offers not yet recorded under `status`, one per URL.
  *
- * The location and posting-age cuts run before dedup, and their rows never
+ * The title, location and posting-age cuts run before dedup, and their rows never
  * pin a URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so without this every scan
  * appended the same rows again. A URL already carrying a row with the same
  * status is skipped, and so is a second listing of one URL within this scan.
@@ -1527,7 +1541,7 @@ const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
  */
 export function unrecordedOffers(offers, status, scanHistoryText = '') {
   const recorded = new Set();
-  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     const [url, , , , , rowStatus] = line.split('\t');
     if (url && rowStatus === status) recorded.add(normalizeUrlForDedup(url));
   }
@@ -1538,17 +1552,6 @@ export function unrecordedOffers(offers, status, scanHistoryText = '') {
     return true;
   });
 }
-
-// A classifier-confirmed "expired" can be a false positive (e.g. a bot-block
-// misread as a dead posting — see the rediscover-fallback comment in
-// verifyOffers()). Unlike `added`, which recycles on the configured
-// recheck_after_days, expired/skipped_expired default to a much longer
-// cooldown so a genuinely dead posting isn't re-surfaced every scan — but it
-// is NOT permanent. 45 days is a judgment call: long enough that a real
-// closure doesn't nag, short enough that a misclassification self-heals well
-// within a job search's timeline.
-const EXPIRED_STATUSES = new Set(['expired', 'skipped_expired']);
-const EXPIRED_RECHECK_AFTER_DAYS = 45;
 
 function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
@@ -1566,16 +1569,11 @@ function daysBetweenIsoDates(start, end) {
 // explicitly; only the default moves.
 export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { recheckAfterDays = null, today = localToday() } = {}) {
   if (PERMANENT_SCAN_HISTORY_STATUSES.has(status)) return true;
+  if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) return false;
   if (status.startsWith('cooldown:')) {
     const parts = status.split(':');
     const cooldownUntil = parts[parts.length - 1];
     return today < cooldownUntil;
-  }
-  if (EXPIRED_STATUSES.has(status)) {
-    const ageDays = daysBetweenIsoDates(firstSeen, today);
-    if (ageDays == null) return true;
-    // A configured recheck_after_days wins; the 45-day default only applies without one.
-    return ageDays < (recheckAfterDays ?? EXPIRED_RECHECK_AFTER_DAYS);
   }
   if (!RECHECKABLE_SCAN_HISTORY_STATUSES.has(status)) return true;
   if (recheckAfterDays == null) return true;
@@ -1636,17 +1634,76 @@ export function resolveDedupIncludeLanguage(config = {}) {
   return config.scan_history?.dedup_include_language === true;
 }
 
-// Query params naming the language a page renders in. Stripped from the dedup
-// key like the rest of DEDUP_STRIP_PARAMS, and read back by
-// languageFormsFromUrl to tell a posting's language versions apart.
-const URL_LANGUAGE_PARAMS = ['language', 'lang', 'locale'];
+/**
+ * Read the top-level `preferred_languages` list: the languages the candidate
+ * wants a posting in, best first.
+ *
+ * Each entry is reduced the way posting languages are (languageFormsForDedup),
+ * so `en-GB` and `en` name one language. A single string counts as a one-entry
+ * list; anything that is not a non-empty string is skipped, and a repeated
+ * language keeps its first place.
+ *
+ * @param {object} [config] - Parsed portals.yml.
+ * @returns {string[]} Language forms, best first; empty when unset.
+ */
+export function resolvePreferredLanguages(config = {}) {
+  const raw = config.preferred_languages;
+  const list = typeof raw === 'string' ? [raw] : Array.isArray(raw) ? raw : [];
+  return [...new Set(list.flatMap(entry => languageFormsForDedup(entry)))];
+}
+
+/**
+ * Rank a posting language against the preferred list: its place in the list,
+ * or -1 when it is not there or unknown.
+ *
+ * Handed to providers as `ctx.preferredLanguageRank`, so a provider compares
+ * its own codes by the same rules without its own copy of them.
+ *
+ * @param {string[]} preferred - From resolvePreferredLanguages.
+ * @returns {(language: unknown) => number}
+ */
+export function preferredLanguageRanker(preferred) {
+  return (language) => {
+    const [form] = languageFormsForDedup(language);
+    return form === undefined ? -1 : preferred.indexOf(form);
+  };
+}
+
+/**
+ * Order one provider's jobs so that postings in a preferred language come
+ * first, best language first; the rest keep the provider's order.
+ *
+ * The sort is stable. Where several language versions of one posting come
+ * back, the dedup below keeps the first one it meets when dedup_include_language
+ * is off, so this is what makes it keep the preferred version; when it is on,
+ * every version is kept, in this order. The provider's own order — each
+ * posting's default language first — is what the language-aware URL dedup
+ * resolves seen rows against, so siblingsByUrl is built from the unsorted list.
+ *
+ * @template {{language?: unknown}} T
+ * @param {T[]} jobs
+ * @param {(language: unknown) => number} rank - From preferredLanguageRanker.
+ * @returns {T[]} A new array; `jobs` is left as it was.
+ */
+export function orderByPreferredLanguage(jobs, rank) {
+  const keyOf = (job) => {
+    const r = rank(job?.language);
+    return r < 0 ? Number.POSITIVE_INFINITY : r;
+  };
+  return jobs
+    .map((job, index) => ({ job, index, key: keyOf(job) }))
+    .sort((a, b) => a.key - b.key || a.index - b.index)
+    .map(({ job }) => job);
+}
 
 // Query params that carry no identity information for a job posting — safe to
 // strip when computing the dedup key. Deliberately an allowlist rather than
 // "strip everything": several ATSes key the posting off a query param (e.g.
 // Greenhouse's `gh_jid`), so a blanket strip would collapse distinct roles.
 const DEDUP_STRIP_PARAMS = new Set([
-  ...URL_LANGUAGE_PARAMS,
+  // The language a page renders in: the language versions of one posting
+  // share a key, and languageFormsFromUrl reads the param back to tell them apart.
+  ...LANGUAGE_PARAMS,
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
   'ref', 'src', 'source', 'gh_src', 'lever-origin', 'lever-source',
   'rltr', // StepStone: regenerated per request, so one posting returns as new every scan
@@ -1719,7 +1776,7 @@ export function languageFormsFromUrl(url) {
     return [];
   }
   for (const [name, value] of parsed.searchParams) {
-    if (URL_LANGUAGE_PARAMS.includes(name.toLowerCase())) return languageFormsForDedup(value);
+    if (LANGUAGE_PARAMS.includes(name.toLowerCase())) return languageFormsForDedup(value);
   }
   return [];
 }
@@ -1965,9 +2022,9 @@ function extractPipelineCompanyRole(line) {
 }
 
 /**
- * Derive the seen-URL set from the TEXT of the three dedup sources (#2382).
- * Pure: takes contents, reads nothing. loadSeenUrls is the filesystem wrapper,
- * and loadDedupSnapshot reuses this over a single read of each file.
+ * Build the seen-URL set from already-read source texts. An absent file is
+ * passed as '' (the readIfExists convention shared with
+ * `collectSeenCompanyRoles`) — every parse below yields nothing on ''.
  *
  * `extraTokensFor(url, portal)` (optional) lets a caller add provider-scoped
  * dedup tokens alongside the plain normalized-URL one — e.g. a Workday
@@ -1998,17 +2055,15 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   };
 
   // scan-history.tsv
-  // Skip line 0 only when it is the header; a headerless legacy file starts with a data row.
-  const historyLines = scanHistoryText.split('\n');
-  if (historyLines[0].startsWith('url\t')) historyLines.shift();
-  for (const line of historyLines) {
+  // Line 0 only when it is the header; a headerless legacy file starts with a data row.
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     const { url, first_seen: firstSeen, portal, status: rawStatus, title, language, listing_key: listingKey } = parseScanHistoryLine(line);
     const status = rawStatus || 'added';
     if (!url) continue;
-    // Not pinned and not a recheck candidate either: the row records a config
-    // rejection, and the URL was never queued, so counting it as "eligible
-    // again" would overstate what the TTL released. See
-    // OBSERVATIONAL_SCAN_HISTORY_STATUSES.
+    // Not pinned, no listing identity, and not a recheck candidate either: the
+    // row records a config rejection or an inconclusive Apply-control check,
+    // and the URL was never queued, so counting it as "eligible again" would
+    // overstate what the TTL released. See OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       const urlToken = normalizeUrlForDedup(url);
@@ -2016,9 +2071,10 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       const recorded = languageFormsForDedup(language);
       recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
       // Only accepted or intentionally deferred posting rows can teach this
-      // scan a strong identity. Verification rejections such as expired or
-      // missing-apply-control URLs may pin that URL, but must not suppress a
-      // different live alias with the same provider identity.
+      // scan a strong identity. A verification rejection such as an expired
+      // URL may pin that URL, but must not suppress a different live alias
+      // with the same provider identity. (A missing Apply control never gets
+      // here: its row is observational and pins nothing, see above.)
       const identityMayPromote = status === 'added' || status.startsWith('cooldown:');
       if (identityMayPromote) addIdentityPromotableUrl(urlToken, listingKey);
       if (extraTokensFor && identityMayPromote) {
@@ -2106,7 +2162,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   return { seen, recheckEligible, identityPromotableUrls, variants };
 }
 
-// Path options mirror appendToPipeline's seam below: the defaults are the
+// Path options mirror mergeIntoPipeline's seam below: the defaults are the
 // CAREER_OPS_ROOT-anchored module constants, and a caller with its own lane
 // (or a test with a fixture) passes explicit paths. Before CAREER_OPS_ROOT the
 // defaults were cwd-relative strings, so callers could retarget them by
@@ -2333,6 +2389,11 @@ function isRoleLocationSuffix(tag) {
   return false;
 }
 
+// "(m/w/d)", "(f/m/x)", "(H/F)", "(all genders)": the letter order differs by
+// board, and the tag never tells two roles apart. "h" (homme) only counts
+// next to "f": "(H/W)" is hardware, a discipline that does tell roles apart.
+const ROLE_GENDER_TAG_RE = /^(?:[mwfdx](?:\s*\/\s*(?:[mwfdx]|div|divers)){1,3}|(?:h\s*\/\s*f|f\s*\/\s*h)(?:\s*\/\s*[xd])?|all genders?)$/;
+
 /**
  * Normalize a role title for stable scan-time duplicate identity.
  *
@@ -2367,7 +2428,7 @@ export function normalizeRoleForDedup(role) {
   while (true) {
     // Bracketed: "Engineering Manager (Remote)", "… [US]".
     const bracketed = title.match(/\s*[\[(]([^[\]()]+)[\])]\s*$/);
-    if (bracketed && isRoleLocationSuffix(bracketed[1])) {
+    if (bracketed && (isRoleLocationSuffix(bracketed[1]) || ROLE_GENDER_TAG_RE.test(bracketed[1].trim()))) {
       title = title.slice(0, bracketed.index).trimEnd();
       continue;
     }
@@ -2621,31 +2682,16 @@ export function isDistinctRequisition(seededRequisitions, candidateRequisitions)
 }
 
 /**
- * The posting language as dedup forms, or none when the source did not say.
- *
- * A value that parses as a language tag (`_` read as `-`) is reduced by
- * `Intl.Locale` to its canonical language subtag: the region and script go
- * (`en-GB`, `en_GLOBAL`, `zh-Hant-TW` → `en`, `en`, `zh`) — regional variants of
- * one language are the same text for any reader — and legacy or three-letter
- * codes map to the current two-letter one (`deu` → `de`, `iw` → `he`). Anything
- * that doesn't parse, such as `English (US)`, is compared whole, case-folded; a
- * name like `German` parses as a (non-standard) tag and comes back lowercased.
- * The two postings being compared come from one employer, and almost always
- * one provider, so the value only has to be consistent within a source, not
- * standard across sources.
+ * The posting language as dedup forms, or none when the source did not say:
+ * the one form languageSubtag (url-key.mjs) reduces it to, shared with the
+ * tracker's URL comparison.
  *
  * @param {unknown} language - `Job.language`, or a scan-history `language` cell.
  * @returns {string[]} Zero or one form.
  */
 export function languageFormsForDedup(language) {
-  if (typeof language !== 'string') return [];
-  const value = language.trim();
-  if (!value) return [];
-  try {
-    return [new Intl.Locale(value.replace(/_/g, '-')).language];
-  } catch {
-    return [value.toLowerCase()];
-  }
+  const form = languageSubtag(language);
+  return form ? [form] : [];
 }
 
 /**
@@ -2854,7 +2900,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
   // and (trailing) requisition_id + language. This is the source that carries a
   // location for every scanned posting, and so the one that makes the opt-in key
   // discriminate between two cities of one role.
-  for (const line of scanHistoryText.split('\n').slice(1)) { // skip header
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     const row = parseScanHistoryLine(line);
     const status = row.status || 'added';
     if (!row.url) continue;
@@ -2897,7 +2943,7 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
  */
 export function collectPostingAttributes(scanHistoryText) {
   const attributes = new Map();
-  for (const line of scanHistoryText.split('\n').slice(1)) {
+  for (const line of scanHistoryDataLines(scanHistoryText)) {
     const row = parseScanHistoryLine(line);
     const requisitionId = row.requisition_id.trim();
     const language = row.language.trim();
@@ -2924,9 +2970,9 @@ function readIfExists(filePath) {
  *
  * The two leading positional parameters are unchanged, so existing callers keep
  * working. The extra sources are injectable via the trailing options object: the
- * module-level paths are relative to `DATA_ROOT`, so a test that passes only a
+ * module-level paths are relative to `process.cwd()`, so a test that passes only a
  * sandbox tracker would otherwise pick up the developer's real scan-history and
- * pipeline.
+ * pipeline (CI only avoids this because those files are gitignored).
  *
  * @param {string} [appsPath=APPLICATIONS_PATH] - Applications tracker path.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
@@ -2980,7 +3026,7 @@ export function sanitizeMarkdownField(value) {
     .replace(/\|/g, '/');
 }
 
-export function sanitizePipelineUrl(value) {
+function sanitizePipelineUrl(value) {
   return normalizeScanUrl(value)
     .replace(/[\\[\]]/g, char => MARKDOWN_ESCAPE_CHARS[char])
     .replace(/\|/g, '%7C');
@@ -3057,10 +3103,8 @@ export function formatPipelineOffer(offer) {
   // 1/3/4/5-column contract in modes/pipeline.md intact.
   const posted = postedAtIsoDate(offer.postedAt);
   if (posted) {
-    // Cosmetic only — does not affect dedup, filtering, or new_added.
-    // Only sources carrying postedAt (Greenhouse/Lever/Ashby/Workday-family)
-    // can ever earn this tag; CutShort, the highest-volume source, has no
-    // date field in its payload at all and never sorts above an undated row.
+    // Fork-only: a posting under 24h old is tagged [<24h]. Cosmetic; dedup,
+    // filtering and new_added are unaffected.
     const isFresh = typeof offer.postedAt === 'number' && (Date.now() - offer.postedAt) < DAY_MS;
     line = `${line} | posted: ${posted}${isFresh ? ' [<24h]' : ''}`;
   }
@@ -3083,7 +3127,6 @@ function postedAtIsoDate(postedAt) {
   if (typeof postedAt !== 'number' || !Number.isFinite(postedAt) || postedAt <= 0) return '';
   return new Date(postedAt).toISOString().slice(0, 10);
 }
-
 export function formatScanHistoryRow(offer, date, status = 'added') {
   const record = {
     url: normalizeScanUrl(offer.url),
@@ -3221,10 +3264,11 @@ export function migrateOfferToUrl(offer, url) {
 }
 
 /**
- * Read scan-history.tsv rows that carry a fingerprint, for the cross-listing
- * check. Older rows without the 8th column simply never match.
+ * Parse scan-history.tsv rows that carry a fingerprint, for the cross-listing
+ * check. Older rows without the 8th column simply never match. Takes the file
+ * text ('' for an absent file), like its `collect*` siblings.
  *
- * @param {string} [historyPath] - Override for tests.
+ * @param {string} [scanHistoryText] - Full scan-history.tsv contents.
  * @returns {Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}
  */
 export function collectFingerprintHistory(scanHistoryText = '') {
@@ -3269,15 +3313,14 @@ export function loadFingerprintHistory(historyPath = SCAN_HISTORY_PATH) {
  * (the previous re-read at the cross-listing step could not safely observe
  * them anyway — scan-history appends are not locked).
  *
- * Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
- * paths for a caller with its own lane or a test with a fixture.
- *
  * @param {{recheckAfterDays?: number|null, today?: string}} [policy] -
  *   Scan-history recheck policy, shared by the URL and company+role sets.
  * @param {(name: unknown) => string} [canonicalize=defaultCompanyNormalizer] -
  *   Company canonicalizer for the role keys.
  * @returns {{seen: Set<string>, recheckEligible: number, seenCompanyRoles: Set<string>, seenCompanyRoleBases: Set<string>, seenCompanyRoleRequisitions: Map<string, Set<string>>, locatedRequisitionsByBase: Map<string, Set<string>>, seenCompanyRoleLanguages: Map<string, Set<string>>, locatedLanguagesByBase: Map<string, Set<string>>, fingerprintHistory: Array<{url: string, dateStr: string, company: string, title: string, fingerprint: string}>}}
  */
+// Same path seam as loadSeenUrls/appendToPipeline: anchored defaults, explicit
+// paths for a caller with its own lane or a test with a fixture.
 export function loadDedupSnapshot(policy = {}, canonicalize = defaultCompanyNormalizer, {
   scanHistoryPath = SCAN_HISTORY_PATH,
   pipelinePath = PIPELINE_PATH,
@@ -3324,21 +3367,14 @@ Paste job URLs below as \`- [ ] {url}\` then run \`/career-ops pipeline\`.
 ## Processed
 `;
 
-// Current section names (English). Legacy Spanish names are checked as fallback
-// so existing pipeline.md files created before this change keep working.
-const PENDING_MARKERS = ['## Pending', '## Pendientes'];
-const PROCESSED_MARKERS = ['## Processed', '## Procesadas'];
-
-// Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, apify-search.mjs and
-// plugins.mjs — the four current callers — can never interleave their
-// read-modify-write and silently drop each other's offers. atomicWriteFile
-// already prevented a torn write; it cannot prevent a lost update.
-// Freshest first; undated offers (no postedAt) keep their original relative
-// order and sort after every dated offer — Array.prototype.sort is stable,
-// so a comparator that treats "no postedAt" as -Infinity achieves that
-// without a separate partition step. Cosmetic ordering only: dedup and
-// filtering already happened upstream, this only changes read order in
-// data/pipeline.md.
+// Locked (pipeline-lock.mjs) so scan.mjs, scan-ats-full.mjs, and plugins.mjs
+// (pipeline mode) — the three current callers — can never interleave their
+// read-modify-write and silently drop each other's offers.
+// Same seam as loadSeenUrls above: the default is the CAREER_OPS_ROOT-anchored
+// module constant; a caller with its own lane (or a fixture) passes the path.
+// Freshest first; undated offers (no postedAt) keep their relative order and sort
+// after every dated offer (Array.prototype.sort is stable). Cosmetic: dedup and
+// filtering already happened, this only changes read order in data/pipeline.md.
 export function sortOffersByPostedAtDesc(offers) {
   return [...offers].sort((a, b) => {
     const ap = typeof a.postedAt === 'number' ? a.postedAt : -Infinity;
@@ -3357,21 +3393,18 @@ export async function appendToPipeline(offers, { pipelinePath = PIPELINE_PATH } 
       ? readFileSync(pipelinePath, 'utf-8')
       : PIPELINE_SKELETON;
 
-    const marker = PENDING_MARKERS.find(m => text.includes(m)) ?? null;
-    const idx = marker !== null ? text.indexOf(marker) : -1;
+    const headings = [...text.matchAll(/^##[ \t].*$/gm)];
+    const pending = headings.find(h => sectionKind(h[0]) === 'pending');
 
-    if (idx === -1) {
+    if (!pending) {
       // No Pending section found — insert one before Processed (or at end)
-      const procIdx = PROCESSED_MARKERS.reduce((found, m) => {
-        const i = text.indexOf(m);
-        return (found === -1 || (i !== -1 && i < found)) ? i : found;
-      }, -1);
-      const insertAt = procIdx === -1 ? text.length : procIdx;
+      const processed = headings.find(h => sectionKind(h[0]) === 'processed');
+      const insertAt = processed ? processed.index : text.length;
       const block = `\n## Pending\n\n` + offers.map(formatPipelineOffer).join('\n') + '\n\n';
       text = text.slice(0, insertAt) + block + text.slice(insertAt);
     } else {
       // Find the end of existing Pending content (next ## or end)
-      const afterMarker = idx + marker.length;
+      const afterMarker = pending.index + pending[0].length;
       const nextSection = text.indexOf('\n## ', afterMarker);
       const insertAt = nextSection === -1 ? text.length : nextSection;
 
@@ -3412,7 +3445,7 @@ export async function appendToScanHistory(offers, date, status = 'added', { alre
 
     const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-    appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+    appendLedgerRows(SCAN_HISTORY_PATH, lines);
   };
 
   if (alreadyLocked) write();
@@ -3644,12 +3677,12 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
   if (!existsSync(filePath)) {
     atomicWriteFile(filePath, SCAN_RUNS_HEADER);
   } else {
-    const firstLine = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
-    if (firstLine !== SCAN_RUNS_HEADER) {
+    const onDisk = (readFileSync(filePath, 'utf-8').split('\n', 1)[0] || '') + '\n';
+    if (onDisk !== SCAN_RUNS_HEADER) {
       console.error(
-        `⚠️  scan-runs.tsv header is ${firstLine.trim().split('\t').length} columns but this build writes ` +
-        `${SCAN_RUNS_HEADER.trim().split('\t').length} — rows below the header are positionally offset. ` +
-        `Header-name consumers (stats.mjs) will misread them. Run: node stats.mjs --summary to see the drift report.`,
+        `Warning: ${filePath} header has ${onDisk.trim().split('\t').length} columns but this build writes `
+        + `${SCAN_RUNS_HEADER.trim().split('\t').length}. Rows below the header are positionally offset and `
+        + `stats.mjs will exclude them. Move ${filePath} aside to start a fresh file — deleting only the header does NOT recover it, because the file still exists and the next run would read the first data row as the header.`,
       );
     }
   }
@@ -3665,10 +3698,10 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
     c.filteredVisa ?? 0,
     // filtered_posted_date appended at the END for the same reason.
     c.filteredPostedDate ?? 0,
-    // filtered_country_eligibility appended at the END for the same reason.
+    // filtered_country_eligibility (#2093) appended at the END for the same reason.
     c.filteredCountryEligibility ?? 0,
   ].join('\t') + '\n';
-  appendFileSync(filePath, row, 'utf-8');
+  appendLedgerRows(filePath, row);
 }
 
 // ── Portal health persistence (#1744) ───────────────────────────────
@@ -3698,7 +3731,7 @@ export async function appendPortalHealth(healthRecords, filePath = PORTAL_HEALTH
     for (const r of healthRecords) {
       lines += [r.timestamp, r.company, r.status].join('\t') + '\n';
     }
-    if (lines) appendFileSync(filePath, lines, 'utf-8');
+    if (lines) appendLedgerRows(filePath, lines);
   });
 }
 
@@ -3710,21 +3743,20 @@ export function loadPortalHealth(filePath = PORTAL_HEALTH_PATH) {
     const line = lines[i].trim();
     if (!line) continue;
     const parts = line.split('\t');
-    if (parts.length >= 3) records.push({ timestamp: parts[0], company: parts[1], status: parts[2] });
+    if (parts.length >= 3) {
+      records.push({ timestamp: parts[0], company: parts[1], status: parts[2] });
+    }
   }
   return records;
 }
 
-// Consecutive slug_gone/network streak per company; reset by any
-// reachable/empty result. Mirrors stats.mjs's computePortalStats — duplicated
-// there (not imported) so stats.mjs stays a pure reader with no dependency on
-// the scanner's write path.
 export function computeConsecutiveFailures(healthRecords) {
   const streaks = new Map();
   for (const r of healthRecords) {
-    // Healthy statuses reset the streak; every other status counts toward it
-    // (so newer error kinds can't fall outside it). 'empty' is healthy: a live
-    // board with 0 jobs is reachable.
+    // Healthy statuses reset the streak; every other status counts toward it.
+    // Inverted (vs. listing failure statuses) so the newer error kinds
+    // (auth/server/unknown) can't silently fall outside the streak again.
+    // 'empty' is deliberately healthy: a live board with 0 jobs is reachable.
     if (r.status === 'reachable' || r.status === 'empty') {
       streaks.set(r.company, 0);
     } else {
@@ -3743,7 +3775,7 @@ export function emptyTargetStatus(observation) {
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
-async function parallelFetch(tasks, limit) {
+async function parallelFetch(tasks, limit, onDone = () => {}) {
   const results = [];
   let i = 0;
 
@@ -3751,12 +3783,24 @@ async function parallelFetch(tasks, limit) {
     while (i < tasks.length) {
       const task = tasks[i++];
       results.push(await task());
+      onDone();
     }
   }
 
   const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
   await Promise.all(workers);
   return results;
+}
+
+// stderr, so it shows under --quiet and never mixes into the --json receipt.
+export function progressTicker(total, { every = PROGRESS_EVERY, write = (line) => process.stderr.write(line), now = () => new Date() } = {}) {
+  let done = 0;
+  return () => {
+    done++;
+    if (done % every === 0 || done === total) {
+      write(`[${now().toTimeString().slice(0, 8)}] scan: ${done}/${total} sources done\n`);
+    }
+  };
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -3770,6 +3814,7 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
   const {
     rejectPrivateOrInvalid, checkUrlLiveness, checkUrlLivenessWithFallback,
     createHeadedPageProvider, newLivenessPage, installLivenessRouteGuard, jitteredDelayMs, sleep,
+    takeSuppressedBlockCount,
   } = await import('./liveness-browser.mjs');
 
   // The HTTP rung can run concurrently; each provider retains its own rate
@@ -3826,12 +3871,14 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
     ? checkUrlLivenessWithFallback(page, url, { getHeadedPage: () => headed.get() })
     : checkUrlLiveness(page, url);
 
-  // Three permanent buckets + one transient passthrough:
+  // Two permanent buckets, one observational, one transient passthrough:
   //   verified  → active pages and transient nav errors (retry next scan)
   //   expired   → classifier-confirmed dead postings (HTTP 4xx, redirect markers,
   //               body patterns, listing pages, insufficient content)
   //   dropped   → page loaded but classifier saw no Apply control. --verify is an
-  //               opt-in stricter filter; keeping these defeats the purpose.
+  //               opt-in stricter filter; keeping these defeats the purpose. Not
+  //               proof the posting is closed, so the row never pins the URL and
+  //               the next --verify scan loads the page again (#4832).
   //   invalid   → up-front URL guard rejections (malformed / non-http / private)
   const verified = [];
   const verificationStatusByOffer = new Map();
@@ -3888,9 +3935,11 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
         invalid.push({ ...offer, code, reason });
         console.log(`  ⛔ invalid   ${offer.company} | ${offer.title} (${reason})`);
       } else if (result === 'uncertain' && code === 'no_apply_control') {
-        // Page loaded but classifier could not find an Apply control. Treat like
-        // expired for routing — drop from pipeline AND record in scan-history so
-        // we don't burn a verify cycle on the same URL next scan.
+        // Page loaded but classifier could not find an Apply control. Drop from
+        // pipeline and record in scan-history for visibility only: the row does
+        // not pin the URL (OBSERVATIONAL_SCAN_HISTORY_STATUSES), so the next
+        // --verify scan checks it again rather than losing a live posting whose
+        // button the classifier does not recognise (#4832).
         dropped.push({ ...offer, reason });
         console.log(`  ⚠️ no-apply  ${offer.company} | ${offer.title} (${reason})`);
       } else {
@@ -3908,6 +3957,9 @@ export async function verifyOffers(offers, { headedFallback = false, throttleBas
       if (browser) await browser.close();
     }
   }
+  // The route guard counts, rather than logs, subresources a DNS filter blocks.
+  const quietBlocks = typeof takeSuppressedBlockCount === 'function' ? takeSuppressedBlockCount() : 0;
+  if (quietBlocks) console.warn(`--verify: ${quietBlocks} tracker/analytics requests skipped (no usable address, e.g. a DNS ad-blocker); not counted against any posting`);
 
   return { verified, expired, dropped, invalid, migrated, verificationStatusByOffer };
 }
@@ -3934,10 +3986,6 @@ const KNOWN_FLAGS = [
   '--dry-run', '--verify', '--headed-fallback', '--throttle', '--rediscover-404',
   '--include-blacklisted', '--company', '--posted-after', '--posted-before',
   '--since', '--quiet', '--json', '--help', '-h',
-  // Fork-only flags (not part of upstream's KNOWN_FLAGS list) — kept here so
-  // this fork's own capabilities don't get rejected as "unrecognized" now that
-  // every flag has to be named to pass validateFlags.
-  '--agent-handoff', '--apify', '--doctor',
 ];
 
 // Flags whose space-separated value is the NEXT argv token (the `--flag=value`
@@ -3959,12 +4007,12 @@ const USAGE = `Usage:
   node scan.mjs --since 7                    # postings from the last 7 days
   node scan.mjs --posted-after 2026-07-01    # absolute lower bound on posting date
   node scan.mjs --posted-before 2026-08-01   # absolute upper bound on posting date
-  node scan.mjs --agent-handoff              # probe Greenhouse/Ashby/Lever slugs for scan_method:websearch companies
-  node scan.mjs --apify                      # after the zero-token scan, also run a paid broad search (costs money)
-  node scan.mjs --doctor                     # read-only health sweep, never touches pipeline.md/scan-history.tsv
   node scan.mjs --json                       # emit one machine-readable receipt on stdout
   node scan.mjs --quiet                      # suppress the manifesto footer
-  node scan.mjs --help                       # print this usage block and exit`;
+  node scan.mjs --help                       # print this usage block and exit
+
+Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when
+every target it tried failed (with --json: when any target failed).`;
 
 async function main() {
   const args = process.argv.slice(2);
@@ -3988,22 +4036,6 @@ async function main() {
   // --include-blacklisted: bypass the data/blacklist.md filter for auditing.
   // Matching postings flow through annotated instead of being counted out.
   const includeBlacklisted = args.includes('--include-blacklisted');
-  // --agent-handoff: for each scan_method:websearch company, probe Greenhouse/
-  // Ashby/Lever slug candidates the SAME way `verify-portals.mjs --add` does,
-  // instead of only printing an inert console list. Opt-in — this makes extra
-  // network calls beyond the normal zero-token scan, so it doesn't run by
-  // default on every routine scan.
-  const agentHandoffProbe = args.includes('--agent-handoff');
-  // --apify: after the normal zero-token scan completes, run a broad,
-  // query-driven search across LinkedIn/Indeed/Glassdoor/Wellfound via paid
-  // Apify actors (see apify-search.mjs). Opt-in and OFF by default — it costs
-  // real money per run, unlike every zero-token provider in this file.
-  const runApifySearch = args.includes('--apify');
-  // --doctor: read-only health sweep. Reuses verify-portals.mjs's probing
-  // (ATS slug probes tier + provider-layer probes tier) instead of a full
-  // scan-and-persist run — no pipeline.md/scan-history.tsv writes, no dry-run
-  // flag needed. Short-circuits main() right after providers/portals load.
-  const doctor = args.includes('--doctor');
   // flagValue reads both `--flag value` and `--flag=value`; a bare indexOf misses
   // the second form entirely and silently falls back to the unfiltered default.
   //
@@ -4076,33 +4108,6 @@ async function main() {
     process.exit(1);
   }
 
-  // --doctor: stop here. Read-only health sweep via verify-portals.mjs's own
-  // sweep function (ATS slug probes + provider-layer probes) — same report as
-  // `node verify-portals.mjs`, just invokable from scan.mjs. No portals.yml
-  // parsing/target-resolution/scan-and-persist below this point.
-  if (doctor) {
-    const httpCtx = makeHttpCtx();
-    const { found, results } = await verifyPortalsFile(PORTALS_PATH, { providers, httpCtx });
-    if (!found) {
-      console.log(`scan --doctor: no portals file at ${PORTALS_PATH} — nothing to verify (run onboarding first).`);
-      return;
-    }
-    console.log(`scan --doctor: ${PORTALS_PATH}\n`);
-    const live = results.filter((r) => r.status === 'live').length;
-    const empty = results.filter((r) => r.status === 'empty').length;
-    const missing = results.filter((r) => r.status === 'missing');
-    const skipped = results.filter((r) => r.status === 'skipped').length;
-    for (const r of results) {
-      const icon = { live: '✅', empty: '🟡', missing: '❌', skipped: '➖' }[r.status] || '?';
-      const source = r.ats ? `${r.ats}/${r.slug}` : (r.provider || '?');
-      const detail = r.status === 'missing' ? `${source} — ${r.reason || 'unresolved'}` : source;
-      console.log(`  ${icon} ${r.name} — ${detail}`);
-    }
-    console.log(`\n${live} live, ${empty} live-but-empty, ${missing.length} unresolved, ${skipped} no-provider (skipped)`);
-    if (missing.length > 0) process.exitCode = 1;
-    return;
-  }
-
   // 2. Read portals.yml
   if (!existsSync(PORTALS_PATH)) {
     console.error('Error: portals.yml not found. Run onboarding first.');
@@ -4123,13 +4128,12 @@ async function main() {
 
   // Seniority tier classifier integration
   let classifyTier = null;
-  const skipTiers = Array.isArray(config.skip_tiers)
-    ? config.skip_tiers.filter(t => typeof t === 'string').map(t => t.toLowerCase())
-    : [];
-  if (skipTiers.length > 0) {
-    const mod = await import('./classify-tier.mjs');
-    classifyTier = mod.classifyTier || mod.default;
-  }
+  const TIERS = ['intern', 'entry', 'mid', 'senior'];
+  const tierList = list => list.filter(t => typeof t === 'string').map(t => t.toLowerCase());
+  const skipTiers = Array.isArray(config.skip_tiers) ? tierList(config.skip_tiers) : [];
+  // #5778. An entry's own skip_tiers replaces the global list for that entry;
+  // [] turns the tier filter off there.
+  const entrySkipTiers = entry => (Array.isArray(entry.skip_tiers) ? tierList(entry.skip_tiers) : skipTiers);
 
   const locationFilter = buildLocationFilter(config.location_filter);
   const postingAgeFilter = buildPostingAgeFilter(config.max_posting_age_days);
@@ -4168,7 +4172,7 @@ async function main() {
         continue;
       }
       if (filterCompany && !entry.name.toLowerCase().includes(filterCompany)) continue;
-      
+
       const resolved = resolveProvider(entry, providers);
       if (!resolved) {
         skippedCount++;
@@ -4177,15 +4181,14 @@ async function main() {
             company: entry.name,
             method: 'websearch',
             query: entry.scan_query || entry.search_query || entry.careers_url || '',
-            careersUrl: entry.careers_url || '',
           });
         }
         continue;
       }
-      
-      if (resolved.error) { 
-        resolveErrors.push({ company: entry.name, error: resolved.error }); 
-        continue; 
+
+      if (resolved.error) {
+        resolveErrors.push({ company: entry.name, error: resolved.error });
+        continue;
       }
 
       targets.push({ ...entry, _provider: resolved.provider, _isBoard: isBoard, _targetId: targets.length });
@@ -4266,6 +4269,16 @@ async function main() {
         exitOnConfigError(`${target.name}: filter_on "${field}" has no field_filters.${field} block in portals.yml`);
       }
     }
+    if (target.skip_tiers !== undefined
+      && (!Array.isArray(target.skip_tiers)
+        || target.skip_tiers.some(t => typeof t !== 'string' || !TIERS.includes(t.toLowerCase())))) {
+      exitOnConfigError(`${target.name}: skip_tiers must be a list of ${TIERS.join(', ')}, or [] to turn the tier filter off`);
+    }
+  }
+  const tierFilterActive = skipTiers.length > 0 || targets.some(t => entrySkipTiers(t).length > 0);
+  if (tierFilterActive) {
+    const mod = await import('./classify-tier.mjs');
+    classifyTier = mod.classifyTier || mod.default;
   }
 
   const localParserCount = targets.filter(t => t._provider.id === 'local-parser').length;
@@ -4282,15 +4295,13 @@ async function main() {
   const blacklist = loadBlacklist();
 
   // 4. Load dedup sets — one read per source file for the whole run (#2382).
-  // The URL set, the company+role set and the fingerprint history all come off
-  // a single parse of scan-history.tsv / pipeline.md / applications.md instead
-  // of nine; at 50k history rows that is ~600 ms of redundant parsing per run.
   const historyPolicy = scanHistoryPolicy(config);
   const canonicalizeCompany = buildCompanyCanonicalizer(config.company_aliases);
   const dedupIncludeLocation = resolveDedupIncludeLocation(config);
   const dedupIncludeLanguage = resolveDedupIncludeLanguage(config);
+  const preferredLanguages = resolvePreferredLanguages(config);
+  const preferredLanguageRank = preferredLanguages.length ? preferredLanguageRanker(preferredLanguages) : null;
   const dedupSnapshot = loadDedupSnapshot(historyPolicy, canonicalizeCompany, { includeLocation: dedupIncludeLocation });
-  const seenUrlState = dedupSnapshot;
   const seenUrls = dedupSnapshot.seen;
   const seenUrlVariants = dedupSnapshot.seenUrlVariants ?? new Map();
   const seenCompanyRoles = dedupSnapshot.seenCompanyRoles;
@@ -4311,8 +4322,9 @@ async function main() {
   let totalFilteredCooldown = 0;
   const cooldownOffers = [];
   // Config-rejected offers, kept so the scan-history row can say what the
-  // summary counter only counts. Both lists stay empty under --dry-run, the
-  // same as every other history write below.
+  // summary counter only counts. All three lists stay empty under --dry-run,
+  // the same as every other history write below.
+  const titleFilteredOffers = [];
   const locationFilteredOffers = [];
   const ageFilteredOffers = [];
   let totalFound = 0;
@@ -4339,8 +4351,40 @@ async function main() {
   const newOffers = [];
   const verifyDedupKeys = new Map();
   const errors = [...resolveErrors];
+  // Targets whose fetch threw. Not errors.length: that also holds resolve
+  // errors and a local parser rescued by its API fallback, which succeeded.
+  let failedTargets = 0;
   const emptyTargets = [];
   const unverifiedZeroTargets = [];
+
+  // Arm the failure-path row (#2643) now that the sweep is about to start and
+  // every counter it reads is in scope. new_added is hardcoded 0 on a failed
+  // run even if the sweep added postings before dying (the count isn't settled
+  // mid-sweep). Excluded from trend averages so it can't skew them, but a
+  // raw-TSV reader should treat that 0 as a sentinel, not a true count.
+  if (!dryRun) {
+    registerRunFailureSnapshot(() => ({
+      timestamp: new Date().toISOString(),
+      companies: targets.filter(t => !t._isBoard).length,
+      boards: targets.filter(t => t._isBoard).length,
+      found: totalFound, filteredTitle: totalFilteredTitle, filteredTier: totalFilteredTier,
+      filteredLocation: totalFilteredLocation, filteredPostingAge: totalFilteredPostingAge,
+      filteredSalary: totalFilteredSalary, filteredContent: totalFilteredContent,
+      filteredCooldown: totalFilteredCooldown, dupes: totalDupes, newAdded: 0,
+      errors: errors.length, filteredBlacklist: totalFilteredBlacklist,
+      filteredVisa: totalFilteredVisa, filteredPostedDate: totalFilteredPostedDate,
+      filteredCountryEligibility: totalFilteredCountryEligibility,
+    }));
+    // Ctrl-C mid-sweep is the common abort. Best effort: record, then die
+    // with the conventional SIGINT code.
+    process.once('SIGINT', () => {
+      writeRunFailureRow('failed');
+      process.exit(130);
+    });
+  }
+
+  // Values providers resolve once and reuse on later scans (provider-id-cache.mjs).
+  const idCaches = openProviderIdCache(path.join(DATA_ROOT, PROVIDER_ID_CACHE_DIR));
 
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
@@ -4373,6 +4417,15 @@ async function main() {
       // A provider that serves extra language versions of a posting at extra
       // cost fetches them only when the scan will keep them.
       dedupIncludeLanguage,
+      // Present only when portals.yml sets preferred_languages: a provider that
+      // returns language versions selectively also returns the preferred ones.
+      ...(preferredLanguageRank ? { preferredLanguageRank } : {}),
+      // This scan's own title decision, for a provider that pays extra per
+      // posting (Workday's multi-location detail GETs) and can skip postings
+      // the title filter below will drop. Absent when this company's filter_on
+      // leaves the title out, since then no title is dropped.
+      ...(normalizeFilterOn(company.filter_on).includes('title') ? { titleWanted: (title) => titleFilter(title) } : {}),
+      idCache: idCaches.forProvider(provider.id),
     };
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     try {
@@ -4385,6 +4438,7 @@ async function main() {
         if (!fallback || fallback.error) throw parserErr;
         provider = fallback.provider;
         sourceName = `${provider.id}-api`;
+        ctx.idCache = idCaches.forProvider(provider.id);
         jobs = await provider.fetch(company, ctx);
         errors.push({
           company: company.name,
@@ -4416,7 +4470,9 @@ async function main() {
       }
 
       const declaredFields = normalizeFilterOn(company.filter_on);
-      for (const job of jobs) {
+      const companySkipTiers = entrySkipTiers(company);
+      const orderedJobs = preferredLanguageRank ? orderByPreferredLanguage(jobs, preferredLanguageRank) : jobs;
+      for (const job of orderedJobs) {
         const listingToken = refreshListingKey(job);
         // #3438. Presence accounting only — no verdict, no rejection. It runs
         // before every filter below, including the blacklist skip, because it
@@ -4474,6 +4530,7 @@ async function main() {
         }
         if (failedField === 'title') {
           totalFilteredTitle++;
+          if (!dryRun) titleFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (failedField !== null) {
@@ -4481,7 +4538,7 @@ async function main() {
           continue;
         }
         if (sawAbsentField) totalPassedFieldAbsent++;
-        if (classifyTier && skipTiers.includes(classifyTier(job.title))) {
+        if (classifyTier && companySkipTiers.includes(classifyTier(job.title))) {
           totalFilteredTier++;
           continue;
         }
@@ -4541,7 +4598,15 @@ async function main() {
         // the prebuilt aggregate of located rows. An unknown ID keeps the
         // historical duplicate decision. Aggregators use URL dedup only.
         const baseKey = companyRoleDedupKey(job.company, job.title, canonicalizeCompany);
-        const key = company.aggregator === true
+        // No employer, no company+role identity. A board that cannot name a
+        // posting's employer returns `company: ''` (providers/_types.js allows
+        // it; builtin, platsbanken, justjoin and vdab do it), and `::{title}`
+        // then stood for every unnamed employer at once: a second "Senior
+        // Software Engineer" from a different company was dropped as a
+        // duplicate of the first. Seeding already skips such rows
+        // (collectSeenCompanyRoles), so they dedup by URL only, as an
+        // aggregator's do.
+        const key = company.aggregator === true || !canonicalizeCompany(job.company)
           ? null
           : (dedupIncludeLocation
             ? companyRoleDedupKey(job.company, job.title, canonicalizeCompany, job.location)
@@ -4599,6 +4664,7 @@ async function main() {
         });
       }
     } catch (err) {
+      failedTargets++;
       errors.push({
         company: company.name,
         error: err.message,
@@ -4608,7 +4674,16 @@ async function main() {
     }
   });
 
-  await parallelFetch(tasks, CONCURRENCY);
+  await parallelFetch(tasks, CONCURRENCY, progressTicker(tasks.length));
+  // --dry-run leaves no trace, this cache included.
+  if (!dryRun) {
+    try {
+      await idCaches.save();
+    } catch (err) {
+      // Losing the cache costs a lookup on the next scan, not this scan's results.
+      console.warn(`⚠️  could not save the provider id cache: ${err.message}`);
+    }
+  }
 
   // 5.5. Optional liveness verification — drop expired and guard-rejected postings
   let verifiedOffers = newOffers;
@@ -4683,6 +4758,9 @@ async function main() {
   for (const offer of verifiedOffers) {
     offer.fingerprint = fingerprintText(offer.description);
   }
+  // History rows come from the run-start snapshot: nothing has appended to
+  // scan-history.tsv yet at this point in the run (all writes happen below),
+  // so this sees the same bytes a re-read would — minus the third full parse.
   const crossListings = findCrossListings(verifiedOffers, dedupSnapshot.fingerprintHistory);
 
   // 6. Write results
@@ -4711,23 +4789,30 @@ async function main() {
   if (!dryRun && expiredForHistory.length > 0) {
     await appendToScanHistory(expiredForHistory, date, 'skipped_expired');
   }
-  // Offers the location and posting-age cuts removed: recorded for visibility,
-  // never added to pipeline.md. Both are OBSERVATIONAL_SCAN_HISTORY_STATUSES,
-  // so the rows carry no dedup weight — the threshold that rejected them is one
-  // the user edits, and a row written under the old threshold must not suppress
-  // the same posting once it moves.
-  // Each posting is recorded once per status, not once per scan.
-  if (!dryRun && (locationFilteredOffers.length > 0 || ageFilteredOffers.length > 0)) {
+  // Offers the title, location and posting-age cuts removed: recorded for
+  // visibility, never added to pipeline.md. All three are
+  // OBSERVATIONAL_SCAN_HISTORY_STATUSES, so the rows carry no dedup weight —
+  // the setting that rejected them is one the user edits, and a row written
+  // under the old setting must not suppress the same posting once it moves.
+  // Each posting is recorded once per status, not once per scan, so the file
+  // grows with new postings rather than with scans (#2695).
+  if (!dryRun && (titleFilteredOffers.length > 0 || locationFilteredOffers.length > 0 || ageFilteredOffers.length > 0)) {
     const historyText = readIfExists(SCAN_HISTORY_PATH);
+    const newTitleRows = unrecordedOffers(titleFilteredOffers, 'skipped_title', historyText);
     const newLocationRows = unrecordedOffers(locationFilteredOffers, 'skipped_location', historyText);
     const newAgeRows = unrecordedOffers(ageFilteredOffers, 'skipped_age', historyText);
+    if (newTitleRows.length > 0) await appendToScanHistory(newTitleRows, date, 'skipped_title');
     if (newLocationRows.length > 0) await appendToScanHistory(newLocationRows, date, 'skipped_location');
     if (newAgeRows.length > 0) await appendToScanHistory(newAgeRows, date, 'skipped_age');
   }
-  // Pages that loaded but had no Apply control: record so we don't re-verify
-  // them next scan, but never let them reach pipeline.md.
+  // Pages that loaded but had no Apply control: recorded for visibility and
+  // never added to pipeline.md. The row carries no dedup weight
+  // (OBSERVATIONAL_SCAN_HISTORY_STATUSES), because "no visible Apply control"
+  // is not proof the posting is closed; the next scan verifies it again.
+  // Each posting is recorded once, not once per scan.
   if (!dryRun && droppedOffers.length > 0) {
-    await appendToScanHistory(droppedOffers, date, 'skipped_no_apply_control');
+    const newDroppedRows = unrecordedOffers(droppedOffers, 'skipped_no_apply_control', readIfExists(SCAN_HISTORY_PATH));
+    if (newDroppedRows.length > 0) await appendToScanHistory(newDroppedRows, date, 'skipped_no_apply_control');
   }
   // Guard-rejected URLs (invalid / unsupported protocol / blocked host) are
   // recorded with a precise status so subsequent scans dedup-skip them via
@@ -4759,10 +4844,12 @@ async function main() {
     console.log(`Filtered by field:     ${totalFilteredDeclaredField} removed`);
     console.log(`Passed, field absent:  ${totalPassedFieldAbsent} ungated`);
   }
-  if (skipTiers.length > 0) {
+  if (tierFilterActive) {
     console.log(`Filtered by tier:      ${totalFilteredTier} removed`);
   }
-  console.log(`Filtered by location:  ${totalFilteredLocation} removed`);
+  if (config.location_filter || totalFilteredLocation > 0) {
+    console.log(`Filtered by location:  ${totalFilteredLocation} removed`);
+  }
   if (config.max_posting_age_days != null || totalFilteredPostingAge > 0) {
     console.log(`Filtered by age:       ${totalFilteredPostingAge} removed`);
   }
@@ -4776,6 +4863,9 @@ async function main() {
   }
   if (config.content_filter || totalFilteredContent > 0) {
     console.log(`Filtered by content:   ${totalFilteredContent} removed`);
+  }
+  if (config.country_eligibility_filter || totalFilteredCountryEligibility > 0) {
+    console.log(`Filtered by country eligibility: ${totalFilteredCountryEligibility} removed`);
   }
   if (visaEnabled) {
     console.log(`Filtered by visa:      ${totalFilteredVisa} removed`);
@@ -4799,7 +4889,7 @@ async function main() {
       console.log(`    ${offer.url}`);
       console.log(`    vs ${row.url}`);
     }
-    console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both.`);
+    console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both (#1596).`);
   }
   const aggregatorMap = loadAggregatorDomains();
   if (aggregatorMap.size > 0 && verifiedOffers.length > 0) {
@@ -4843,7 +4933,7 @@ async function main() {
     console.log(`  Check the field name and whether the provider supplies it.`);
   }
   if (historyPolicy.recheckAfterDays != null) {
-    console.log(`Recheck eligible:      ${seenUrlState.recheckEligible} old scan-history URL(s)`);
+    console.log(`Recheck eligible:      ${dedupSnapshot.recheckEligible} old scan-history URL(s)`);
   }
   if (verify) {
     console.log(`Expired (verified):    ${expiredOffers.length} dropped`);
@@ -4881,40 +4971,6 @@ async function main() {
     }
     if (agentHandoff.length > 25) {
       console.log(`  … ${agentHandoff.length - 25} more omitted; narrow with --company or inspect portals.yml`);
-    }
-
-    if (agentHandoffProbe) {
-      // Deterministic, zero-LLM auto-detection: probe Greenhouse/Ashby/Lever
-      // slug candidates derived from the company name — the SAME mechanism
-      // `verify-portals.mjs --add` uses. This can NEVER write to portals.yml:
-      // a name-derived slug can collide with an unrelated company that
-      // happens to share the guessed slug (e.g. "Hevo" the SaaS vs. an
-      // unrelated "hevo" on lever.co), so every hit is a suggestion for the
-      // user to verify and apply by hand, not an auto-applied config change.
-      console.log(`\nProbing ATS slugs for ${agentHandoff.length} websearch-only compan${agentHandoff.length === 1 ? 'y' : 'ies'} (--agent-handoff)...`);
-      let suggested = 0;
-      for (const item of agentHandoff) {
-        let hit;
-        try {
-          hit = await discoverAlternates(item.company, {});
-        } catch (err) {
-          console.log(`  ✗ ${item.company}: probe failed — ${err.message}`);
-          continue;
-        }
-        if (!hit) continue;
-        suggested++;
-        const jobsHint = hit.status === 'live' ? `${hit.jobCount} live job(s)` : 'live but empty — verify before adding';
-        console.log(`  → ${item.company}: possible ${hit.ats} board at slug "${hit.slug}" (${jobsHint})`);
-        console.log(`      Suggested portals.yml change — verify this is really ${item.company}, then replace:`);
-        console.log(`        careers_url: ${item.careersUrl || '(none set)'}  (remove scan_method/scan_query)`);
-        console.log(`      with:`);
-        console.log(`        careers_url: ${hit.url}`);
-      }
-      if (suggested === 0) {
-        console.log(`  No ATS slug matches found for any websearch-only company — these likely are genuinely custom/token-gated.`);
-      } else {
-        console.log(`\n${suggested} suggestion(s) above — a name-derived slug can collide with an unrelated company, so verify each before editing portals.yml.`);
-      }
     }
   }
 
@@ -4975,7 +5031,7 @@ async function main() {
     console.log(`   Run: node verify-portals.mjs to check if the ATS migrated, or update their board slugs.`);
   }
   if (newlyDeadSlug.length > 0) {
-    const names = newlyDeadSlug.map((e) => e.company).join(', ');
+    const names = newlyDeadSlug.map(x => x.company).join(', ');
     console.log(`\n⚠️  ${newlyDeadSlug.length} target(s) unreachable (slug?): ${names} — run: node verify-portals.mjs`);
   }
   if (emptyTargets.length > 0) {
@@ -5038,15 +5094,8 @@ async function main() {
       filteredCountryEligibility: totalFilteredCountryEligibility,
     }));
   }
-
-  // --apify: broad paid search, opt-in, runs after the zero-token scan above.
-  if (runApifySearch) {
-    console.log(`\n${'━'.repeat(45)}`);
-    console.log('Broad search via Apify (--apify, paid)');
-    console.log(`${'━'.repeat(45)}`);
-    const { runBroadSearch } = await import('./apify-search.mjs');
-    await runBroadSearch({ dryRun });
-  }
+  // The run completed (or was a dry run) — disarm the failure row.
+  registerRunFailureSnapshot(null);
 
   console.log(`\n→ Run /career-ops pipeline to evaluate new offers.`);
   console.log('→ Share results and get help: https://discord.gg/8pRpHETxa4');
@@ -5072,10 +5121,24 @@ async function main() {
     }, errors.length > 0 ? 2 : 0);
   }
 
+  // A run in which every target it tried failed read nothing, and exiting 0
+  // told cron and the web scheduler it succeeded with zero new offers. Exit 2,
+  // the receipt's failure code, so the outage is visible. Only when all failed:
+  // a few dead boards are routine, and every run would turn red. An empty
+  // config tried nothing and still exits 0. This runs after the bookkeeping
+  // above, so the scan-runs and portal-health rows are already written; the
+  // message goes to stderr last, where a scheduler reads the cause.
+  const attempted = targets.length + resolveErrors.length;
+  const everyTargetFailed = attempted > 0 && failedTargets + resolveErrors.length === attempted;
+  if (everyTargetFailed && !jsonMode) {
+    console.error(`Error: every scan target failed (${attempted} of ${attempted}); no board could be read. See the errors above.`);
+    process.exitCode = 2;
+  }
+
   // One-time-ever manifesto note: first successful REAL run only. The state
   // file keeps it from ever repeating; --dry-run must leave no trace, and a
   // piped/quiet run is not the moment for it.
-  if (!dryRun && process.stdout.isTTY && !process.argv.includes('--quiet') && !existsSync('.manifesto-noted')) {
+  if (!dryRun && !everyTargetFailed && process.stdout.isTTY && !process.argv.includes('--quiet') && !existsSync('.manifesto-noted')) {
     // OSC 8 hyperlink where support is known, so the click attributes as
     // utm_source=cli while the visible text stays clean; otherwise print the
     // URL with the utm so typed visits attribute too.

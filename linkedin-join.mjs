@@ -71,23 +71,21 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import * as yaml from 'js-yaml';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
 import { asciiFold } from './lib/ascii-fold.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
-import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 
-// Fork adaptation (rule 5): every path below is DATA, so it resolves through dataRoot rather than
-// the script directory. Upstream reads them relative to itself, which under this fork's
-// multi-profile layout would join one profile's connections export against another profile's
-// tracker — silently, and with plausible-looking output.
-const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const DEFAULT_CSV = join(CAREER_OPS_DATA, 'data/Connections.csv');
-export const TRACKER_PATH = resolveTrackerPath(CAREER_OPS_DATA);
-const PORTALS_PATH = join(CAREER_OPS_DATA, 'portals.yml');
-const CONTACTS_PATH = join(CAREER_OPS_DATA, 'data/contacts.tsv');
+const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_CSV = join(DATA_ROOT, 'data/Connections.csv');
+export const TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
+const PORTALS_PATH = join(DATA_ROOT, 'portals.yml');
+const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
 
 const args = process.argv.slice(2);
 
@@ -447,7 +445,7 @@ export function parseTrackerTargets(content) {
 export function parsePortalTargets(content) {
   let doc;
   try {
-    doc = yaml.load(String(content || ''));
+    doc = loadYaml(String(content || ''));
   } catch {
     return { targets: [], skipped: [{ company: '(portals.yml)', reason: 'YAML parse error' }] };
   }

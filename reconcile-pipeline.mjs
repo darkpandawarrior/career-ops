@@ -25,47 +25,37 @@ import { readFileSync, existsSync, readdirSync, copyFileSync, realpathSync, stat
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { normalizeReportLink } from './tracker-links.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { withPipelineLock, LockTimeoutError } from './pipeline-lock.mjs';
 import { writeFileAtomic } from './tracker-utils.mjs';
+import { sectionKind, processedHeadingFor } from './lib/pipeline-sections.mjs';
 
+const CAREER_OPS = getCareerOpsRoot();
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
 
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
 const KNOWN_FLAGS = ['--dry-run', '--pipeline', '--state', '--help', '-h'];
 const VALUE_FLAGS = ['--pipeline', '--state'];
 const USAGE = `Usage: node reconcile-pipeline.mjs [--dry-run] [--state <path>] [--pipeline <path>]
   Moves batch-processed offers out of pipeline.md "Pendientes" into "Procesadas".`;
 
-// An unrecognized flag — a typo'd --dry-run, say — used to be silently ignored and fall through to
-// a LIVE run that writes pipeline.md. The caller believed they were in dry-run mode and were not.
-// Fail fast instead.
+// An unrecognized flag (typo'd --dry-run, say) used to be silently ignored
+// and fall through to a LIVE run that writes pipeline.md — the caller
+// believed they were in dry-run mode and were not. Fail fast instead.
 const args = process.argv.slice(2);
 validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
 const DRY_RUN = args.includes('--dry-run');
 
-function argValue(flag) {
-  const i = process.argv.indexOf(flag);
-  return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : null;
-}
-
-// Constrain user-supplied --state/--pipeline paths to the repository tree, so a
-// crafted path cannot read from or overwrite files outside the project.
+// Pipeline writes stay inside the data root. Batch state can also live in the
+// code checkout, where batch-runner.sh keeps it under batch/.
 // Symlinks are resolved first (realpathSync) so an in-repo symlink cannot
 // smuggle the real target outside the tree past a purely lexical check.
-function resolveInsideRepo(inputPath, fallbackPath, flag) {
+function resolveInsideRepo(inputPath, fallbackPath, flag, roots = [CAREER_OPS]) {
   const abs = resolve(inputPath || fallbackPath);
-  let repoReal, targetReal;
+  let repoRoots, targetReal;
   try {
-    // Anchored on the DATA root, not the engine checkout: under the
-    // multi-profile setup the pipeline/batch files legitimately live outside
-    // the engine directory, and anchoring on the engine would reject every
-    // real path while still allowing traversal within it.
-    repoReal = realpathSync(CAREER_OPS_DATA);
+    repoRoots = roots.map(root => realpathSync(root));
     // The target may not exist yet (e.g. a fresh --pipeline path); fall back to
     // its parent directory so the symlink-resolved boundary check still applies.
     targetReal = existsSync(abs) ? realpathSync(abs) : realpathSync(dirname(abs));
@@ -73,8 +63,10 @@ function resolveInsideRepo(inputPath, fallbackPath, flag) {
     console.error(`Invalid ${flag}: cannot resolve path (${abs})`);
     process.exit(1);
   }
-  const rel = relative(repoReal, targetReal);
-  if (rel.startsWith('..') || isAbsolute(rel)) {
+  if (!repoRoots.some(root => {
+    const rel = relative(root, targetReal);
+    return !rel.startsWith('..') && !isAbsolute(rel);
+  })) {
     console.error(`Invalid ${flag}: path must stay inside the repository (${abs})`);
     process.exit(1);
   }
@@ -87,15 +79,12 @@ function resolveInsideRepo(inputPath, fallbackPath, flag) {
   return abs;
 }
 
-const defaultPipeline = existsSync(join(CAREER_OPS_DATA, 'data/pipeline.md'))
-  ? join(CAREER_OPS_DATA, 'data/pipeline.md')
-  // The flat-layout fallback is a DATA path too. It read CAREER_OPS (the engine
-  // checkout), so under `./profile <name>` the fallback pointed outside the data
-  // root and resolveInsideRepo() — anchored on CAREER_OPS_DATA — rejected it.
-  : join(CAREER_OPS_DATA, 'pipeline.md');
-const PIPELINE_FILE = resolveInsideRepo(argValue('--pipeline'), defaultPipeline, '--pipeline');
-const STATE_FILE = resolveInsideRepo(argValue('--state'), join(CAREER_OPS_DATA, 'batch/batch-state.tsv'), '--state');
-const REPORTS_DIR = join(CAREER_OPS_DATA, 'reports');
+const defaultPipeline = existsSync(join(CAREER_OPS, 'data/pipeline.md'))
+  ? join(CAREER_OPS, 'data/pipeline.md')
+  : join(CAREER_OPS, 'pipeline.md');
+const PIPELINE_FILE = resolveInsideRepo(flagValue(args, '--pipeline'), defaultPipeline, '--pipeline');
+const STATE_FILE = resolveInsideRepo(flagValue(args, '--state'), join(CODEBASE_ROOT, 'batch/batch-state.tsv'), '--state', [CODEBASE_ROOT, CAREER_OPS]);
+const REPORTS_DIR = join(CAREER_OPS, 'reports');
 
 // ---- guards ----
 if (!existsSync(STATE_FILE)) {
@@ -114,11 +103,14 @@ for (const line of readFileSync(STATE_FILE, 'utf-8').split(/\r?\n/)) {
   if (!line.trim() || line.startsWith('id\t')) continue;
   const c = line.split('\t');
   if (c.length < 7) continue;
-  const [, url, status, , , reportNum, score] = c;
-  // "completed" and "skipped" (below --min-score) both produced a report.
+  const [, url, status, , , reportNum, score, error] = c;
+  // "completed" and "skipped" (below --min-score) both produced a report. A
+  // dealbreaker skip (batch-prompt.md Step 1.6) is finished without one: its
+  // SKIP tracker row is the record.
   if (status !== 'completed' && status !== 'skipped') continue;
   if (!url || !url.trim()) continue;
-  DONE.set(url.trim(), { reportNum: (reportNum || '').trim(), score: (score || '').trim() });
+  const dealbreaker = status === 'skipped' && (error || '').startsWith('dealbreaker:');
+  DONE.set(url.trim(), { reportNum: (reportNum || '').trim(), score: (score || '').trim(), dealbreaker });
 }
 
 if (DONE.size === 0) {
@@ -177,15 +169,17 @@ function resolveScore(stateScore, reportFile) {
   return 'N/A';
 }
 
+// The batch report header names the PDF path when one was generated, and
+// otherwise says "not generated" in the user's output language. Only the path
+// is the same in every language.
 function resolvePdf(reportFile) {
   const rep = readReportField(reportFile, 'PDF');
-  if (!rep) return '❌';
-  return /not generated/i.test(rep) ? '❌' : '✅';
+  // A filename ending in .pdf (path or basename), not a bare ".pdf" mention in
+  // a localized "not generated" note.
+  return rep && (/[^\s]+\.pdf\b/i.test(rep) || rep.includes('✅')) ? '✅' : '❌';
 }
 
 // ---- parse pipeline.md ----
-const PENDING_RE = /^##\s+(Pendientes|Pending)\s*$/i;
-const PROCESSED_RE = /^##\s+(Procesadas|Processed)\s*$/i;
 const SECTION_RE = /^##\s+/;
 const PENDING_ITEM_RE = /^- \[ \]\s+/;
 
@@ -205,8 +199,9 @@ function reconcile() {
 
   let pendStart = -1, procStart = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (pendStart < 0 && PENDING_RE.test(lines[i])) pendStart = i;
-    else if (procStart < 0 && PROCESSED_RE.test(lines[i])) procStart = i;
+    const kind = sectionKind(lines[i]);
+    if (pendStart < 0 && kind === 'pending') pendStart = i;
+    else if (procStart < 0 && kind === 'processed') procStart = i;
   }
 
   if (pendStart < 0) {
@@ -255,6 +250,15 @@ function reconcile() {
       continue;
     }
 
+    if (done.dealbreaker) {
+      const [, company = '', role = ''] = body.split('|').map(s => s.trim());
+      movedProcLines.push(`- [x] SKIP | ${url} | ${company} | ${role} | N/A | PDF ❌`);
+      moved.push({ url, company, role, num: '-', score: 'SKIP, dealbreaker' });
+      procUrls.add(url);
+      removeIdx.add(i);
+      continue;
+    }
+
     const reportFile = findReportFile(done.reportNum);
     if (!reportFile) {
       // No report on disk — leave it in Pendientes rather than write a dead link.
@@ -269,7 +273,7 @@ function reconcile() {
     const pdf = resolvePdf(reportFile);
     const num = parseInt(done.reportNum, 10);
 
-    const reportLink = normalizeReportLink(`[${num}](reports/${reportFile})`, dirname(PIPELINE_FILE), CAREER_OPS_DATA);
+    const reportLink = normalizeReportLink(`[${num}](reports/${reportFile})`, dirname(PIPELINE_FILE), CAREER_OPS);
     movedProcLines.push(`- [x] ${reportLink} | ${url} | ${company} | ${role} | ${score} | PDF ${pdf}`);
     moved.push({ url, company, role, num, score });
     procUrls.add(url);
@@ -305,9 +309,8 @@ function reconcile() {
   // No Procesadas section yet — create one at the end of the file, matching the
   // language the pending section header already uses.
   if (procStart < 0 && movedProcLines.length > 0) {
-    const processedHeader = /Pending/i.test(lines[pendStart]) ? '## Processed' : '## Procesadas';
     if (out.length && out[out.length - 1].trim() !== '') out.push('');
-    out.push(processedHeader, '', ...movedProcLines);
+    out.push(processedHeadingFor(lines[pendStart]), '', ...movedProcLines);
   }
 
   const newContent = out.join('\n');
@@ -315,7 +318,7 @@ function reconcile() {
   const newCount = (() => {
     let n = 0, inPend = false;
     for (const l of out) {
-      if (PENDING_RE.test(l)) { inPend = true; continue; }
+      if (sectionKind(l) === 'pending') { inPend = true; continue; }
       if (SECTION_RE.test(l)) { inPend = false; continue; }
       if (inPend && PENDING_ITEM_RE.test(l)) n++;
     }
