@@ -744,7 +744,7 @@ Translate these human-facing headings according to `language.output` when it is 
 9. Build competency grid (6-8 keyword phrases)
 10. Inject keywords into existing achievements (**NEVER invent**)
 11. Generate complete HTML from the template (read `templates/cv-template.html`)
-12. Write HTML to `output/cv-candidate-{company-slug}.html` (NOT to /tmp — the registered HTML is the dashboard's regeneration source)
+12. Write HTML to `output/cv-candidate-{{REPORT_NUM}}-{company-slug}.html` (NOT to /tmp — the registered HTML is the dashboard's regeneration source)
 13. Run:
 ```bash
 node generate-pdf.mjs \

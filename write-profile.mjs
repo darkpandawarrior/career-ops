@@ -33,6 +33,7 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import path from 'path';
 import * as yaml from 'js-yaml';
+import { loadYaml as parseYaml } from './lib/yaml-document.mjs';
 import { resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const { dataRoot: WP_DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
@@ -109,7 +110,7 @@ function patchToProfile(p) {
 function loadYaml(file) {
   try {
     const raw = readFileSync(file, 'utf-8');
-    const doc = raw.trim() ? yaml.load(raw) : {};
+    const doc = raw.trim() ? parseYaml(raw) : {};
     return isObj(doc) ? doc : {};
   } catch {
     return null;

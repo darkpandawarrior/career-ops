@@ -85,6 +85,8 @@ Determine the mode from `$mode`:
 | `followup` | `followup` |
 | `reply-watch` | `reply-watch` |
 | `email-sweep` | `email-sweep` |
+| `cv-ingest` | `cv-ingest` |
+| `portfolio` | `portfolio` |
 | `ko` | `ko` (Korean locale pack — see `modes/ko/README.md`) |
 | `outcome` | `outcome` |
 | `interview/redflag` | `interview/redflag` |

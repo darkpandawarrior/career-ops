@@ -276,6 +276,7 @@ try {
     'updater-upgrade-safety',
   ]) {
     const suite = fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url));
+    if (!existsSync(suite)) continue; // Fork: the updater suites are not shipped
     const child = spawnSync(process.execPath, [suite], { encoding: 'utf-8', timeout: 120000, env });
     const out = child.stdout || '';
     const failures = out.split('\n').filter((line) => line.includes('❌'));
@@ -323,6 +324,7 @@ try {
     'updater-upgrade-safety',
   ]) {
     const suite = fileURLToPath(new URL(`./${name}.test.mjs`, import.meta.url));
+    if (!existsSync(suite)) continue; // Fork: the updater suites are not shipped
     const child = spawnSync(process.execPath, [suite], { encoding: 'utf-8', timeout: 120000, env });
     const out = child.stdout || '';
     const failures = out.split('\n').filter((line) => line.includes('❌'));

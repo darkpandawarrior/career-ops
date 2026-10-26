@@ -760,6 +760,40 @@ function resolveActiveCli() {
   return { cli: 'claude', source: 'default' };
 }
 
+function checkPlaywrightMcp(root, activeCli) {
+  // Unknown CLI (typo / not in AGENT_CLIS).
+  if (activeCli === 'unknown') return null;
+
+  // Known CLI without an MCP file mapping.
+  const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
+  if (!entry) {
+    return {
+      warn: true,
+      label: `Playwright MCP check skipped for CLI: ${activeCli}`,
+      fix: [
+        `doctor doesn't scan MCP configs for "${activeCli}". Verify your Playwright MCP setup manually for that CLI.`,
+        `CLIs with scanning today: ${MCP_CONFIGS.map((c) => c.cli).join(', ')}.`,
+      ],
+    };
+  }
+  if (isPlaywrightMcpConfigured(root, activeCli)) {
+    return { pass: true, label: `Playwright MCP server configured (${activeCli})` };
+  }
+  // Active CLI is known (flag/env/.env) but its MCP isn't configured.
+  return {
+    warn: true,
+    label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
+    fix: [
+      entry.plugins
+        ? `No project-level MCP config, no server in .claude.json (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json when set), and no enabled plugin providing one, was detected for ${activeCli}.`
+        : `No project-level MCP config was detected for ${activeCli}.`,
+      activeCli === 'opencode'
+        ? 'Add the Playwright MCP server to opencode.json (project; see opencode.example.json) or to the global ~/.config/opencode/opencode.json[c] (or $OPENCODE_CONFIG), or pass --cli <name> if you actually run a different CLI.'
+        : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
+    ],
+  };
+}
+
 // Report which scan/JD extractor is active (config/profile.yml → scan.extractor).
 // `mcp` (default) uses the browser MCP; `cli` uses browser-extract.mjs. When cli
 // is selected but the helper is missing, the modes fall back to MCP — surface

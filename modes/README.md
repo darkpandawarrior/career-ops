@@ -43,6 +43,10 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `tracker.md` | `tracker` | Applications tracker overview |
 | `patterns.md` | `patterns` | Rejection pattern detector |
 | `calibrate.md` | `calibrate` | Advisory report: do your evaluation scores predict your real outcomes? Reads `/outcome` data; never changes scoring |
+| `outcome.md` | `outcome` | Record application outcome & archive artifacts |
+| `cv-ingest.md` | `cv-ingest` | Convert a pasted CV or local PDF/DOCX into clean `cv.md` markdown (proposer only; the human confirms before anything is saved) |
+| `email-sweep.md` | `email-sweep` | Scan Gmail for application-status signals and merge new or changed statuses into the tracker |
+| `portfolio.md` | `portfolio` | Generate the data for a personal portfolio site from your career-ops files (emits one JSON object, writes nothing) |
 | `titles.md` | `titles` | Adjacent job-title suggestions |
 | `upskill.md` | `upskill` | Skill-gap analysis across the evaluated pipeline |
 | `training.md` | `training` | Training & course evaluation |

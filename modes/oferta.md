@@ -273,19 +273,77 @@ Use the bounded research budget above for:
 - Company's compensation reputation
 - Demand trend for the role
 
-Before interpreting any salary number, classify the company type and assign a
-compensation-reliability tier — see `_shared.md` § Company Type and
-Compensation Reliability for the taxonomy and tiers. State both as one line
-each: **Company type:** {category or `Unknown`} — {confidence + one evidence
-phrase}, **Compensation reliability:** {tier}.
+Before interpreting any salary number, classify the company type. Public compensation ranges are not equally reliable across company categories.
 
-Table with data and cited sources. If there is no data, state it instead of inventing. The table's **first row is always the JD's own advertised figure, verbatim** (or `not stated` if none) — before any researched market data:
+**Company type classification (required):**
+
+Classify the employer into the closest category and state the confidence level:
+
+| Company type | Typical comp reliability | Signals |
+|--------------|--------------------------|---------|
+| Public big tech / mature tech | High to medium | Public company, structured levels, large engineering org, repeatable hiring process |
+| Growth-stage startup / VC-backed startup | Medium | Funded startup, competitive hiring market, may mix base + equity + bonus |
+| Early-stage startup / pre-revenue startup | Medium to low | Small team, vague role scope, equity-heavy promises, unclear bands |
+| Enterprise / traditional corporate | Medium | Formal HR process, stable base, slower bands, bonus may be discretionary |
+| Agency / outsourcing / consulting vendor | Medium to low | Client allocation, project-based work, billability pressure, variable bonus |
+| Local SMB / service business | Low | Small company, broad role, informal HR, "comprehensive salary" language |
+| Sales / commission-heavy org | Low unless base is explicit | "OTE", "uncapped", commission, performance bonus, target-based pay |
+| Recruiter / staffing listing | Low to medium | Third-party posting, range may reflect client budget rather than offer terms |
+| Government / academic / nonprofit | Medium to high | Published grades/bands, but lower market competitiveness |
+| Open-source community / education community | Medium to low | Community-led org, foundation/association sponsor, campus/community operations, unclear employment entity |
+
+If the company type is uncertain, mark it as `Unknown` and default compensation reliability to the conservative canonical tier: `Low` until evidence improves it.
+
+If the brand differs from the legal employer or posting entity, classify the **actual contract / hiring entity** first and mention the brand relationship separately. Example: a "Datawhale community" role posted by an association, school, vendor, or partner should be classified by that hiring entity, not by the Datawhale brand alone.
+
+**Compensation reliability (required):**
+
+First check whether the JD itself states a salary figure. If no advertised number exists, collapse this section to exactly two concise lines after the demand trend:
+
+- **Company type:** {category or `Unknown`} — {confidence + one evidence phrase}
+- **Compensation reliability:** {tier} — no advertised salary figure; skip component split, detailed market rows, and HR verification questions
+
+When an advertised salary figure exists, split compensation into:
+
+- **Advertised range:** the salary shown in the JD or public sources
+- **Likely guaranteed base:** conservative estimate of fixed contract salary
+- **Variable / conditional cash components:** bonus, commission, allowance, attendance bonus, KPI bonus, overtime, 13th salary, sign-on, or other cash tied to conditions
+- **Expected stable cash:** what is likely recurring and reliable in cash, before tax unless local data supports a net estimate; exclude benefits
+- **Non-cash benefits:** equity, insurance, pension, meals, transport, wellness, learning budget, equipment, or other benefits that are not guaranteed cash
+
+Add a reliability tier:
+
+| Tier | Meaning |
+|------|---------|
+| High | Salary is stated as base or backed by structured public bands / multiple consistent sources |
+| Medium | Range is plausible but components are not fully separated |
+| Low | Public number likely includes variable, attendance, commission, subsidy, or "up to" components |
+| Unknown | No usable salary data |
+
+Treat these phrases as low-reliability signals unless the fixed base is explicitly separated: "comprehensive salary", "total package", "up to", "OTE", "uncapped", "including allowances", "performance bonus included", "attendance bonus", "KPI bonus", "base + variable", "base + commission", "13th salary included", or unusually wide salary ranges.
+
+When the advertised number may be inflated, say so plainly. Example: `Advertised 5k may represent 3k base + attendance / KPI / subsidy components; verify contract base before treating it as a 5k role.`
+
+**Required HR verification questions when a salary figure exists:**
+
+Include 3-6 concrete questions tailored to the JD and company type, such as:
+
+- What is the fixed base salary written in the employment contract?
+- Does the advertised range include bonus, commission, allowances, overtime, attendance, or KPI components?
+- Is probation salary discounted?
+- Are social insurance / pension / benefits calculated from base salary or full compensation?
+- Which components are guaranteed monthly versus discretionary or target-based?
+- If equity or bonus is mentioned, what is the vesting schedule, payout history, and realistic expected value?
+
+When a salary figure exists, include a table with data and cited sources. If there is no data beyond the JD figure, state it instead of inventing. Do not present advertised compensation as real take-home pay unless the source explicitly supports that interpretation.
+
+The table's **first row is always the JD's own advertised figure, verbatim** — before any researched market data:
 
 ```markdown
 | Advertised (JD) | {verbatim figure or "not stated"} | JD |
 ```
 
-Never blend the advertised figure with researched estimates or replace it with them — market research rows follow below it. This same verbatim figure is what the Machine Summary's `advertised_comp` key carries (see Post-evaluation § Machine Summary) and what `salary-gap.mjs` reads as the advertised-compensation observation for `data/salary-observations.tsv`'s per-application comparison (desired vs. advertised vs. actual).
+Never blend the advertised figure with researched estimates or replace it with them — market research rows follow below it. This same verbatim figure goes into the Machine Summary `advertised_comp` key (see the report format).
 
 ## Block E — Customization Plan
 
@@ -523,7 +581,7 @@ Three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not eval
 | Employment classification | Employment classification signal inside Block G | `✅ clear` when the check ran and found nothing; `⚠️ contractor-style language: "{quoted phrase}"` when the flag fired; `— not evaluated` when the check could not run |
 | Culture screen | Culture screen field in Block A | `✅ pass`, or `⚠️ caution — {evidence}` / `⚠️ fail — {evidence}`; `— not evaluated` when no screen was run |
 | Interview red flags | `interview-prep/{company-slug}-redflags.md` (from `interview-redflag` mode) | **Cross-reference, not a copy:** if the file exists, surface its current warning level plus a relative link — `[{level}](../interview-prep/{company-slug}-redflags.md)` (relative to `reports/`); otherwise `— no interview sessions yet` |
-| Benefits/terminology mismatch | Benefits/Employment Terminology Country Mismatch signal inside Block G | `✅ clear` when the check ran and found nothing; `⚠️ {jurisdiction B} terms in {jurisdiction A} posting: "{quoted phrase}"` when the flag fired; `— not evaluated` when the check could not run |
+| AI claims vs. infrastructure | AI/infrastructure mismatch check in Block G, when present | If this report contains that check, mirror its verdict (`✅ consistent` / `⚠️ {finding}`); otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
 | AI-screening disclosure | AI-screening disclosure signal in Block G (Signal 15), when present | If this report contains that check: `✅ discloses AI use` when (a) fired, `ℹ️ {jurisdiction_name} requires disclosure; posting is silent` when only (b) fired (corroborating-only, never a compliance verdict), `— no jurisdiction match` when neither fired because the candidate's jurisdiction has no table row; otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
 | Fixed-term contract | Fixed-term disclosure signal in Block G (Signal 16) | `ℹ️ fixed term — "{quoted phrase}"` when explicit fixed-term language is present; otherwise `✅ no fixed term disclosed`; `— not evaluated` only when no JD text was available |
 | Relocation purchasing power | Relocation purchasing-power signal in Block G (Signal 17), when present | If this report contains that check: `ℹ️ {home.jurisdiction} ~{home.takeHome} vs {dest.jurisdiction} ~{dest.takeHome}` when `ok: true` (informational, never a verdict on the offer); `— no jurisdiction match` ONLY when the script's `reason` is specifically `no-jurisdiction-match`; `— not evaluated` for every other `ok: false` reason (`same-jurisdiction`, `cross-country-not-supported`, `currency-mismatch`, `no-gross-amount`, `no-table`, `no-federal-table`, `malformed-brackets`, …) and when the gate's own conditions (relocation location stated, differs from home, usable comp figure) were not met. A same-jurisdiction or currency-mismatch result is not a jurisdiction-match failure and must never be rendered as one. The row activates automatically once the check exists — no ordering dependency |
@@ -626,6 +684,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 - `{###}` = next sequential number (3 digits, zero-padded). To allocate it atomically and prevent race conditions, you MUST run `node reserve-report-num.mjs` to claim the number (stdout returns `{###}`), write the report, and then run `node reserve-report-num.mjs --release {###}` to release the sentinel.
 - `{company-slug}` = company name in lowercase, without spaces (use hyphens)
 - `{YYYY-MM-DD}` = current date
+- **Agency-mediated posting with unknown end employer (#1596):** slug is `confidential-{agency-slug}` (e.g. `042-confidential-hays-2026-07-06.md`). The file is NEVER renamed after the employer is revealed — update the title/header/YAML instead.
 
 **Report format:**
 
@@ -634,6 +693,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 **Date:** {YYYY-MM-DD}
 **URL:**
+**Via:** {agency/recruiter firm, or — for direct applications}
 **Archetype:** {detected}
 <!-- When the role matches one of the user's targets, name it. When it matches
      none, this field is NOT left blank and NOT hedged — an empty field reads as
@@ -742,18 +802,18 @@ The TSV carries:
 **The row the merge writes** (for reference; you write the TSV, not this row):
 
 ```markdown
-| # | Date | Company | Role | Score | Status | PDF | Report |
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
 ```
 
-With the optional Via column (intermediary channel) after Company:
+With the optional Via column (intermediary channel, #1596) after Company:
 
 ```markdown
-| # | Date | Company | Via | Role | Score | Status | PDF | Report |
+| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |
 ```
 
 ### 3. Salary observations (desired ask only)
 
-If — and only if — the user **explicitly stated a role-specific desired number for THIS application** in the conversation ("I'd ask 95k here"), append one `desired` line (source `user`) to `data/salary-observations.tsv` (create the file if missing):
+If — and only if — the user **explicitly stated a role-specific desired number for THIS application** in the conversation ("I'd ask 95k here"), append one `desired` line (source `user`) to `data/salary-observations.tsv` (create the file if missing; format per `docs/SCRIPTS.md` → salary-gap):
 
 ```text
 {tracker#}\t{YYYY-MM-DD}\tdesired\t{amount}\t{currency}\tuser\t{short context note}
@@ -762,33 +822,3 @@ If — and only if — the user **explicitly stated a role-specific desired numb
 `{tracker#}` is the row's `#` **after** the merge in step 2, read from `merge-tracker.mjs`'s output. Write this line after merging, never before: until then the row has no number, and the report number is not a safe stand-in because the merge assigns a different `#` when that one is taken.
 
 Never infer a desired number from the JD, the score, or past conversations. The profile default (`config/profile.yml` → `compensation.target_range`) needs no line — `salary-gap.mjs` reads it as the fallback. The advertised figure also needs no line: the report's `advertised_comp` **is** the advertised observation.
-
----
-
-## 4. Do not stop at the report
-
-**An evaluation that ends in a written report is not an outcome.** Measured on this tracker
-(2026-08-25): of 17 roles that went through a full evaluation, **2** were ever applied to. The other
-15 ended `Evaluated`, `SKIP` or `Discarded`. Meanwhile 42 of the 67 roles applied to bypassed
-evaluation entirely. The pipeline is being used as a filter and almost never as a launcher, and that
-gap — not job supply — is where this search actually loses.
-
-So the evaluation does not end here. Close it on one of two explicit rails, and say which:
-
-**If the score clears `auto_pdf_score_threshold`** (`config/profile.yml`, currently 4.0) **and the
-role clears the compensation floor**, continue **in the same turn** into the apply flow
-(`modes/apply.md`) — generate the tailored CV and cover letter, run the reviewer pass, compile the
-PDF, and run the pre-submit gates (`verify-cv-facts.mjs`, `verify-application-match.mjs`). Stop
-before submission, as always: the candidate clicks Submit. But hand them a finished artifact, not a
-recommendation to make one.
-
-Do **not** ask "shall I proceed?" and wait. A question at this point is a self-initiated return, and
-this candidate's own measured behaviour is that self-initiated returns do not happen — every
-application that died did so at a step that needed him to come back to it. Draft first, ask after.
-
-**If the score does not clear the threshold, or the role fails the floor**, say so in one line, set
-the status to `SKIP` with the reason, and stop. That is a completed outcome and it is a good one —
-a 3.2/5 that is honestly closed beats a 3.2/5 left open as `Evaluated` forever.
-
-Either way the row must not be left in `Evaluated` with nothing owed and nothing decided. `Evaluated`
-is a transient state, not a resting place.

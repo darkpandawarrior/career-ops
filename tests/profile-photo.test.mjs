@@ -119,12 +119,12 @@ test('a relative photo is read from the data root, where the profile is', () => 
 });
 
 test('the data root wins over the checkout when both have the relative path', () => {
-  // docs/logo.png exists in the checkout; a different image at the same path
+  // docs/assets/screens/today.png exists in the checkout; a different image at the same path
   // in the data root is the one the user meant.
-  assert.ok(existsSync(join(ROOT, 'docs', 'logo.png')), 'premise: the checkout has docs/logo.png');
-  const { result, html } = dataRootPhotoBuild('docs/logo.png', ONE_PIXEL_PNG);
+  assert.ok(existsSync(join(ROOT, 'docs', 'assets', 'screens', 'today.png')), 'premise: the checkout has docs/assets/screens/today.png');
+  const { result, html } = dataRootPhotoBuild('docs/assets/screens/today.png', ONE_PIXEL_PNG);
   assert.equal(result.status, 0, describeSpawn(result, 'expected a clean build'));
-  assert.ok(html.includes(`src="data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}"`), 'the data-root image is inlined, not the checkout logo');
+  assert.ok(html.includes(`src="data:image/png;base64,${ONE_PIXEL_PNG.toString('base64')}"`), 'the data-root image is inlined, not the checkout image');
 });
 
 test('single-letter Windows drive paths reach local file handling', () => {
@@ -147,7 +147,7 @@ test('a payload photo path that config/profile.yml does not name is refused (#50
   writeFileSync(secret, ONE_PIXEL_PNG);
   const cases = [
     ['profile has no photo', undefined],
-    ['profile names a different photo', 'docs/logo.png'],
+    ['profile names a different photo', 'docs/assets/screens/today.png'],
   ];
   for (const [label, profilePhoto] of cases) {
     const { result, output } = buildWith(payload(secret), profilePhoto);
@@ -158,7 +158,7 @@ test('a payload photo path that config/profile.yml does not name is refused (#50
 });
 
 test('a relative path that climbs out of the project is refused unless the profile names it (#5094)', () => {
-  const { result, output } = buildWith(payload('../../../../etc/hosts.png'), 'docs/logo.png');
+  const { result, output } = buildWith(payload('../../../../etc/hosts.png'), 'docs/assets/screens/today.png');
   assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
   assert.match(result.stderr, /does not match candidate\.photo in config\/profile\.yml/);
   assert.equal(existsSync(output), false);

@@ -29,7 +29,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import path from 'path';
-import * as yaml from 'js-yaml';
+import { loadYaml as parseYaml } from './lib/yaml-document.mjs';
 import { pathToFileURL } from 'url';
 
 try {
@@ -81,7 +81,7 @@ const DEFAULT_MAX_RESULTS = 10;
 function loadBroadSearchConfig() {
   if (!existsSync(PROFILE_PATH)) return {};
   try {
-    const raw = yaml.load(readFileSync(PROFILE_PATH, 'utf-8')) || {};
+    const raw = parseYaml(readFileSync(PROFILE_PATH, 'utf-8')) || {};
     return raw.broad_search || {};
   } catch {
     return {};

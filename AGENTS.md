@@ -185,7 +185,6 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `process-quality.mjs` | Recruiting-process friction signal at company level (reschedules, silence gaps, contradictory feedback) |
 | `rejection-latency.mjs` | Post-interview response-latency signal — flags companies still in `Interview` state whose silence since the last `data/active-interviews.md` round exceeds a courtesy (30d default, configurable) threshold, with a ready-to-copy `data/blacklist.md` suggestion row; suggestion-only, never writes (JSON or `--summary` table output) |
 | `invite-match.mjs` | Fuzzy-matches a pasted interview-invite email to its tracker row (company/date/req-ID extraction) |
-| `set-status.mjs` | Canonical CLI for tracker status updates — `node set-status.mjs <report#\|company> <State> [--dry-run] [--json] [--force]`. A numeric selector fails closed when the row's Report cell points at a different report ID than its `#` column, unless `--force` is passed |
 | `add-entry.mjs` | Backs `/career-ops add` — fetches a project/paper/role URL into cv.md / article-digest.md |
 | `check-liveness.mjs` | Job posting liveness checker |
 | `liveness-core.mjs` | Shared liveness logic (expired signals win over generic Apply text) |
@@ -541,7 +540,7 @@ A single-string `modes_dir` (today's default, ~90% of users) behaves exactly as 
 **This system is designed for quality, not quantity.** The goal is to help the user find and apply to roles where there is a genuine match -- not to spam companies with mass applications.
 
 - **NEVER submit an application without the user reviewing it first.** Fill forms, draft answers, generate PDFs -- but always STOP before clicking Submit/Send/Apply. The user makes the final call.
-- **Strongly discourage low-fit applications.** If a score is below 4.0/5, explicitly recommend against applying. The user's time and the recruiter's time are both valuable. Only proceed if the user has a specific reason to override the score.
+- **Strongly discourage low-fit applications.** Below 4.0/5, explicitly recommend against applying; only proceed if the user has a specific reason to override.
 - **Quality over speed.** A well-targeted application to 5 companies beats a generic blast to 50. Guide the user toward fewer, better applications.
 - **Respect recruiters' time.** Every application a human reads costs someone's attention. Only send what's worth reading.
 

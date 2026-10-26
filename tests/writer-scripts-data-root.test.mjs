@@ -160,7 +160,7 @@ const CLOSURE = {
     'lib/status-hooks.mjs', 'session-activity.mjs',
     // --undo replays status-log.tsv through funnel-velocity.mjs, which brings
     // its own imports.
-    'funnel-velocity.mjs', 'stats.mjs', 'followup-cadence.mjs', 'funnel-stages.mjs',
+    'funnel-velocity.mjs', 'stats.mjs', 'followup-cadence.mjs', 'owed-actions.mjs', 'funnel-stages.mjs',
     'lib/scan-history-columns.mjs', 'lib/tsv-formula-escape.mjs',
     // check-jd-archive.mjs / jd-capture.mjs: the transition into Interview
     // triggers a JD-archive check via these two (#4523), which in turn need
