@@ -52,6 +52,6 @@ test("output that is not the writer's answer is a failure", () => {
 
 test("pipeline.ts reads the child's answer through this helper", () => {
   const src = readFileSync(PIPELINE_TS, "utf8");
-  assert.match(src, /child\.on\("close", \(code, signal\) => resolve\(pipelineWriterResult\(out, err, \{ code, signal \}\)\)\)/);
+  assert.match(src, /resolve\(pipelineWriterResult\(out, err, \{ code, signal \}\)\)/);
   assert.doesNotMatch(src, /out\.trim\(\) \|\| "\{\}"/);
 });

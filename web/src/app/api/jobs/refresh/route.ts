@@ -25,6 +25,7 @@ export async function POST() {
   const child = spawn("node", [cli, dataRoot], {
     cwd: engineRoot(),
     env: { ...process.env, CAREER_OPS_ROOT: dataRoot },
+    windowsHide: true, // never inherit the server console (#3809)
   });
   const enc = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

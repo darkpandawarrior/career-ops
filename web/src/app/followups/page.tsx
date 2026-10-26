@@ -5,8 +5,8 @@ import { readFollowupsEnabled } from "@/lib/followups-server";
 
 export const dynamic = "force-dynamic"; // cadence is computed fresh per request
 
-export default function FollowupsPage() {
-  if (!readFollowupsEnabled()) {
+export default async function FollowupsPage() {
+  if (!(await readFollowupsEnabled())) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-10">
         <h1 className="font-display text-2xl tracking-tight text-landing">Follow-ups are turned off</h1>

@@ -38,7 +38,9 @@ const PROTOCOL_FILES = [DEFINITION, MIRROR];
 // Every module git ships, minus the suites: test fixtures stamp owner.json by
 // hand on purpose, to stage the states the lock must survive.
 const shippedCoreModules = () => trackedFiles(ROOT, (rel) => rel.endsWith('.mjs')
-  && !rel.startsWith('tests/') && !rel.startsWith('web/tests/') && rel !== 'test-all.mjs')
+  && !rel.startsWith('tests/') && !rel.startsWith('web/tests/') && rel !== 'test-all.mjs'
+  // FORK ADAPTATION: web tests are colocated under web/src (upstream: web/tests, already excluded).
+  && !(rel.startsWith('web/src/') && rel.endsWith('.test.mjs')))
   .map((abs) => abs.slice(ROOT.length + 1).replace(/\\/g, '/'));
 
 // Comments are stripped first: explaining what the protocol does is not

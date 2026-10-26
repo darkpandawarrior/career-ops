@@ -207,7 +207,7 @@ test("doctorState still reports the profile missing when the override file does 
 });
 
 test("readFollowupsEnabled reads the override profile", async () => {
-  await withProfiles(() => {
-    assert.equal(readFollowupsEnabled(), false);
+  await withProfiles(async () => {
+    assert.equal(await readFollowupsEnabled(), false);
   });
 });

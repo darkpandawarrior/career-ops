@@ -21,6 +21,7 @@ export function runOnboarding(
     const child = spawn("node", [engineScript("onboarding-cli"), step, ...extraArgs], {
       cwd: engineRoot(),
       env: process.env,
+      windowsHide: true, // never inherit the server console (#3809)
     });
     let out = "";
     let err = "";

@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     : resolved.spec.args(prompt);
 
   const out = await new Promise<string>((resolve) => {
-    const child = spawn(resolved.binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: root }, shell: process.platform === "win32" });
+    const child = spawn(resolved.binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: root }, shell: process.platform === "win32", windowsHide: true });
     let buf = "";
     const killer = setTimeout(() => { try { child.kill("SIGTERM"); } catch { /* */ } }, 150_000);
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));

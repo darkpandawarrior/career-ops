@@ -324,13 +324,20 @@ export function portalsConfigPath(root = careerOpsRoot(), env: NodeJS.ProcessEnv
   return override ? path.resolve(override) : path.join(root, "portals.yml");
 }
 
-export function doctorState(root: string = careerOpsRoot(), snapshot?: Pick<PipelineSummary, "applications" | "inbox">): {
+export function doctorState(
+  rootOrSnapshot?: string | Pick<PipelineSummary, "applications" | "inbox">,
+  maybeSnapshot?: Pick<PipelineSummary, "applications" | "inbox">,
+): {
   phase: LifecyclePhase;
   onboardingNeeded: boolean;
   missing: string[];
   hasCv: boolean;
   hasData: boolean;
 } {
+  // Fork: the root is per-profile, so it leads. The snapshot-only form (the upstream
+  // signature) resolves the root from the environment.
+  const root = typeof rootOrSnapshot === "string" ? rootOrSnapshot : careerOpsRoot();
+  const snapshot = typeof rootOrSnapshot === "string" || rootOrSnapshot === undefined ? maybeSnapshot : rootOrSnapshot;
   const has = (rel: string) => {
     try {
       // The profile is where getProfilePath() says, not always <root>/config/profile.yml,

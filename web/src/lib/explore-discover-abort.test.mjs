@@ -96,7 +96,7 @@ test("Discover writes nothing to pipeline.md: only the offers the user picks are
 
   // The writer is the explicit "Add to pipeline" route, fed by the user's pick.
   const addRoute = readFileSync(join(ROOT, "app/api/explore/add/route.ts"), "utf8");
-  assert.match(addRoute, /addOffersToPipeline\(offers\)/);
+  assert.match(addRoute, /addOffersToPipeline\(offers(, root)?\)/);
 
   // And the client never marks an offer as added from a scan event.
   assert.doesNotMatch(provider, /savedUrls/);

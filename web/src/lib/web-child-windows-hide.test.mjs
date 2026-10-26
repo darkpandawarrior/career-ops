@@ -228,6 +228,9 @@ test("census: every child launch in web/src passes windowsHide: true", () => {
   const posixOnlySeen = new Set();
   for (const file of files) {
     const rel = relative(src, file).split(sep).join("/");
+    // FORK ADAPTATION: upstream keeps suites in web/tests (outside this census); the fork colocates
+    // them under web/src, and their fixtures spawn children on purpose.
+    if (/\.test\.mjs$/.test(rel) || rel === "browser-suites.mjs") continue;
     for (const call of launchCalls(file)) {
       // Each route.ts execFile is driven for real by core-script-routes.test.mjs.
       if (call.name === "execFile" && rel.startsWith("app/api/") && rel.endsWith("/route.ts")) continue;

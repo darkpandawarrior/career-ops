@@ -3149,7 +3149,7 @@ export function formatPipelineOffer(offer) {
   if (posted) {
     // Fork-only: a posting under 24h old is tagged [<24h]. Cosmetic; dedup,
     // filtering and new_added are unaffected.
-    const isFresh = typeof offer.postedAt === 'number' && (Date.now() - offer.postedAt) < DAY_MS;
+    const isFresh = typeof offer.postedAt === 'number' && (Date.now() - offer.postedAt) >= 0 && (Date.now() - offer.postedAt) < DAY_MS;
     line = `${line} | posted: ${posted}${isFresh ? ' [<24h]' : ''}`;
   }
   // Labeled trust/legitimacy segment (#1743) — rides like posted:/note:, emitted

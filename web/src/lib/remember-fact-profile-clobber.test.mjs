@@ -38,7 +38,7 @@ const WEB = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 // A file:// URL, not a bare path: `--import` takes a module SPECIFIER, and on
 // Windows an absolute path starts with a drive letter that Node reads as a URL
 // scheme. POSIX tolerates the path form, so the bug would be invisible locally.
-const LOADER = pathToFileURL(join(WEB, "tests", "helpers", "web-ts-alias-loader.mjs")).href;
+const LOADER = pathToFileURL(join(WEB, "src", "helpers", "web-ts-alias-loader.mjs")).href;
 
 const REAL_PROFILE = [
   "# Profile customization",
