@@ -30,6 +30,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { trackedFiles } from '../lib/mjs-files.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -92,7 +93,7 @@ test('a CLI reached through a symlinked directory still runs', (t) => {
         `${viaLink.status} — the main-guard silently suppressed it (#3170)`,
     );
     assert.equal(output(viaLink), output(direct), 'the symlinked invocation behaved differently');
-    assert.equal(viaLink.status, direct.status);
+    assert.equal(viaLink.status, direct.status, describeSpawn(viaLink));
   } finally {
     cleanup();
   }

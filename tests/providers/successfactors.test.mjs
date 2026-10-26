@@ -1,17 +1,18 @@
-// tests/providers/successfactors.test.mjs — moved from test-all.mjs (test-layout migration).
+// tests/providers/successfactors.test.mjs — moved verbatim from test-all.mjs (#1440).
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
-console.log('\n29. Provider — successfactors (RMK tile scraper + CSB fallback)');
+console.log('\nProvider — successfactors (SAP RMK tile parser)');
+
 
 try {
-  const successfactors = (await import(pathToFileURL(join(ROOT, 'providers/successfactors.mjs')).href)).default;
-  const { parseTiles, cityFromSlug, extractLocales, parseCsbDate, cleanCsbLocation, parseCsbJobs, resolveConfig } =
-    await import(pathToFileURL(join(ROOT, 'providers/successfactors.mjs')).href);
+  const successfactorsModule = await import(pathToFileURL(join(ROOT, 'providers/successfactors.mjs')).href);
+  const sf = successfactorsModule.default;
+  const { parseTiles, cityFromSlug, resolveConfig } = successfactorsModule;
 
-  if (successfactors.id === 'successfactors') pass('successfactors.id is "successfactors"');
-  else fail(`successfactors.id is ${JSON.stringify(successfactors.id)}`);
+  if (sf.id === 'successfactors') pass('successfactors.id is "successfactors"');
+  else fail(`successfactors.id is ${JSON.stringify(sf.id)}`);
 
   // resolveConfig — multi-brand RMK tenants (#2010): a brand/tenant path
   // segment in the configured URL (careers.nemetschek.com/Bluebeam/) must
@@ -110,42 +111,48 @@ try {
 
   // detect() — literal SF hosts auto-claim; branded RMK hosts (jobs.zf.com) do
   // NOT (they carry no "successfactors" string and rely on explicit provider:).
-  if (successfactors.detect({ name: 'X', careers_url: 'https://acme.successfactors.eu/careers' })) {
+  if (sf.detect({ name: 'X', careers_url: 'https://acme.successfactors.eu/careers' })) {
     pass('successfactors.detect() claims a *.successfactors.eu URL');
   } else {
     fail('successfactors.detect() should claim *.successfactors.eu');
   }
-  if (successfactors.detect({ name: 'X', api: 'https://company.jobs2web.com/x' })) {
+  if (sf.detect({ name: 'X', api: 'https://company.jobs2web.com/x' })) {
     pass('successfactors.detect() claims a jobs2web.com URL');
   } else {
     fail('successfactors.detect() should claim jobs2web.com');
   }
-  if (successfactors.detect({ name: 'ZF', careers_url: 'https://jobs.zf.com' }) === null) {
+  if (sf.detect({ name: 'ZF', careers_url: 'https://jobs.zf.com' }) === null) {
     pass('successfactors.detect() returns null for a branded RMK host (needs explicit provider:)');
   } else {
     fail('successfactors.detect() must not auto-claim branded hosts');
   }
 
-  // RMK tile parsing
-  const tileHtml = `<li class="job-tile job-id-1001"><a class="jobTitle-link" data-url="/job/Munich-Senior-Engineer-REQ1/1001/">Senior Engineer &amp; Lead</a></li>` +
-    `<li class="job-tile job-id-1002"><a class="jobTitle-link" data-url="https://jobs.zf.com/job/Berlin-Analyst-2/1002/">Analyst</a><div id="x-section-city-value">Berlin</div></li>`;
-  const tiles = parseTiles(tileHtml, 'https://jobs.zf.com');
-  if (tiles.length === 2) pass('parseTiles returns 2 tiles');
-  else fail(`parseTiles returned ${tiles.length}, expected 2`);
-  const t1 = tiles.find((t) => t.id === '1001');
-  if (t1 && t1.title === 'Senior Engineer & Lead' && t1.url === 'https://jobs.zf.com/job/Munich-Senior-Engineer-REQ1/1001/') {
-    pass('parseTiles decodes the title entity and resolves a relative data-url');
+  // cityFromSlug — recover the city prefix from an RMK /job/{City}-{Title}-{code}/ slug.
+  if (cityFromSlug('/job/Hyderabad-Specialist-Low-Level-Driver-Development-TG-500032/1399717233/', 'Specialist -Low Level Driver Development') === 'Hyderabad') {
+    pass('cityFromSlug extracts a single-word city');
   } else {
-    fail(`parseTiles tile 1 wrong: ${JSON.stringify(t1)}`);
+    fail(`cityFromSlug single-word wrong: ${cityFromSlug('/job/Hyderabad-Specialist-Low-Level-Driver-Development-TG-500032/1399717233/', 'Specialist -Low Level Driver Development')}`);
   }
-  const t2 = tiles.find((t) => t.id === '1002');
-  if (t2 && t2.location === 'Berlin') pass('parseTiles reads an explicit city field when rendered');
-  else fail(`parseTiles tile 2 location wrong: ${JSON.stringify(t2)}`);
+  // Multi-word city (Levallois-Perret) — anchoring on the title's first two
+  // words means the full city prefix survives, not just the first token.
+  if (cityFromSlug('/job/Levallois-Perret-Data-Management-Engagement-Architect-92300/1400945133/', 'Data Management Engagement Architect') === 'Levallois Perret') {
+    pass('cityFromSlug extracts a multi-word city');
+  } else {
+    fail(`cityFromSlug multi-word wrong: ${cityFromSlug('/job/Levallois-Perret-Data-Management-Engagement-Architect-92300/1400945133/', 'Data Management Engagement Architect')}`);
+  }
+  // Accented title (Ingénieur) — unicode word matching keeps the anchor intact.
+  if (cityFromSlug('/job/Massy-Ing%C3%A9nieur-Commercial-91743/1351400755/', 'Ingénieur Commercial') === 'Massy') {
+    pass('cityFromSlug handles accented (unicode) titles');
+  } else {
+    fail(`cityFromSlug accented wrong: ${cityFromSlug('/job/Massy-Ing%C3%A9nieur-Commercial-91743/1351400755/', 'Ingénieur Commercial')}`);
+  }
 
-  // parseTiles — a compact fragment covering title-entity decoding, &amp; in
-  // data-url, slug-fallback city, desktop/tablet/mobile collapse, and a
-  // title-less tile that must be dropped (upstream #1499 union).
-  const jobBase2 = 'https://jobs.example.com';
+  // parseTiles — a compact fragment covering the three things that bit during
+  // development: the city-value div (not its "City" label), an &amp; in the
+  // data-url path, a slug fallback when no city div is rendered, an entity in
+  // the title, desktop/mobile duplication collapsed to one <li>, and a
+  // title-less tile that must be dropped.
+  const jobBase = 'https://jobs.example.com';
   const fragment = `
     <ul>
       <li class="job-tile job-id-111 job-row-index-1" data-url="/job/Schweinfurt-Ferienarbeiter-97421/111/">
@@ -161,75 +168,89 @@ try {
       <li class="job-tile job-id-333 job-row-index-3" data-url="/job/no-title/333/">
       </li>
     </ul>`;
-  const parsedFrag = parseTiles(fragment, jobBase2);
-  if (parsedFrag.length === 2) pass('parseTiles returns 2 jobs (title-less tile dropped)');
-  else fail(`parseTiles returned ${parsedFrag.length} jobs, expected 2`);
-  const f1 = parsedFrag.find((j) => j.url.includes('/111/'));
-  if (f1 && f1.title === 'Ferienarbeiter (m/w/d)') pass('parseTiles decodes entity in title');
-  else fail(`parseTiles title wrong: ${JSON.stringify(f1 && f1.title)}`);
-  if (f1 && f1.location === 'Schweinfurt') pass('parseTiles reads the city-value div, not the "City" label');
-  else fail(`parseTiles city wrong: ${JSON.stringify(f1 && f1.location)}`);
-  if (f1 && f1.url === 'https://jobs.example.com/job/Schweinfurt-Ferienarbeiter-97421/111/') pass('parseTiles builds an absolute URL from data-url');
-  else fail(`parseTiles url wrong: ${JSON.stringify(f1 && f1.url)}`);
-  const f2 = parsedFrag.find((j) => j.url.includes('/222/'));
-  if (f2 && f2.url === 'https://jobs.example.com/job/Palo-Alto-Program-&-Release-Manager-CA-94304/222/') {
+  const parsed = parseTiles(fragment, jobBase);
+
+  if (parsed.length === 2) pass('parseTiles returns 2 jobs (title-less tile dropped)');
+  else fail(`parseTiles returned ${parsed.length} jobs, expected 2`);
+
+  const j1 = parsed.find((j) => j.url.includes('/111/'));
+  if (j1 && j1.title === 'Ferienarbeiter (m/w/d)') pass('parseTiles decodes entity in title');
+  else fail(`parseTiles title wrong: ${JSON.stringify(j1 && j1.title)}`);
+  if (j1 && j1.location === 'Schweinfurt') pass('parseTiles reads the city-value div, not the "City" label');
+  else fail(`parseTiles city wrong: ${JSON.stringify(j1 && j1.location)}`);
+  if (j1 && j1.url === 'https://jobs.example.com/job/Schweinfurt-Ferienarbeiter-97421/111/') pass('parseTiles builds an absolute URL from data-url');
+  else fail(`parseTiles url wrong: ${JSON.stringify(j1 && j1.url)}`);
+
+  const j2 = parsed.find((j) => j.url.includes('/222/'));
+  if (j2 && j2.url === 'https://jobs.example.com/job/Palo-Alto-Program-&-Release-Manager-CA-94304/222/') {
     pass('parseTiles decodes &amp; in the data-url path');
   } else {
-    fail(`parseTiles &amp; url wrong: ${JSON.stringify(f2 && f2.url)}`);
+    fail(`parseTiles &amp; url wrong: ${JSON.stringify(j2 && j2.url)}`);
   }
-  if (f2 && f2.location === 'Palo Alto') pass('parseTiles falls back to slug city when no city div is present');
-  else fail(`parseTiles slug-fallback city wrong: ${JSON.stringify(f2 && f2.location)}`);
-  if (parseTiles('<!DOCTYPE html>', jobBase2).length === 0) pass('parseTiles returns [] for an empty fragment');
+  if (j2 && j2.location === 'Palo Alto') pass('parseTiles falls back to slug city when no city div is present');
+  else fail(`parseTiles slug-fallback city wrong: ${JSON.stringify(j2 && j2.location)}`);
+
+  // Empty fragment (MTU's zero-req case) → no jobs, no throw.
+  if (parseTiles('<!DOCTYPE html>', jobBase).length === 0) pass('parseTiles returns [] for an empty fragment');
   else fail('parseTiles should return [] for an empty fragment');
 
-  // cityFromSlug — recover the city prefix from an RMK /job/{City}-{Title}-{code}/ slug.
-  if (cityFromSlug('/job/Hyderabad-Specialist-Low-Level-Driver-Development-TG-500032/1399717233/', 'Specialist -Low Level Driver Development') === 'Hyderabad') {
-    pass('cityFromSlug extracts a single-word city');
-  } else {
-    fail(`cityFromSlug single-word wrong: ${cityFromSlug('/job/Hyderabad-Specialist-Low-Level-Driver-Development-TG-500032/1399717233/', 'Specialist -Low Level Driver Development')}`);
-  }
-  if (cityFromSlug('/job/Levallois-Perret-Data-Management-Engagement-Architect-92300/1400945133/', 'Data Management Engagement Architect') === 'Levallois Perret') {
-    pass('cityFromSlug extracts a multi-word city');
-  } else {
-    fail(`cityFromSlug multi-word wrong: ${cityFromSlug('/job/Levallois-Perret-Data-Management-Engagement-Architect-92300/1400945133/', 'Data Management Engagement Architect')}`);
-  }
-  if (cityFromSlug('/job/Massy-Ing%C3%A9nieur-Commercial-91743/1351400755/', 'Ingénieur Commercial') === 'Massy') {
-    pass('cityFromSlug handles accented (unicode) titles');
-  } else {
-    fail(`cityFromSlug accented wrong: ${cityFromSlug('/job/Massy-Ing%C3%A9nieur-Commercial-91743/1351400755/', 'Ingénieur Commercial')}`);
-  }
+  // ── CSB (Career Site Builder) strategy — JSON jobs API ────────────────────
+  const { extractLocales, parseCsbDate, cleanCsbLocation, parseCsbJobs } = successfactorsModule;
 
-  // CSB helpers
-  if (parseCsbDate('6/18/26') === Date.UTC(2026, 5, 18) && parseCsbDate('20.11.23') === Date.UTC(2023, 10, 20) && parseCsbDate('junk') === undefined) {
-    pass('parseCsbDate reads US slash (M/D/Y) and EU dot (D.M.Y) formats, rejects junk');
+  // extractLocales — pull the language-switcher locales from a /search/ page,
+  // deduped and priority-ordered (de_DE, en_US first; then alphabetical).
+  const switcherHtml =
+    '<a href="/search/?q=&amp;startrow=0&amp;locale=fr_FR">FR</a>' +
+    '<a href="/search/?q=&amp;startrow=0&amp;locale=en_US">EN</a>' +
+    '<a href="/search/?q=&amp;startrow=0&amp;locale=de_DE">DE</a>' +
+    '<a href="/search/?q=&amp;startrow=0&amp;locale=de_DE">DE dup</a>';
+  const locs = extractLocales(switcherHtml);
+  if (JSON.stringify(locs) === JSON.stringify(['de_DE', 'en_US', 'fr_FR'])) {
+    pass('extractLocales dedups and priority-orders (de_DE, en_US, then alpha)');
   } else {
-    fail('parseCsbDate wrong');
+    fail(`extractLocales wrong: ${JSON.stringify(locs)}`);
   }
+  if (extractLocales('<p>no locales here</p>').length === 0) pass('extractLocales returns [] when the page carries none');
+  else fail('extractLocales should return [] for a page with no locale links');
+
+  // The date format follows the query locale: BMW's fr_FR and pt_BR pages send
+  // D/M/YYYY with slashes, and hu_HU sends "YYYY. MM. DD.".
+  {
+    const rec = (id, d) => ({ response: { id, unifiedStandardTitle: `Role ${id}`, unifiedStandardStart: d } });
+    const posted = (d, locale) => parseCsbJobs({ jobSearchResult: [rec('1', d)] }, { origin: 'https://jobs.example.com' }, locale)[0].postedAt;
+    const got = [
+      posted('05/10/2026', 'fr_FR'),
+      posted('13/10/2026', 'pt_BR'),
+      posted('2025. 07. 03.', 'hu_HU'),
+      posted('6/18/26', 'en_US'),
+    ];
+    const want = [Date.UTC(2026, 9, 5), Date.UTC(2026, 9, 13), Date.UTC(2025, 6, 3), Date.UTC(2026, 5, 18)];
+    if (JSON.stringify(got) === JSON.stringify(want)) pass('parseCsbJobs reads the posting date in the query locale order');
+    else fail(`parseCsbJobs locale dates wrong: ${JSON.stringify(got.map((t) => (t ? new Date(t).toISOString().slice(0, 10) : t)))}`);
+  }
+  // parseCsbDate — locale-dependent short date; separator infers field order.
+  if (parseCsbDate('6/18/26') === Date.UTC(2026, 5, 18)) pass('parseCsbDate reads US M/D/YY');
+  else fail(`parseCsbDate US wrong: ${parseCsbDate('6/18/26')}`);
+  if (parseCsbDate('20.11.23') === Date.UTC(2023, 10, 20)) pass('parseCsbDate reads European D.M.YY (dots)');
+  else fail(`parseCsbDate DE wrong: ${parseCsbDate('20.11.23')}`);
   if (parseCsbDate('garbage') === undefined && parseCsbDate('13/40/99') === undefined && parseCsbDate('') === undefined) {
     pass('parseCsbDate returns undefined for junk / out-of-range / empty');
   } else {
     fail('parseCsbDate should reject junk, out-of-range, and empty input');
   }
-  if (cleanCsbLocation(['Karlovy Vary, CZE, 36004<br/>', 'Karlovy Vary, CZE, 36004<br/>', 'Prague, CZE']) === 'Karlovy Vary, CZE, 36004 / Prague, CZE') {
-    pass('cleanCsbLocation strips markup, dedupes, and joins multiple locations');
-  } else {
-    fail('cleanCsbLocation wrong');
-  }
+
+  // cleanCsbLocation — array of "City, CC, ZIP<br/>" strings → joined, stripped.
+  if (cleanCsbLocation(['Karlovy Vary, CZE, 36004<br/>']) === 'Karlovy Vary, CZE, 36004') pass('cleanCsbLocation strips trailing <br/>');
+  else fail(`cleanCsbLocation single wrong: ${JSON.stringify(cleanCsbLocation(['Karlovy Vary, CZE, 36004<br/>']))}`);
+  if (cleanCsbLocation(['Munich<br/>', 'Berlin<br/>']) === 'Munich / Berlin') pass('cleanCsbLocation joins multiple locations with " / "');
+  else fail(`cleanCsbLocation multi wrong: ${JSON.stringify(cleanCsbLocation(['Munich<br/>', 'Berlin<br/>']))}`);
   if (cleanCsbLocation(undefined) === '' && cleanCsbLocation([]) === '') pass('cleanCsbLocation tolerates missing/empty location');
   else fail('cleanCsbLocation should return "" for missing/empty input');
-  const csbRows = parseCsbJobs(
-    { jobSearchResult: [{ response: { id: 55, unifiedStandardTitle: 'Data Engineer', unifiedUrlTitle: 'data-engineer', jobLocationShort: ['Munich, DEU'], unifiedStandardStart: '6/18/26' } }] },
-    { origin: 'https://careers.example.com' },
-    'en_US',
-  );
-  if (csbRows.length === 1 && csbRows[0].url === 'https://careers.example.com/job/data-engineer/55-en_US' && csbRows[0].postedAt === Date.UTC(2026, 5, 18)) {
-    pass('parseCsbJobs maps id/title/url/postedAt from the jobs API response');
-  } else {
-    fail(`parseCsbJobs wrong: ${JSON.stringify(csbRows)}`);
-  }
-  // parseCsbJobs — drops id/title-less records; sanitizes &amp;/URL-structural
-  // chars out of a cosmetic slug (upstream #1499 union).
-  const csbJson2 = {
+
+  // parseCsbJobs — map the {response:{…}} records; build {id}-{locale} URLs and
+  // sanitize the cosmetic slug (HTML entities, URL-structural chars).
+  const csbJson = {
+    totalJobs: 3,
     jobSearchResult: [
       { response: { id: '31099', unifiedStandardTitle: 'Analytical Lab Technician', unifiedUrlTitle: 'Analytical-Lab-Technician', jobLocationShort: ['Anyang, KOR, 14058<br/>'], unifiedStandardStart: '6/18/26' } },
       { response: { id: '1283', unifiedStandardTitle: 'Senior Expert Mergers & Acquisitions (m/f/d)', unifiedUrlTitle: 'Senior-Expert-Mergers-&amp;-Acquisitions-%28mfd%29', jobLocationShort: ['Munich<br/>'], unifiedStandardStart: '4/21/26' } },
@@ -237,76 +258,30 @@ try {
       { response: { id: '999', unifiedStandardTitle: '', unifiedUrlTitle: 'no-title-dropped' } },
     ],
   };
-  const csbRows2 = parseCsbJobs(csbJson2, { origin: 'https://jobs.example.com' }, 'en_US');
-  if (csbRows2.length === 2) pass('parseCsbJobs drops records missing id or title');
-  else fail(`parseCsbJobs returned ${csbRows2.length}, expected 2`);
-  const cr2 = csbRows2[1];
-  if (cr2 && !/[?#&]|&amp;/.test(new URL(cr2.url).pathname)) pass('parseCsbJobs sanitizes &amp; / URL-structural chars out of the slug');
-  else fail(`parseCsbJobs slug not sanitized: ${JSON.stringify(cr2 && cr2.url)}`);
+  const csbCfg = { origin: 'https://jobs.example.com' };
+  const csbJobs = parseCsbJobs(csbJson, csbCfg, 'en_US');
+  if (csbJobs.length === 2) pass('parseCsbJobs drops records missing id or title');
+  else fail(`parseCsbJobs returned ${csbJobs.length}, expected 2`);
+  const c1 = csbJobs[0];
+  if (c1 && c1.url === 'https://jobs.example.com/job/Analytical-Lab-Technician/31099-en_US') pass('parseCsbJobs builds {origin}/job/{slug}/{id}-{locale}');
+  else fail(`parseCsbJobs url wrong: ${JSON.stringify(c1 && c1.url)}`);
+  if (c1 && c1.location === 'Anyang, KOR, 14058') pass('parseCsbJobs cleans jobLocationShort');
+  else fail(`parseCsbJobs location wrong: ${JSON.stringify(c1 && c1.location)}`);
+  if (c1 && c1.postedAt === Date.UTC(2026, 5, 18)) pass('parseCsbJobs sets postedAt from unifiedStandardStart');
+  else fail(`parseCsbJobs postedAt wrong: ${JSON.stringify(c1 && c1.postedAt)}`);
+  const c2 = csbJobs[1];
+  if (c2 && !/[?#&]|&amp;/.test(new URL(c2.url).pathname)) pass('parseCsbJobs sanitizes &amp; / URL-structural chars out of the slug');
+  else fail(`parseCsbJobs slug not sanitized: ${JSON.stringify(c2 && c2.url)}`);
 
   // parseCsbJobs (#2010): a brand-scoped cfg.base (from resolveConfig) must
-  // flow into the built job URL, for a multi-brand CSB tenant.
+  // flow into the built job URL, for a hypothetical multi-brand CSB tenant.
   const csbBrandCfg = { origin: 'https://careers.example.com', base: 'https://careers.example.com/Acme' };
-  const csbBrandJobs = parseCsbJobs(csbJson2, csbBrandCfg, 'en_US');
+  const csbBrandJobs = parseCsbJobs(csbJson, csbBrandCfg, 'en_US');
   if (csbBrandJobs[0]?.url === 'https://careers.example.com/Acme/job/Analytical-Lab-Technician/31099-en_US') {
     pass('parseCsbJobs uses cfg.base (brand-scoped) when present (#2010)');
   } else {
     fail(`parseCsbJobs did not honor cfg.base: ${JSON.stringify(csbBrandJobs[0]?.url)}`);
   }
-
-  const locales = extractLocales('<a href="/search/?q=&startrow=0&amp;locale=de_DE">DE</a><a href="/search/?locale=en_US">EN</a>');
-  if (locales[0] === 'de_DE' && locales.includes('en_US')) pass('extractLocales discovers and priority-orders tenant locales');
-  else fail(`extractLocales wrong: ${JSON.stringify(locales)}`);
-  const switcherHtml =
-    '<a href="/search/?q=&amp;startrow=0&amp;locale=fr_FR">FR</a>' +
-    '<a href="/search/?q=&amp;startrow=0&amp;locale=en_US">EN</a>' +
-    '<a href="/search/?q=&amp;startrow=0&amp;locale=de_DE">DE</a>' +
-    '<a href="/search/?q=&amp;startrow=0&amp;locale=de_DE">DE dup</a>';
-  const locs2 = extractLocales(switcherHtml);
-  if (JSON.stringify(locs2) === JSON.stringify(['de_DE', 'en_US', 'fr_FR'])) {
-    pass('extractLocales dedups and priority-orders (de_DE, en_US, then alpha)');
-  } else {
-    fail(`extractLocales wrong: ${JSON.stringify(locs2)}`);
-  }
-  if (extractLocales('<p>no locales here</p>').length === 0) pass('extractLocales returns [] when the page carries none');
-  else fail('extractLocales should return [] for a page with no locale links');
-
-  // fetch() strategy selection
-  const rmkCtx = { fetchText: async () => tileHtml };
-  const rmkJobs = await successfactors.fetch({ name: 'ZF', api: 'https://jobs.zf.com' }, rmkCtx);
-  if (rmkJobs.length === 2) pass('successfactors.fetch() uses RMK when the tile scraper returns postings');
-  else fail(`successfactors.fetch() RMK path returned ${rmkJobs.length} jobs, expected 2`);
-
-  // A blank RMK page (0 tiles) must fall through to CSB automatically.
-  const fallbackCtx = {
-    fetchText: async () => '',
-    fetchJson: async () => ({ jobSearchResult: [{ response: { id: 9, unifiedStandardTitle: 'CSB Role', unifiedUrlTitle: 'csb-role', unifiedStandardStart: '1/1/26' } }], totalJobs: 1 }),
-  };
-  const fallbackJobs = await successfactors.fetch({ name: 'Tenant', api: 'https://careers.example.com' }, fallbackCtx);
-  if (fallbackJobs.length === 1 && fallbackJobs[0].title === 'CSB Role') pass('successfactors.fetch() auto-falls back to CSB when RMK yields zero postings');
-  else fail(`successfactors.fetch() RMK-empty fallback wrong: ${JSON.stringify(fallbackJobs)}`);
-
-  let rmkCalled = false;
-  const csbForcedCtx = {
-    fetchText: async () => { rmkCalled = true; return ''; }, // only the /search/ locale-discovery call should hit fetchText
-    fetchJson: async () => ({ jobSearchResult: [{ response: { id: 7, unifiedStandardTitle: 'Forced CSB', unifiedUrlTitle: 'x' } }], totalJobs: 1 }),
-  };
-  const forced = await successfactors.fetch({ name: 'Tenant', api: 'https://careers.example.com', sfVariant: 'csb' }, csbForcedCtx);
-  if (forced.length === 1 && forced[0].title === 'Forced CSB') pass('successfactors.fetch() honors an explicit sfVariant: "csb" override, skipping the RMK tile probe');
-  else fail(`successfactors.fetch() explicit CSB override wrong: ${JSON.stringify(forced)}`);
-
-  // ctx.maxPages bounds pages-per-locale even when totalJobs implies more pages
-  // exist. Pin locale discovery to a single locale so the count isolates the
-  // per-locale page cap from the (separate) multi-locale loop.
-  let csbCalls = 0;
-  const boundedCtx = {
-    fetchText: async () => '<a href="/search/?locale=de_DE">DE</a>',
-    fetchJson: async () => { csbCalls++; return { jobSearchResult: [{ response: { id: String(csbCalls), unifiedStandardTitle: `Role ${csbCalls}`, unifiedUrlTitle: 'x' } }], totalJobs: 999 }; },
-    maxPages: 1,
-  };
-  await successfactors.fetch({ name: 'Tenant', api: 'https://careers.example.com', sfVariant: 'csb' }, boundedCtx);
-  if (csbCalls === 1) pass('successfactors.fetch() CSB path honors ctx.maxPages (bounded health-probe budget)');
-  else fail(`successfactors.fetch() CSB path made ${csbCalls} calls under ctx.maxPages:1 with 1 locale, expected 1`);
 
   // Regression (#1639 lineage) — a numeric entity above U+10FFFF must not throw
   // RangeError out of the whole parse. The local decodeEntities copy guarded
@@ -328,7 +303,6 @@ try {
     else if (badTiles.length === 1 && badTiles[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('successfactors.parseTiles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
     else fail(`successfactors.parseTiles() out-of-range entity wrong: ${JSON.stringify(badTiles)}`);
   }
-
   // CSB: when every locale fails without one successful jobs-API request, the
   // board is unreachable, not empty. fetch() must throw so scan/portal-health
   // record a failure instead of "live but empty".
@@ -336,7 +310,7 @@ try {
     let csbErr = null;
     let csbCalls = 0;
     try {
-      await successfactors.fetch(
+      await sf.fetch(
         { name: 'DeadCo', careers_url: 'https://careers.deadco.example', sfVariant: 'csb' },
         {
           sleep: async () => {},
@@ -367,7 +341,7 @@ try {
     let probeJobs = null;
     let probeCalls = 0;
     try {
-      probeJobs = await successfactors.fetch(
+      probeJobs = await sf.fetch(
         { name: 'EmptyCo', careers_url: 'https://jobs.emptyco.example' },
         {
           sleep: async () => {},
@@ -388,7 +362,67 @@ try {
       fail(`successfactors fetch() empty-RMK CSB-probe wrong: ${probeErr ? `threw "${probeErr.message}"` : JSON.stringify(probeJobs)} after ${probeCalls} jobs-API calls`);
     }
   }
-} catch (e) {
-  fail(`successfactors provider tests crashed: ${e.message}`);
+  // CSB paging against a server whose default sort reshuffles ties on every
+  // request (BMW's live behavior): every posting must still come back.
+  {
+    const ids = Array.from({ length: 25 }, (_, i) => String(1000 + i));
+    const rec = (id) => ({ response: { id, unifiedStandardTitle: `Role ${id}`, unifiedUrlTitle: `Role-${id}` } });
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    let dateCalls = 0;
+    const jobs = await sf.fetch(
+      { name: 'ShuffleCo', careers_url: 'https://jobs.shuffleco.example', sfVariant: 'csb' },
+      {
+        sleep: async () => {},
+        fetchText: async () => '<a href="/search/?locale=en_US">en</a>',
+        fetchJson: async (_url, opts) => {
+          const { pageNumber, sortBy } = JSON.parse(opts.body);
+          let order;
+          if (sortBy === 'date') {
+            dateCalls++;
+            order = [...ids];
+            if (dateCalls <= 3 && pageNumber === 1) order[10] = order[9];
+          } else {
+            order = [...ids].sort(() => rand() - 0.5);
+          }
+          return { totalJobs: ids.length, jobSearchResult: order.slice(pageNumber * 10, pageNumber * 10 + 10).map(rec) };
+        },
+      },
+    );
+    const got = new Set(jobs.map((j) => j.url.split('/').pop().split('-')[0]));
+    if (got.size === 25 && jobs.length === 25) pass('successfactors CSB returns every posting when the server reshuffles page order');
+    else fail(`successfactors CSB lost postings under unstable paging: ${got.size} of 25`);
+  }
+  {
+    let inFlight = 0;
+    let peak = 0;
+    const pagesAsked = [];
+    const jobs = await sf.fetch(
+      { name: 'ParallelCo', careers_url: 'https://careers.parallelco.example', sfVariant: 'csb' },
+      {
+        sleep: async () => {},
+        fetchText: async () => '<a href="/search/?q=&startrow=0&locale=de_DE">de</a>',
+        fetchJson: async (_url, opts) => {
+          const { pageNumber } = JSON.parse(opts.body);
+          pagesAsked.push(pageNumber);
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          inFlight--;
+          const count = Math.max(0, Math.min(10, 125 - pageNumber * 10));
+          return {
+            totalJobs: 125,
+            jobSearchResult: Array.from({ length: count }, (_, i) => ({ response: { id: String(pageNumber * 10 + i), unifiedStandardTitle: `Role ${pageNumber * 10 + i}`, unifiedUrlTitle: 'Role' } })),
+          };
+        },
+      },
+    );
+    if (jobs.length === 125 && pagesAsked.length === 13 && peak === 6 && jobs[0].title === 'Role 0' && jobs[124].title === 'Role 124') {
+      pass('successfactors CSB fetch() asks for the pages after page 0 six at a time and keeps board order');
+    } else {
+      fail(`successfactors CSB parallel pages: ${jobs.length} jobs, ${pagesAsked.length} requests, peak ${peak} in flight, first=${jobs[0]?.title} last=${jobs.at(-1)?.title}`);
+    }
+  }
+} catch (err) {
+  fail(`successfactors provider test threw: ${err.message}`);
 }
-

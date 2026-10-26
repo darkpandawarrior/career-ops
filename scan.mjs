@@ -3026,7 +3026,7 @@ export function sanitizeMarkdownField(value) {
     .replace(/\|/g, '/');
 }
 
-function sanitizePipelineUrl(value) {
+export function sanitizePipelineUrl(value) {
   return normalizeScanUrl(value)
     .replace(/[\\[\]]/g, char => MARKDOWN_ESCAPE_CHARS[char])
     .replace(/\|/g, '%7C');

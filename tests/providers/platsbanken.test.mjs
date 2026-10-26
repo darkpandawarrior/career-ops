@@ -260,18 +260,19 @@ try {
     const withTmpCwd = async (setup, run) => {
       const tmp = mkdtempSync(join(tmpdir(), 'career-ops-platsbanken-fallback-'));
       const cwdBefore = process.cwd();
-      let rootBefore;
+      const rootEnvBefore = { root: process.env.CAREER_OPS_ROOT, dir: process.env.CAREER_OPS_DATA_DIR };
       try {
         setup(tmp);
         process.chdir(tmp);
-        // fork: the profile default resolves from the data root, not the cwd
-        rootBefore = process.env.CAREER_OPS_ROOT;
         process.env.CAREER_OPS_ROOT = tmp;
+        process.env.CAREER_OPS_DATA_DIR = '';
         return await run();
       } finally {
+        if (rootEnvBefore.root === undefined) delete process.env.CAREER_OPS_ROOT;
+        else process.env.CAREER_OPS_ROOT = rootEnvBefore.root;
+        if (rootEnvBefore.dir === undefined) delete process.env.CAREER_OPS_DATA_DIR;
+        else process.env.CAREER_OPS_DATA_DIR = rootEnvBefore.dir;
         process.chdir(cwdBefore);
-        if (rootBefore === undefined) delete process.env.CAREER_OPS_ROOT;
-        else process.env.CAREER_OPS_ROOT = rootBefore;
         rmSync(tmp, { recursive: true, force: true });
       }
     };
