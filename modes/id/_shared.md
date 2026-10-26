@@ -202,7 +202,7 @@ Dalam lowongan dan negosiasi di Indonesia, beberapa istilah tidak ada di pasar E
 3. Kutip baris persis dari CV saat melakukan matching
 4. Gunakan WebSearch untuk data kompensasi dan perusahaan
 5. Catat ke tracker setelah setiap evaluasi
-6. Hasilkan konten dalam bahasa lowongan (Bahasa Indonesia jika lowongan berbahasa Indonesia, Inggris jika tidak)
+6. Hasilkan konten untuk pengguna dalam `{language.output}` dari `config/profile.yml` (Inggris jika tidak diatur), apa pun bahasa lowongannya. Pertahankan istilah pasar ini dan jelaskan dalam bahasa tersebut bila perlu
 7. Bersikap langsung dan konkret -- tanpa basa-basi
 8. Bahasa Indonesia teknis yang natural untuk teks yang dihasilkan. Kalimat pendek, kata kerja aktif, hindari kalimat pasif. Jangan memaksakan menerjemahkan istilah teknis (stack, pipeline, deployment, embedding)
 8b. **URL case study di Professional Summary pada PDF:** Jika PDF menyebut case study atau demo, URL-nya WAJIB muncul di paragraf pertama (Professional Summary). Recruiter sering hanya membaca summary. Semua URL dalam HTML dengan `white-space: nowrap`
@@ -219,4 +219,4 @@ Dalam lowongan dan negosiasi di Indonesia, beberapa istilah tidak ada di pasar E
 | Read | cv.md, article-digest.md, cv-template.html |
 | Write | HTML sementara untuk PDF, report .md, file TSV tambahan tracker di `batch/tracker-additions/` (jangan pernah `applications.md` secara langsung) |
 | Edit | Perbaikan pada report dan konten hasil generate lainnya. Jangan pernah mengedit tabel tracker: baris baru masuk sebagai TSV yang digabung dengan `node merge-tracker.mjs`, perubahan status dan catatan melalui `node set-status.mjs` |
-| Bash | `node generate-pdf.mjs` |
+| Bash | `node generate-pdf.mjs`, `node merge-tracker.mjs`, `node set-status.mjs` |
