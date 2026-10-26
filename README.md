@@ -6,8 +6,8 @@
 
 ---
 
-![engine version](https://img.shields.io/badge/engine-career--ops_v1.36.0-6366f1?style=flat-square)
-![dashboard version](https://img.shields.io/badge/dashboard-web_v0.14.0-22d3ee?style=flat-square)
+![engine version](https://img.shields.io/badge/engine-career--ops_v1.38.0-6366f1?style=flat-square)
+![dashboard version](https://img.shields.io/badge/dashboard-web_v0.16.0-22d3ee?style=flat-square)
 ![Next.js](https://img.shields.io/badge/Next.js_16-000000?style=flat-square&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React_19-20232A?style=flat-square&logo=react&logoColor=61DAFB)
 ![TypeScript](https://img.shields.io/badge/TypeScript_7-3178C6?style=flat-square&logo=typescript&logoColor=white)
