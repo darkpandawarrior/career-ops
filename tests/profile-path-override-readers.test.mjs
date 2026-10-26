@@ -22,7 +22,7 @@
 import { pass, fail, rmSync, ROOT, NODE } from './helpers.mjs';
 import { spawn, spawnSync } from 'child_process';
 import { createServer } from 'http';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
@@ -248,22 +248,26 @@ try {
     ? pass('builders: renderHtmlToPdf with no workspaceRoot reads the profile CAREER_OPS_PROFILE names')
     : failOnce(`builders: renderHtmlToPdf() touched ${JSON.stringify(defaulted.paths.map((p) => p.replace(scratch, '<scratch>')))}; expected only <scratch>/named-profile-B.yml (exit ${defaulted.code})`);
 
-  // 4. update-system: the template variants the updater preserves are the ones the
-  // profile in force selects. snapshotConfiguredTemplateVariants() takes a data
-  // root (tests and apply() both pass one) and an optional profilePath that names
-  // the file outright.
-  const snapshot = (profilePathArg) => inline(`
-    const { snapshotConfiguredTemplateVariants } = await import(${JSON.stringify(module('update-system.mjs'))});
-    await snapshotConfiguredTemplateVariants({ dataRoot: ${JSON.stringify(dataRoot)}${profilePathArg ? `, profilePath: ${JSON.stringify(profilePathArg)}` : ''} });
-  `);
-  const fromRoot = await touched(snapshot(null), { override: true });
-  fromRoot.paths.length === 1 && fromRoot.paths[0] === profileA
-    ? pass('updater: snapshotConfiguredTemplateVariants({dataRoot}) reads that root, not the override')
-    : failOnce(`updater: snapshot with an explicit dataRoot touched ${JSON.stringify(fromRoot.paths.map((p) => p.replace(scratch, '<scratch>')))}; expected only <scratch>/data-root/config/profile.yml (exit ${fromRoot.code})`);
-  const named = await touched(snapshot(profileB), { override: false });
-  named.paths.length === 1 && named.paths[0] === profileB
-    ? pass('updater: snapshotConfiguredTemplateVariants({profilePath}) reads the profile it is given')
-    : failOnce(`updater: snapshot with a profilePath touched ${JSON.stringify(named.paths.map((p) => p.replace(scratch, '<scratch>')))}; expected only <scratch>/named-profile-B.yml (exit ${named.code})`);
+  // FORK ADAPTATION: the fork ships no updater (no update-system.mjs), so its cases are skipped.
+  if (existsSync(join(ROOT, 'update-system.mjs'))) {
+    // 4. update-system: the template variants the updater preserves are the ones the
+    // profile in force selects. snapshotConfiguredTemplateVariants() takes a data
+    // root (tests and apply() both pass one) and an optional profilePath that names
+    // the file outright.
+    const snapshot = (profilePathArg) => inline(`
+      const { snapshotConfiguredTemplateVariants } = await import(${JSON.stringify(module('update-system.mjs'))});
+      await snapshotConfiguredTemplateVariants({ dataRoot: ${JSON.stringify(dataRoot)}${profilePathArg ? `, profilePath: ${JSON.stringify(profilePathArg)}` : ''} });
+    `);
+    const fromRoot = await touched(snapshot(null), { override: true });
+    fromRoot.paths.length === 1 && fromRoot.paths[0] === profileA
+      ? pass('updater: snapshotConfiguredTemplateVariants({dataRoot}) reads that root, not the override')
+      : failOnce(`updater: snapshot with an explicit dataRoot touched ${JSON.stringify(fromRoot.paths.map((p) => p.replace(scratch, '<scratch>')))}; expected only <scratch>/data-root/config/profile.yml (exit ${fromRoot.code})`);
+    const named = await touched(snapshot(profileB), { override: false });
+    named.paths.length === 1 && named.paths[0] === profileB
+      ? pass('updater: snapshotConfiguredTemplateVariants({profilePath}) reads the profile it is given')
+      : failOnce(`updater: snapshot with a profilePath touched ${JSON.stringify(named.paths.map((p) => p.replace(scratch, '<scratch>')))}; expected only <scratch>/named-profile-B.yml (exit ${named.code})`);
+
+  }
 
   // 5b. export-ats-text takes its profile and its CV from the same place. Run from
   // a directory that is not the data root, the profile used to fail closed (cwd
@@ -324,40 +328,44 @@ try {
     ? pass('builders: generate-pdf honors an override that names the data-root profile itself')
     : failOnce(`builders: generate-pdf ignored CAREER_OPS_PROFILE naming the data-root profile: sheet ${namingDataRoot}, expected A4`);
 
-  // 4b. apply() is not exported, so, as updater-apply-target-verification.test.mjs
-  // does for the properties that only exist in its body, the wiring is asserted on
-  // its source: apply() must hand the snapshot BOTH the profile in force
-  // (getProfilePath()) and the data root's own. The templates directory is the data
-  // root's, so reading only one profile leaves the other's variants unprotected.
-  const updaterSource = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
-  const takesProfile = /profilePaths = \[getProfilePath\(\), getProfilePath\(dataRoot\)\];/.test(updaterSource);
-  const callAt = updaterSource.indexOf('await snapshotConfiguredTemplateVariantsAcrossProfiles({');
-  const snapshotCall = callAt === -1 ? null : [updaterSource.slice(callAt, updaterSource.indexOf('readRemoteContent', callAt))];
-  takesProfile && snapshotCall && /\bprofilePaths,/.test(snapshotCall[0])
-    ? pass('updater: apply() hands both the override profile and the data-root profile to the template-variant snapshot (source check)')
-    : failOnce(`updater: apply() does not pass [getProfilePath(), getProfilePath(dataRoot)] into the snapshot (takesProfile=${takesProfile}, call=${snapshotCall ? 'found' : 'missing'})`);
+  // FORK ADAPTATION: no updater in the fork; skip 4b-4d when update-system.mjs is absent.
+  if (existsSync(join(ROOT, 'update-system.mjs'))) {
+    // 4b. apply() is not exported, so, as updater-apply-target-verification.test.mjs
+    // does for the properties that only exist in its body, the wiring is asserted on
+    // its source: apply() must hand the snapshot BOTH the profile in force
+    // (getProfilePath()) and the data root's own. The templates directory is the data
+    // root's, so reading only one profile leaves the other's variants unprotected.
+    const updaterSource = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+    const takesProfile = /profilePaths = \[getProfilePath\(\), getProfilePath\(dataRoot\)\];/.test(updaterSource);
+    const callAt = updaterSource.indexOf('await snapshotConfiguredTemplateVariantsAcrossProfiles({');
+    const snapshotCall = callAt === -1 ? null : [updaterSource.slice(callAt, updaterSource.indexOf('readRemoteContent', callAt))];
+    takesProfile && snapshotCall && /\bprofilePaths,/.test(snapshotCall[0])
+      ? pass('updater: apply() hands both the override profile and the data-root profile to the template-variant snapshot (source check)')
+      : failOnce(`updater: apply() does not pass [getProfilePath(), getProfilePath(dataRoot)] into the snapshot (takesProfile=${takesProfile}, call=${snapshotCall ? 'found' : 'missing'})`);
 
-  // 4c. The self-reexec child runs with the checkout as its cwd, so a relative
-  // CAREER_OPS_PROFILE would name a different file there than in the user's shell.
-  // The parent resolves it and hands the child the absolute path.
-  const reexecEnvFor = (profile) => JSON.parse(spawnSync(NODE, inline(
-    `const { reexecProfileEnv } = await import(${JSON.stringify(module('update-system.mjs'))}); console.log(JSON.stringify(await reexecProfileEnv()));`), {
-    cwd: decoyCwd, encoding: 'utf-8', timeout: 60_000,
-    env: { ...process.env, CAREER_OPS_ROOT: dataRoot, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: profile },
-  }).stdout);
-  const relEnv = reexecEnvFor('profiles/me.yml');
-  relEnv.CAREER_OPS_PROFILE === join(decoyCwd, 'profiles', 'me.yml') && Object.keys(reexecEnvFor('')).length === 0
-    ? pass('updater: the self-reexec child gets a relative CAREER_OPS_PROFILE resolved against the parent\'s cwd, and nothing when it is unset')
-    : failOnce(`updater: reexecProfileEnv() gave ${JSON.stringify(relEnv)} for a relative override from ${decoyCwd}`);
-  /\.\.\.process\.env,\s*\.\.\.await reexecProfileEnv\(\),/.test(updaterSource)
-    ? pass('updater: apply() spreads reexecProfileEnv() into the self-reexec child env after process.env (source check)')
-    : failOnce('updater: the self-reexec child env does not spread reexecProfileEnv() after process.env');
+    // 4c. The self-reexec child runs with the checkout as its cwd, so a relative
+    // CAREER_OPS_PROFILE would name a different file there than in the user's shell.
+    // The parent resolves it and hands the child the absolute path.
+    const reexecEnvFor = (profile) => JSON.parse(spawnSync(NODE, inline(
+      `const { reexecProfileEnv } = await import(${JSON.stringify(module('update-system.mjs'))}); console.log(JSON.stringify(await reexecProfileEnv()));`), {
+      cwd: decoyCwd, encoding: 'utf-8', timeout: 60_000,
+      env: { ...process.env, CAREER_OPS_ROOT: dataRoot, CAREER_OPS_DATA_DIR: '', CAREER_OPS_PROFILE: profile },
+    }).stdout);
+    const relEnv = reexecEnvFor('profiles/me.yml');
+    relEnv.CAREER_OPS_PROFILE === join(decoyCwd, 'profiles', 'me.yml') && Object.keys(reexecEnvFor('')).length === 0
+      ? pass('updater: the self-reexec child gets a relative CAREER_OPS_PROFILE resolved against the parent\'s cwd, and nothing when it is unset')
+      : failOnce(`updater: reexecProfileEnv() gave ${JSON.stringify(relEnv)} for a relative override from ${decoyCwd}`);
+    /\.\.\.process\.env,\s*\.\.\.await reexecProfileEnv\(\),/.test(updaterSource)
+      ? pass('updater: apply() spreads reexecProfileEnv() into the self-reexec child env after process.env (source check)')
+      : failOnce('updater: the self-reexec child env does not spread reexecProfileEnv() after process.env');
 
-  // 4d. The skip warning for a profile the update cannot parse is printed by apply().
-  // Deleting the print leaves the skip silent, and nothing else would notice.
-  /for \(const warning of configuredSnapshot\.warnings\) console\.log\(/.test(updaterSource)
-    ? pass('updater: apply() prints the snapshot warnings (source check)')
-    : failOnce('updater: apply() no longer prints configuredSnapshot.warnings');
+    // 4d. The skip warning for a profile the update cannot parse is printed by apply().
+    // Deleting the print leaves the skip silent, and nothing else would notice.
+    /for \(const warning of configuredSnapshot\.warnings\) console\.log\(/.test(updaterSource)
+      ? pass('updater: apply() prints the snapshot warnings (source check)')
+      : failOnce('updater: apply() no longer prints configuredSnapshot.warnings');
+
+  }
 
   // 4e. Doctor's .env warning has to be true at this change: the evaluators follow
   // CAREER_OPS_PROFILE now, after their working-directory config(), so it names them

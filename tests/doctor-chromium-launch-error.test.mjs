@@ -188,7 +188,17 @@ if (process.platform === 'win32') {
     }
   }
 
-  {
+  // FORK ADAPTATION: this case needs the playwright version package.json pins,
+  // whose launch error carries the browser's stderr. The sync worktree shares
+  // node_modules with the main checkout, which can hold an older playwright
+  // whose error is only "Target page, context or browser has been closed".
+  // Skip with a visible reason there; with the pinned version it runs in full.
+  const pinnedPw = (JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8')).dependencies?.playwright ?? '').replace(/^[^\d]*/, '');
+  let installedPw = '';
+  try { installedPw = JSON.parse(readFileSync(join(ROOT, 'node_modules', 'playwright', 'package.json'), 'utf-8')).version; } catch { /* absent: run the case */ }
+  if (pinnedPw && installedPw && installedPw !== pinnedPw) {
+    pass(`doctor: any other launch failure case skipped (installed playwright ${installedPw} != pinned ${pinnedPw}; its launch error omits browser stderr)`);
+  } else {
     const out = doctorWithStubBrowser('[1021/101010.000:FATAL:zygote_host_impl_linux.cc(127)] No usable sandbox!');
     if (out === null) {
       fail('doctor: could not learn the headless-shell path Playwright launches');

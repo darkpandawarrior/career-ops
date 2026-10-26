@@ -327,6 +327,11 @@ export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0 } 
  */
 export async function importSuiteContained(file, rel) {
   const before = results();
+  // FORK ADAPTATION: the fork runs every suite in test-all's own process, so an
+  // import can nest inside a suite that already sealed git (hermetic-git-env does).
+  // Stash the outer seal so this import unseals only what it sealed itself.
+  const outerUnseal = unsealGitEnv;
+  unsealGitEnv = null;
   try {
     await import(pathToFileURL(file).href);
   } catch (err) {
@@ -341,10 +346,8 @@ export async function importSuiteContained(file, rel) {
   } finally {
     // A suite that sealed git (sealProcessGitEnv) hands the environment back,
     // so the suites after it in this process do not inherit the seal.
-    if (unsealGitEnv) {
-      unsealGitEnv();
-      unsealGitEnv = null;
-    }
+    if (unsealGitEnv) unsealGitEnv();
+    unsealGitEnv = outerUnseal;
   }
 }
 

@@ -60,6 +60,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
 import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+// FORK ADAPTATION: upstream's --needs tool-suite filter (tests/required-tools.mjs).
+import { REQUIRED_TOOL_ENV, declaresTool } from './tests/required-tools.mjs';
 import { collectMjsFiles } from './lib/mjs-files.mjs';
 import { walkTree, listTree } from './lib/walk-tree.mjs';
 import { FROZEN_EVALUATION_MODES, KNOWN_EVALUATION_MODES, discoverEvaluationModes, readModeText, structuralGaps } from './tests/evaluation-mode-parity-helpers.mjs';
@@ -182,15 +184,22 @@ function stripCommentLines(src) {
   return kept.join('\n');
 }
 
-async function runDiscovered(filter = null) {
+async function runDiscovered(filter = null, tools = null) {
   let files = discoverTests(TESTS_DIR);
   if (filter) {
     const norm = (p) => p.slice(TESTS_DIR.length + 1).replace(/\\/g, '/');
     files = files.filter((f) => norm(f).includes(filter));
   }
+  if (tools) {
+    files = files.filter((f) => {
+      const src = stripCommentLines(readFileSync(f, 'utf-8'));
+      return tools.some((tool) => declaresTool(src, tool));
+    });
+  }
   if (files.length === 0) {
     // Fail hard: a path typo must never silently turn CI green.
-    console.log(`  ❌ no test files matched${filter ? ` --only "${filter}"` : ''} under tests/`);
+    const what = [filter && `--only "${filter}"`, tools && `--needs ${tools.join(',')}`].filter(Boolean).join(' ');
+    console.log(`  ❌ no test files matched${what ? ` ${what}` : ''} under tests/`);
     process.exit(1);
   }
   for (const f of files) {
@@ -341,6 +350,25 @@ async function runDiscovered(filter = null) {
 // that was asked for — the same silent substitution this file's flag reading
 // was fixed for.
 const ONLY = hasFlag(process.argv, '--only') ? (flagValue(process.argv, '--only') ?? '') : null;
+
+// FORK ADAPTATION: `--needs browser,latex` ported from upstream (see its runner).
+const NEEDS = hasFlag(process.argv, '--needs') ? (flagValue(process.argv, '--needs') ?? '') : null;
+if (NEEDS !== null) {
+  const tools = NEEDS.split(',').map((t) => t.trim()).filter(Boolean);
+  const unknown = tools.filter((t) => !Object.hasOwn(REQUIRED_TOOL_ENV, t));
+  if (tools.length === 0 || NEEDS.startsWith('--') || unknown.length) {
+    console.log(`  ❌ --needs takes a comma-separated list of: ${Object.keys(REQUIRED_TOOL_ENV).join(', ')}${unknown.length ? ` (got "${unknown.join('", "')}")` : ''}`);
+    process.exit(1);
+  }
+  if (ONLY !== null && (ONLY === '' || ONLY.startsWith('--'))) {
+    console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
+    process.exit(1);
+  }
+  for (const tool of tools) process.env[REQUIRED_TOOL_ENV[tool]] = '1';
+  console.log(`\n🧪 career-ops test suite (--needs ${tools.join(',')}${ONLY ? ` --only ${ONLY}` : ''})\n`);
+  await runDiscovered(ONLY || null, tools);
+  finish();
+}
 if (ONLY !== null) {
   if (ONLY === '' || ONLY.startsWith('--')) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
@@ -2863,6 +2891,12 @@ try {
       copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
       // ...and the rest of lib/ (yaml-document, dir-lock, ... reached through owed-actions and tracker-utils).
       cpSync(join(ROOT, 'lib'), join(e2eTmp, 'lib'), { recursive: true });
+      // followup-cadence reads the status ledger through funnel-velocity.mjs, which pulls in
+      // stats.mjs and more root modules, so the fixture carries every root module.
+      // FORK ADAPTATION: upstream's runner copies the same set one file at a time.
+      for (const f of readdirSync(ROOT)) {
+        if (/\.(mjs|json)$/.test(f) && !existsSync(join(e2eTmp, f))) copyFileSync(join(ROOT, f), join(e2eTmp, f));
+      }
       // ...and its main-guard now comes from lib/is-main-module.mjs (#3170),
       // which is what lets the copy answer "am I main?" correctly from a
       // symlinked tmpdir in the first place.
