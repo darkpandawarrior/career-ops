@@ -56,7 +56,7 @@ export function readReport(md) {
   for (const l of headerLines) {
     const h = l.match(/^#\s+(.+)/);
     if (h) {
-      title = h[1].replace(/^Evaluat?i[oó]n:?\s*/i, "").trim();
+      title = h[1].replace(/^Evalua(?:ti|ci)[oó]n:?\s*/i, "").trim();
       continue;
     }
     const m = l.match(/^\s*\*\*(.+?):\*\*\s*(.*)$/);

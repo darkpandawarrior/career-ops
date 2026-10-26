@@ -27,7 +27,9 @@ function boundedLockWait(): Record<string, string> {
 
 export type CliResult = { code: number; stdout: string; stderr: string; spawnFailed: boolean; timedOut: boolean };
 
-export function runCoreCli(script: string, args: string[]): Promise<CliResult> {
+/** `extraEnv` carries the multi-profile fork's per-request overrides (CAREER_OPS_TRACKER,
+ *  CAREER_OPS_ROOT): the script lives in the engine root, its data in the active profile's. */
+export function runCoreCli(script: string, args: string[], extraEnv: Record<string, string | undefined> = {}): Promise<CliResult> {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
@@ -35,7 +37,7 @@ export function runCoreCli(script: string, args: string[]): Promise<CliResult> {
       {
         cwd: careerOpsRoot(),
         timeout: CORE_CLI_TIMEOUT_MS,
-        env: { ...process.env, ...boundedLockWait() },
+        env: { ...process.env, ...extraEnv, ...boundedLockWait() },
         // windowsHide: see api/doctor/route.ts — a stale inherited console
         // kills every child with 0xC0000142 on Windows; never inherit one.
         windowsHide: true,
@@ -61,6 +63,6 @@ export function runCoreCli(script: string, args: string[]): Promise<CliResult> {
   });
 }
 
-export function runSetStatus(args: string[]): Promise<CliResult> {
-  return runCoreCli("set-status", args);
+export function runSetStatus(args: string[], extraEnv: Record<string, string | undefined> = {}): Promise<CliResult> {
+  return runCoreCli("set-status", args, extraEnv);
 }

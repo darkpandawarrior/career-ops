@@ -14,6 +14,8 @@ export async function postCoreScript(opts: {
   args: string[];
   logLabel: string;
   fallback: string;
+  /** Per-request overrides (multi-profile fork: CAREER_OPS_ROOT = the active profile's data root). */
+  env?: Record<string, string | undefined>;
 }): Promise<NextResponse> {
   if (!fs.existsSync(rootScript(opts.script))) {
     return NextResponse.json(
@@ -21,7 +23,7 @@ export async function postCoreScript(opts: {
       { status: 503 },
     );
   }
-  const result = await runCoreCli(opts.script, opts.args);
+  const result = await runCoreCli(opts.script, opts.args, opts.env);
   if (result.spawnFailed) {
     console.error(`/${opts.logLabel}: failed to run: ${result.stderr.trim()}`);
     return NextResponse.json({ error: opts.fallback }, { status: 500 });

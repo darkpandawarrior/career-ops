@@ -21,9 +21,9 @@ import { BetaBanner } from "@/components/beta/beta-banner";
 import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
-import { NAV_ITEMS, isActivePath } from "@/lib/nav-items";
+import { visibleNavItems, isActivePath } from "@/lib/nav-items";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children, followupsEnabled }: { children: React.ReactNode; followupsEnabled: boolean }) {
   const pathname = usePathname();
   const { count, permission, requestPermission } = useNotify();
   return (
@@ -31,7 +31,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <PipelineProvider>
       <ApplyProvider>
       <ExploreProvider>
-      <MobileNav />
+      <MobileNav followupsEnabled={followupsEnabled} />
       <div className="flex min-h-screen">
         <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface/30 p-4 md:flex">
           <div className="mb-5 flex items-center justify-between px-1">
@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <kbd className="rounded border border-border px-1.5 py-0.5 text-[10px] text-faint">⌘K</kbd>
           </button>
           <nav className="mt-4 flex flex-col gap-1">
-            {NAV_ITEMS.map(({ href, label, icon: Icon, chip }) => {
+            {visibleNavItems(followupsEnabled).map(({ href, label, icon: Icon, chip }) => {
               const active = isActivePath(href, pathname);
               return (
                 <Link

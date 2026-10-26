@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJsonObject } from "@/lib/json-body";
+import { requestRoot } from "@/lib/profile-registry";
 import { digitArg, postCoreScript } from "@/lib/run-core-script";
 
 export const runtime = "nodejs";
@@ -20,5 +21,6 @@ export async function POST(req: Request) {
     args: [n, "--json"],
     logLabel: "api/followups/seed",
     fallback: "could not seed the follow-up",
+    env: { CAREER_OPS_ROOT: await requestRoot() },
   });
 }

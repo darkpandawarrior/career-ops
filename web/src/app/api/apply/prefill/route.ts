@@ -3,73 +3,18 @@ import path from "node:path";
 import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
+import { profileRef } from "@/lib/core/profile-path.mjs";
 import { getSession } from "@/lib/apply/session";
 import { resolveSessionCv } from "@/lib/apply/cv";
 import { applyCvSource } from "@/lib/apply/cv-source.mjs";
 import { buildAnswerPrompt } from "@/lib/apply/answer-prompt.mjs";
 import { runPlanner } from "@/lib/apply/planner";
+import { extractJsonObject } from "@/lib/extract-json-object.mjs";
+import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 320;
-
-/**
- * Pull a JSON object out of an LLM's text answer, tolerating code fences,
- * trailing prose, and — crucially — TRUNCATION (the planner getting killed
- * mid-output on a big form). When the object is incomplete we salvage the
- * largest valid prefix so the fields that DID finish still come through.
- */
-function extractJsonObject(text: string): { obj: Record<string, unknown> | null; truncated: boolean } {
-  const s = text.replace(/```(?:json)?/gi, "");
-  const start = s.indexOf("{");
-  if (start === -1) return { obj: null, truncated: false };
-
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  let end = -1;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === "\\") esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-    else if (c === "{") depth++;
-    else if (c === "}") {
-      depth--;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  if (end !== -1) {
-    try {
-      return { obj: JSON.parse(s.slice(start, end + 1)) as Record<string, unknown>, truncated: false };
-    } catch {
-      /* malformed even though balanced — fall through to salvage */
-    }
-  }
-
-  // Truncated / unbalanced: walk back from successive commas, close the JSON,
-  // and parse the largest prefix that is valid.
-  const frag = s.slice(start);
-  const open = (frag.match(/{/g) || []).length;
-  const close = (frag.match(/}/g) || []).length;
-  const pad = "}".repeat(Math.max(0, open - close));
-  for (let tryEnd = frag.length; tryEnd > 1; ) {
-    const cand = frag.slice(0, tryEnd).replace(/,\s*$/, "") + pad;
-    try {
-      return { obj: JSON.parse(cand) as Record<string, unknown>, truncated: true };
-    } catch {
-      const prevComma = frag.lastIndexOf(",", tryEnd - 1);
-      if (prevComma <= start) break;
-      tryEnd = prevComma;
-    }
-  }
-  return { obj: null, truncated: true };
-}
 
 // AI pre-fill (STREAMING NDJSON). The user's BYO CLI (read-only PLANNER — no
 // browser access) drafts an answer per field from cv.md / profile / the job's
@@ -77,12 +22,8 @@ function extractJsonObject(text: string): { obj: Record<string, unknown> | null;
 // exit code/signal, parse outcome) so a stuck/empty prefill is observable on the
 // page AND written to <root>/.career-ops-web/apply-prefill.log for debugging.
 export async function POST(req: Request) {
-  let body: { sessionId?: string; cliId?: string; company?: string; application?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<{ sessionId?: string; cliId?: string; company?: string; application?: string }>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const { sessionId, cliId: requestedCliId, company, application } = body;
   // Same two identifiers the fill route takes, validated the same way: they
   // reach a filesystem resolver, so a non-string is refused before it gets there.
@@ -157,7 +98,7 @@ export async function POST(req: Request) {
       // stapled to them cannot describe different documents.
       const cvPath = await resolveSessionCv(dataRoot, { company, application, title: s.title });
       const cvSource = cvPath ? applyCvSource(dataRoot, cvPath) : null;
-      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem, cvSource });
+      const prompt = buildAnswerPrompt({ title: s.title, fields: s.fields, memory: mem, cvSource, profile: profileRef(dataRoot) });
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
       log(`CV source: ${cvSource ?? "none found — answers will come from cv.md"}`);

@@ -31,7 +31,7 @@ const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('career-ops:the
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   await connection();
-  const followupsEnabled = readFollowupsEnabled();
+  const followupsEnabled = await readFollowupsEnabled();
   return (
     <html
       lang="en"

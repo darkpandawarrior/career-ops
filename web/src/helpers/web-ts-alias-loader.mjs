@@ -39,6 +39,16 @@ export async function resolve(specifier, context, nextResolve) {
   // Next's subpath exports (`next/headers`) are extensionless; plain Node ESM
   // wants `next/headers.js`. profile-registry.ts imports it.
   if (/^next\/[\w-]+$/.test(specifier)) return nextResolve(`${specifier}.js`, context);
+  // Extensionless RELATIVE specifiers ("./portals") are the same TS convention as
+  // the alias form, and just as unresolvable by Node; only those from inside
+  // web/src are followed, so no other module's resolution changes.
+  if (/^\.\.?\//.test(specifier) && !HAS_EXT.test(specifier) && context.parentURL?.startsWith("file:")) {
+    const from = path.dirname(fileURLToPath(context.parentURL));
+    if (from.startsWith(WEB_SRC)) {
+      const hit = [".ts", ".tsx", ".mjs"].map((e) => path.resolve(from, specifier) + e).find((c) => existsSync(c));
+      if (hit) return nextResolve(pathToFileURL(hit).href, context);
+    }
+  }
   if (!specifier.startsWith("@/")) return nextResolve(specifier, context);
   const base = path.join(WEB_SRC, specifier.slice(2));
   // Specifiers that already name an extension (e.g. "@/lib/tracker-table.mjs")

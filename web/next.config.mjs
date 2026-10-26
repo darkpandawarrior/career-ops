@@ -12,6 +12,10 @@
 // NEXT_DEV_ORIGINS (comma-separated) for reaching the dev server from other devices
 // (e.g. an iPad over Tailscale). `allowedDevOrigins` is dev-only — `next build`/`start`
 // ignore it, so this never affects the production build.
+// Next sends anonymous usage telemetry unless this is set, and career-ops
+// promises none. server.mjs sets it for dev and start; this covers `next build`.
+process.env.NEXT_TELEMETRY_DISABLED = "1";
+
 const devOrigins = [
   "127.0.0.1",
   ...(process.env.NEXT_DEV_ORIGINS

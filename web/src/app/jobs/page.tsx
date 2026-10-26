@@ -17,7 +17,7 @@ export default function JobsHistory() {
         title="Workers"
         description={
           <>
-            Every evaluation you ran — a persistent log. <span className="tabular-nums">{jobs.length}</span> total.
+            AI runs started from this dashboard, kept in this browser. <span className="tabular-nums">{jobs.length}</span> total.
           </>
         }
         actions={
@@ -35,7 +35,18 @@ export default function JobsHistory() {
       {jobs.length === 0 ? (
         <EmptyState
           className="mt-8"
-          description={<>No workers yet. Hit <span className="text-foreground">Evaluate</span> on an inbox posting to spin one up.</>}
+          description={
+            <>
+              No workers yet. Hit <span className="text-foreground">Evaluate</span> on an inbox posting to start one.
+              <span className="mt-2 block">
+                Ran an evaluation from your AI CLI? It shows up in{" "}
+                <Link href="/pipeline?tab=ALL" className="text-foreground underline-offset-2 hover:underline">
+                  Pipeline
+                </Link>
+                , not here.
+              </span>
+            </>
+          }
         />
       ) : (
         <ul className="mt-6 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
