@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 
 /**
  * Full read model for the /profile dashboard page — everything in
@@ -90,7 +91,7 @@ export function emptyFullProfile(): FullProfile {
 export function readFullProfile(root: string = careerOpsRoot()): FullProfile | null {
   let raw: string;
   try {
-    raw = fs.readFileSync(path.join(root, "config", "profile.yml"), "utf8");
+    raw = fs.readFileSync(getProfilePath(root, { explicitRoot: true }), "utf8");
   } catch {
     return null;
   }

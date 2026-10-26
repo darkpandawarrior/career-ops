@@ -583,7 +583,7 @@ reports/{{REPORT_NUM}}-{company-slug}-{{DATE}}.md
 
 Where `{company-slug}` is the company name in lowercase, no spaces, with hyphens.
 
-**Report format:**
+Report header:
 
 ```markdown
 # Evaluation: {Company} — {Role}

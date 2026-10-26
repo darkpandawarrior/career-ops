@@ -444,6 +444,20 @@ const scripts = [
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   // career-ops 1.30.0 sync: /calibrate (#3315) ships an inline self-test.
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
+  // career-ops 1.38.0 sync: inline self-tests registered (tests/self-test-registration).
+  { name: 'ats-payload.mjs --self-test', expectExit: 0 },
+  { name: 'contact-lookup.mjs --self-test', expectExit: 0 },
+  { name: 'cv-title-check.mjs --self-test', expectExit: 0 },
+  { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
+  { name: 'keyword-match.mjs --self-test', expectExit: 0 },
+  { name: 'linkedin-join.mjs --self-test', expectExit: 0 },
+  { name: 'process-quality.mjs --self-test', expectExit: 0 },
+  { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
+  { name: 'salary-gap.mjs --self-test', expectExit: 0 },
+  { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
+  { name: 'validate-profile.mjs --self-test', expectExit: 0 },
+  { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
+  { name: 'verify-cv-structure.mjs --self-test', expectExit: 0 },
   { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
   // career-ops 1.19.0 scripts with inline self-tests (ported).
   { name: 'upskill.mjs --self-test', expectExit: 0 },

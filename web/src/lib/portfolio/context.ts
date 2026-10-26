@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { renderPortfolio } from "./render";
 import { buildProjectFiles } from "./scaffold";
 import type { PortfolioData } from "./schema";
@@ -173,7 +174,7 @@ function storybankOf(md: string | null): string {
  */
 export function buildPortfolioContext(root: string = careerOpsRoot()): { cv: string; extra: string } {
   const cv = safeRead(path.join(root, "cv.md")) ?? "";
-  const profile = safeRead(path.join(root, "config", "profile.yml"));
+  const profile = safeRead(getProfilePath(root, { explicitRoot: true }));
   const profileNotes = safeRead(path.join(root, "modes", "_profile.md"));
   // coaching_state: profile-local, else the engine's shared interview-coach skill.
   const coaching =

@@ -41,10 +41,10 @@ try {
 
 import { runActor } from './plugins/apify/_apify.mjs';
 import { appendToPipeline, loadSeenUrls } from './scan.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { getProfilePath, resolveCareerOpsRoot } from './path-resolver.mjs';
 
 const { dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || path.join(CAREER_OPS_DATA, 'config/profile.yml');
+const PROFILE_PATH = getProfilePath();
 
 // ── Actor catalog (fixed, per user research — do not re-guess IDs) ─────────
 

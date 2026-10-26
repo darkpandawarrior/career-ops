@@ -266,10 +266,7 @@ function sweep(dir, dnsCode, extraArgs = []) {
   try {
     writeFileSync(
       join(dir, 'data', 'dead-boards.tsv'),
-      // FORK: dead-boards here is keyed `${ats}|${slug}` where slug is the ENTRY NAME
-      // (dead-boards.mjs boardKey/parseDeadBoards). Upstream keys by the board URL, so the
-      // ported fixture's full greenhouse URL matched nothing and nothing was ever skipped.
-      `ats\tslug\tmisses\tlast_checked\ngreenhouse\tsandbox-co-0\t3\t${new Date().toISOString()}\n`,
+      `ats\tboard\tmisses\tlast_checked\ngreenhouse\thttps://job-boards.greenhouse.io/sandbox-co-0\t3\t${new Date().toISOString()}\n`,
       'utf-8',
     );
     const out = sweep(dir, 'ENOTFOUND');

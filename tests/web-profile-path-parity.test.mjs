@@ -197,7 +197,10 @@ if (existsSync(join(ROOT, 'web', 'src'))) {
     'web/src/lib/core/profile-path.mjs',
     'web/src/lib/core/cv-template.mjs',
   ]);
-  const scanned = tracked.filter((f) => !EXEMPT.has(f));
+  // FORK ADAPTATION: upstream's web tests live in web/tests/ (outside this scan); the
+  // fork co-locates them under web/src/ (fork-adaptations web-tests-colocated), where
+  // fixtures legitimately build profile paths by hand. Scan product sources only.
+  const scanned = tracked.filter((f) => !EXEMPT.has(f) && !/\.test\.(ts|tsx|mjs|js)$/.test(f));
   if (scanned.length > 50) pass(`scanned ${scanned.length} tracked web/src files`);
   else fail(`only ${scanned.length} tracked web/src files scanned; an empty scan cannot pass`);
   const offenders = [];
