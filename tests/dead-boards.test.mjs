@@ -1,154 +1,59 @@
-/**
- * dead-boards.test.mjs — tests for the dead-board store.
- *
- * The property that matters most: a board is retired ONLY by repeated 404s.
- * If a throttle/timeout/429 can write a miss, one bad sweep permanently hides
- * live boards and the scanner silently under-reports openings — the exact
- * failure this module exists to prevent. Most of these cases guard that.
- *
- * Run: node dead-boards.test.mjs
- */
-
-import {
-  isDeadBoardError, boardKey, parseDeadBoards, serializeDeadBoards, shouldSkip,
-  recordMiss, recordHit, loadDeadBoards, saveDeadBoards,
-  DEAD_AFTER_MISSES, RECHECK_AFTER_DAYS,
-} from '../dead-boards.mjs';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { pass, fail } from './helpers.mjs';
+import { boardKey, loadDeadBoards, recordBoardResult, saveDeadBoards, shouldSkipDeadBoard } from '../dead-boards.mjs';
 
-function ok(label, cond) {
-  if (cond) pass(label);
-  else fail(label);
+console.log('\nPersistent dead-board memory (#2840)');
+const root = mkdtempSync(join(tmpdir(), 'career-ops-dead-boards-'));
+const file = join(root, 'data', 'dead-boards.tsv');
+const now = Date.parse('2026-08-14T00:00:00Z');
+try {
+  const rows = loadDeadBoards(file, now);
+  const board = boardKey({ careers_url: 'https://jobs.example.test/acme' });
+  recordBoardResult(rows, 'lever', board, 500, now);
+  recordBoardResult(rows, 'lever', board, 404, now);
+  recordBoardResult(rows, 'lever', board, 404, now);
+  if (!shouldSkipDeadBoard(rows, 'lever', board, now)) pass('fewer than three 404s never retires a board');
+  else fail('a board was retired before three consecutive 404s');
+  recordBoardResult(rows, 'lever', board, 404, now);
+  if (shouldSkipDeadBoard(rows, 'lever', board, now)) pass('three 404s retire a board for the re-probe window');
+  else fail('three 404s did not retire a board');
+  recordBoardResult(rows, 'lever', board, 429, now);
+  if (shouldSkipDeadBoard(rows, 'lever', board, now)) pass('429 does not create or clear a dead-board record');
+  else fail('429 incorrectly changed dead-board state');
+  const cleanBoard = 'https://jobs.example.test/clean';
+  recordBoardResult(rows, 'lever', cleanBoard, 429, now);
+  if (!rows.has(`lever\t${cleanBoard}`)) pass('429 does not create a dead-board record');
+  else fail('429 incorrectly created a dead-board record');
+  recordBoardResult(rows, 'lever', board, 200, now);
+  if (!shouldSkipDeadBoard(rows, 'lever', board, now)) pass('a successful response clears a retired board');
+  else fail('a successful response left a board retired');
+  recordBoardResult(rows, 'lever', board, 404, now);
+  recordBoardResult(rows, 'lever', board, 404, now);
+  recordBoardResult(rows, 'lever', board, 404, now);
+  saveDeadBoards(file, rows);
+  const serialized = readFileSync(file, 'utf8');
+  if (/^ats\tboard\tmisses\tlast_checked\nlever\thttps:\/\/jobs\.example\.test\/acme\t3\t2026-08-14T00:00:00\.000Z\n$/.test(serialized)) pass('dead-board store persists the safe TSV contract');
+  else fail('dead-board store wrote an invalid TSV contract');
+  const reloaded = loadDeadBoards(file, now);
+  if (shouldSkipDeadBoard(reloaded, 'lever', board, now)) pass('saved dead-board state reloads into the same skip decision');
+  else fail('saved dead-board state did not reload correctly');
+  const malformedFile = join(root, 'data', 'malformed.tsv');
+  writeFileSync(malformedFile, `${serialized}lever\tbad\tNaN\tnot-a-date\n`, 'utf8');
+  if (loadDeadBoards(malformedFile, now).size === 1) pass('malformed dead-board rows are ignored on reload');
+  else fail('malformed dead-board rows were not ignored on reload');
+  if (shouldSkipDeadBoard(reloaded, 'lever', board, now + 29 * 86_400_000) && !shouldSkipDeadBoard(reloaded, 'lever', board, now + 30 * 86_400_000)) pass('retired boards re-probe at the 30-day boundary');
+  else fail('retired board re-probe window has the wrong boundary');
+  const failedProbeAt = now + 30 * 86_400_000;
+  recordBoardResult(reloaded, 'lever', board, 429, failedProbeAt);
+  if (reloaded.get(`lever\t${board}`)?.lastChecked === failedProbeAt && shouldSkipDeadBoard(reloaded, 'lever', board, failedProbeAt + 1)) pass('a failed retired-board probe refreshes its re-probe timestamp');
+  else fail('a failed retired-board probe did not refresh its re-probe timestamp');
+  const partial = new Map();
+  recordBoardResult(partial, 'lever', board, 404, now);
+  recordBoardResult(partial, 'lever', board, 500, now);
+  if (!partial.has(`lever\t${board}`)) pass('transient errors clear partial 404 progress');
+  else fail('transient errors kept partial 404 progress');
+} finally {
+  rmSync(root, { recursive: true, force: true });
 }
-function eq(label, actual, expected) {
-  const a = JSON.stringify(actual), e = JSON.stringify(expected);
-  if (a === e) pass(label);
-  else fail(`${label} — expected ${e}, got ${a}`);
-}
-
-const DAY = 86_400_000;
-const NOW = Date.parse('2026-08-14T00:00:00.000Z');
-
-// ── isDeadBoardError: ONLY a 404 is proof of death ──────────────────
-ok('404 status is dead', isDeadBoardError({ status: 404 }));
-ok('404 message is dead', isDeadBoardError(new Error('HTTP 404 Not Found')));
-ok('bare HTTP 404 message is dead', isDeadBoardError(new Error('HTTP 404')));
-ok('404 on a wrapped cause is dead', isDeadBoardError(Object.assign(new Error('x'), { cause: { status: 404 } })));
-
-// These are the throttle/transport failures that must NEVER retire a board.
-ok('429 is not dead', !isDeadBoardError({ status: 429 }));
-ok('500 is not dead', !isDeadBoardError({ status: 500 }));
-ok('503 is not dead', !isDeadBoardError({ status: 503 }));
-ok('403 is not dead', !isDeadBoardError({ status: 403 }));
-ok('abort is not dead', !isDeadBoardError(new Error('This operation was aborted')));
-ok('timeout is not dead', !isDeadBoardError(new Error('lever/foo: timed out after 300s')));
-ok('DNS failure is not dead', !isDeadBoardError(Object.assign(new Error('getaddrinfo EAI_AGAIN'), { code: 'EAI_AGAIN' })));
-ok('null is not dead', !isDeadBoardError(null));
-// A 404 inside a longer sentence about something else must not count.
-ok('"404" in prose is not dead', !isDeadBoardError(new Error('board returned 4040 jobs')));
-
-// ── shouldSkip: threshold AND recency ───────────────────────────────
-const dead = { misses: DEAD_AFTER_MISSES, lastChecked: NOW - DAY };
-ok('dead + recent is skipped', shouldSkip(dead, NOW));
-ok('below threshold is not skipped', !shouldSkip({ misses: DEAD_AFTER_MISSES - 1, lastChecked: NOW - DAY }, NOW));
-ok('unknown board is not skipped', !shouldSkip(undefined, NOW));
-ok('dead but stale is re-probed', !shouldSkip({ misses: 99, lastChecked: NOW - (RECHECK_AFTER_DAYS + 1) * DAY }, NOW));
-ok('exactly at recheck boundary is re-probed', !shouldSkip({ misses: 99, lastChecked: NOW - RECHECK_AFTER_DAYS * DAY }, NOW));
-
-// ── record: miss accumulates, hit clears ────────────────────────────
-{
-  const m = new Map();
-  recordMiss(m, 'lever', 'deadco', NOW);
-  eq('first miss counts 1', m.get(boardKey('lever', 'deadco')).misses, 1);
-  ok('one miss is not yet skippable', !shouldSkip(m.get(boardKey('lever', 'deadco')), NOW));
-  recordMiss(m, 'lever', 'deadco', NOW);
-  recordMiss(m, 'lever', 'deadco', NOW);
-  eq('third miss counts 3', m.get(boardKey('lever', 'deadco')).misses, 3);
-  ok('three misses is skippable', shouldSkip(m.get(boardKey('lever', 'deadco')), NOW));
-
-  // A board that answers again must come straight back into the sweep.
-  recordHit(m, 'lever', 'deadco');
-  ok('a hit clears the record', !m.has(boardKey('lever', 'deadco')));
-  ok('revived board is scanned again', !shouldSkip(m.get(boardKey('lever', 'deadco')), NOW));
-}
-
-// ── same slug on different ATSs must not collide ────────────────────
-{
-  const m = new Map();
-  recordMiss(m, 'lever', 'acme', NOW);
-  recordMiss(m, 'ashby', 'acme', NOW);
-  eq('per-ATS records are independent', [m.get(boardKey('lever', 'acme')).misses, m.get(boardKey('ashby', 'acme')).misses], [1, 1]);
-}
-
-// ── round-trip ──────────────────────────────────────────────────────
-{
-  const m = new Map();
-  recordMiss(m, 'workday', 'zzz', NOW);
-  recordMiss(m, 'greenhouse', 'aaa', NOW);
-  const round = parseDeadBoards(serializeDeadBoards(m));
-  eq('round-trips both rows', round.size, 2);
-  eq('round-trips misses', round.get(boardKey('greenhouse', 'aaa')).misses, 1);
-  eq('round-trips timestamp', round.get(boardKey('greenhouse', 'aaa')).lastChecked, NOW);
-  ok('sorted by ats then slug', serializeDeadBoards(m).indexOf('greenhouse') < serializeDeadBoards(m).indexOf('workday'));
-}
-
-// ── malformed input degrades to "re-probe", never throws ────────────
-{
-  const junk = [
-    'ats\tslug\tmisses\tlast_checked',
-    '# a comment',
-    '',
-    'lever',                                   // too few columns
-    'lever\tnomisses\t\t2026-08-01T00:00:00Z', // empty misses
-    'lever\tbadnum\txx\t2026-08-01T00:00:00Z', // non-numeric misses
-    'lever\tbaddate\t3\tnot-a-date',           // unparseable date
-    'lever\tzero\t0\t2026-08-01T00:00:00Z',    // misses must be > 0
-    'lever\tgood\t4\t2026-08-01T00:00:00Z',    // the only valid row
-  ].join('\n');
-  const m = parseDeadBoards(junk);
-  eq('only the valid row survives', [...m.keys()], [boardKey('lever', 'good')]);
-  eq('empty input yields empty map', parseDeadBoards('').size, 0);
-  eq('null input yields empty map', parseDeadBoards(null).size, 0);
-}
-
-// ── the sweep's actual skip decision ────────────────────────────────
-// Mirrors the in-worker guard in scan-ats-full.mjs: look the board up by
-// (ats, slug) and skip only on shouldSkip. The scanner deliberately does NOT
-// pre-filter its entries array — parallelEach's resumeAt indexes into it, and a
-// filtered array would desync the --resume checkpoint offset.
-{
-  const m = new Map();
-  for (let i = 0; i < DEAD_AFTER_MISSES; i++) recordMiss(m, 'lever', 'dead', NOW);
-  recordMiss(m, 'lever', 'flaky', NOW); // one miss only — still scanned
-  const sweep = (ats, entries) => entries.filter(e => !shouldSkip(m.get(boardKey(ats, e.name)), NOW)).map(e => e.name);
-  const entries = [{ name: 'dead' }, { name: 'flaky' }, { name: 'fresh' }];
-  eq('skips only the confirmed-dead board', sweep('lever', entries), ['flaky', 'fresh']);
-  eq('same slugs on another ATS are all scanned', sweep('ashby', entries), ['dead', 'flaky', 'fresh']);
-
-  // The recovery path: a skipped board becomes due again and is re-probed.
-  const old = new Map();
-  for (let i = 0; i < DEAD_AFTER_MISSES; i++) recordMiss(old, 'lever', 'revived', NOW - (RECHECK_AFTER_DAYS + 1) * DAY);
-  const dueAgain = old.get(boardKey('lever', 'revived'));
-  ok('a board past its recheck window is scanned again', !shouldSkip(dueAgain, NOW));
-}
-
-// ── file I/O ────────────────────────────────────────────────────────
-{
-  const dir = mkdtempSync(join(tmpdir(), 'liveness-'));
-  const file = join(dir, 'nested', 'board-liveness.tsv');
-  const m = new Map();
-  recordMiss(m, 'ashby', 'gone', NOW);
-  saveDeadBoards(file, m);
-  eq('saves and reloads', loadDeadBoards(file).get(boardKey('ashby', 'gone')).misses, 1);
-  ok('writes a header', readFileSync(file, 'utf-8').startsWith('ats\tslug'));
-  eq('missing file yields empty map', loadDeadBoards(join(dir, 'nope.tsv')).size, 0);
-
-  writeFileSync(file, '  garbage');
-  eq('corrupt file yields empty map', loadDeadBoards(file).size, 0);
-  rmSync(dir, { recursive: true, force: true });
-}
-
