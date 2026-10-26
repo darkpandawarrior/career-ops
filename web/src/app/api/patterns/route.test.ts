@@ -109,7 +109,7 @@ describe("GET /api/patterns — happy path", () => {
     feed(JSON.stringify({ ok: true }));
     await GET();
     expect(h.lastCall).not.toBeNull();
-    expect(h.lastCall!.file).toBe("node");
+    expect(h.lastCall!.file).toBe(process.execPath);
     expect(h.lastCall!.args).toEqual([SCRIPT]);
     expect(h.lastCall!.opts.cwd).toBe(ENGINE);
     const env = h.lastCall!.opts.env as Record<string, string>;

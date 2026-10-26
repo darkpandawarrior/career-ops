@@ -92,7 +92,7 @@ export async function POST(req: Request) {
     let parsed: unknown;
     try {
       source = fs.readFileSync(file, "utf8");
-      parsed = yaml.load(source);
+      parsed = source.trim() ? yaml.load(source) : {}; // js-yaml v5 throws on load("")
     } catch {
       return Response.json({ error: "config/profile.yml exists but is not valid YAML — refusing to overwrite it." }, { status: 409 });
     }

@@ -99,10 +99,11 @@ describe("GET /api/doctor", () => {
     expect(body).toEqual({ available: true, onboardingNeeded: false, missing: [], warnings: [] });
   });
 
-  it("coerces onboardingNeeded to a real boolean (!!) — truthy non-bool becomes true", async () => {
+  it("a non-boolean onboardingNeeded is not a verdict: reports available:false", async () => {
+    // Upstream hardening: `!!1` would read a malformed payload as a real answer.
     h.stdout = JSON.stringify({ onboardingNeeded: 1, missing: ["x"], warnings: [] });
     const body = await (await GET()).json();
-    expect(body.onboardingNeeded).toBe(true);
+    expect(body.available).toBe(false);
   });
 
   it("defaults missing/warnings to [] when the verdict omits them", async () => {
@@ -137,16 +138,15 @@ describe("GET /api/doctor", () => {
   it("reports available:false when stdout is empty", async () => {
     h.stdout = "";
     const body = await (await GET()).json();
-    // Empty stdout → split/pop yields "{}" → JSON.parse ok → available:true with empty defaults.
-    // (Documents the actual behavior: "{}" parses, so available is true here.)
-    expect(body).toEqual({ available: true, onboardingNeeded: false, missing: [], warnings: [] });
+    // Upstream hardening: "doctor didn't answer" is never a clean bill of health.
+    expect(body).toEqual({ available: false, onboardingNeeded: false, missing: [], warnings: [] });
   });
 
   it("invokes `node <doctor.mjs> --json` from the engine cwd with CAREER_OPS_ROOT = the resolved data root", async () => {
     h.stdout = JSON.stringify({ onboardingNeeded: false, missing: [], warnings: [] });
     await GET();
     expect(h.lastCall).not.toBeNull();
-    expect(h.lastCall!.cmd).toBe("node");
+    expect(h.lastCall!.cmd).toBe(process.execPath);
     expect(h.lastCall!.args).toEqual([DOCTOR, "--json"]);
     expect(h.lastCall!.opts.cwd).toBe(ENGINE);
     const env = h.lastCall!.opts.env as Record<string, string>;

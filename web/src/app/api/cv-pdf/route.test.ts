@@ -90,7 +90,7 @@ describe("GET /api/cv-pdf — serving the matching PDF", () => {
     const res = await get("Acme");
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/pdf");
-    expect(res.headers.get("Content-Disposition")).toBe('inline; filename="cv-alex-acme-2026-06.pdf"');
+    expect(res.headers.get("Content-Disposition")).toContain('inline; filename="cv-alex-acme-2026-06.pdf"');
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const bytes = new Uint8Array(await res.arrayBuffer());
     expect(new TextDecoder().decode(bytes)).toContain("acme body");

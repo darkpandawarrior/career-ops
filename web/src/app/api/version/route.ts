@@ -46,7 +46,7 @@ function webVersion(): string {
 export async function GET() {
   const coreVersion = readVersion();
   const web = webVersion();
-  const m = coreVersion.match(/-(rc|beta|alpha|next)\b/i);
+  const m = coreVersion.match(/-(rc|beta|alpha|next)(?![a-z])/i);
   // Channel precedence: an explicit core pre-release suffix wins (RC installs);
   // otherwise the web component's own maturity decides — pre-1.0 on main IS the
   // alpha (release-please versions web/ independently), and the banner/bug-report
