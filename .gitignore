@@ -340,3 +340,6 @@ voice-dna.md
 .next/
 web/.next/
 web/out/
+
+# Local agent wrapper (not tracked)
+web/CLAUDE.md
