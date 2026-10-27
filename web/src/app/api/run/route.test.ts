@@ -48,6 +48,14 @@ h.spawnMock.mockImplementation((cmd: string, args: string[], opts: Record<string
 
 vi.mock("node:child_process", () => ({ spawn: h.spawnMock }));
 
+// persistEvaluation runs the real reserve/write/merge scripts through spawn; its own
+// suite (report-persist.test.mjs) covers that. Here it is a stand-in so the route's
+// envelope-to-done wiring is what is under test.
+vi.mock("@/lib/report-persist.mjs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/report-persist.mjs")>()),
+  persistEvaluation: vi.fn(async () => ({ ok: true, num: "035", reportFile: "035-acme-2026-06-30.md", warnings: [] })),
+}));
+
 vi.mock("@/lib/clis", () => ({
   resolveCli: vi.fn((id: string) => h.resolved),
   resolveCliOrFallback: (id: string) => { const r = (h.resolved); return r ? { ...r, spec: { id, ...r.spec }, substitutedFrom: null } : null; },
@@ -324,26 +332,25 @@ describe("POST /api/run — stderr / close honesty", () => {
 });
 
 describe("POST /api/run — evaluate persistence honesty", () => {
-  it("emits the 'didn't save a report' error when an evaluate run produced text but wrote no new report", async () => {
-    // reports/ starts empty (setupFullCheckout makes the dir but no .md). The
-    // worker emits text but never writes a report → countReports stays equal.
+  it("emits the 'didn't produce a report to save' error when an evaluate run emits no <<report-md>> envelope", async () => {
+    // Upstream contract: the agent has no write access; it emits the report in an
+    // envelope and the backend persists it. No envelope → nothing to save.
     const { events } = await run({ kind: "evaluate", input: "https://x.test/job", cliId: "claude" }, (child) => {
       child.stdout.emit("data", delta("VERDICT: 4/5 — strong fit"));
       child.emit("close", 0);
     });
     const err = events.find((e) => e.type === "error");
     expect(err).toBeTruthy();
-    expect(String(err!.msg)).toContain("didn't save a report");
+    expect(String(err!.msg)).toContain("didn't produce a report to save");
   });
 
-  it("emits {type:'done'} when an evaluate run actually writes a new report file", async () => {
+  it("emits {type:'done'} when an evaluate run emits a valid report envelope", async () => {
+    const report = "# Evaluation: Acme — Engineer\n\n## Machine Summary\n```yaml\ncompany: Acme\nrole: Engineer\nscore: 4.2\n```\n\n## A) Role Summary\nA role.";
     const { events } = await run({ kind: "evaluate", input: "https://x.test/job", cliId: "claude" }, (child) => {
-      child.stdout.emit("data", delta("scoring..."));
-      // Simulate the worker persisting a canonical report before close.
-      fs.writeFileSync(path.join(ROOT, "reports", "035-acme-2026-06-30.md"), "# report\n");
+      child.stdout.emit("data", delta(`scoring...\n<<report-md>>\n${report}\n<</report-md>>`));
       child.emit("close", 0);
     });
-    expect(events).toContainEqual({ type: "done", tokens: 0, costUsd: null });
+    expect(events).toContainEqual({ type: "done", tokens: 0, costUsd: null, reportN: 35 });
     expect(events.some((e) => e.type === "error")).toBe(false);
   });
 });
@@ -375,18 +382,17 @@ describe("POST /api/run — cancel() safety (#1155)", () => {
 });
 
 describe("POST /api/run — spawn wiring", () => {
-  it("spawns claude with write-capable tools + the data root for an evaluate run", async () => {
+  it("spawns claude with read-only (network) tools + the data root for an evaluate run", async () => {
     await run({ kind: "evaluate", input: "https://x.test/job", cliId: "claude" }, (child) => {
-      fs.writeFileSync(path.join(ROOT, "reports", "036-x-2026-06-30.md"), "# r\n");
       child.stdout.emit("data", delta("x"));
       child.emit("close", 0);
     });
     const { cmd, args, opts } = h.lastSpawnArgs!;
     expect(cmd).toBe("/usr/local/bin/claude");
     expect(args[args.indexOf("--output-format") + 1]).toBe("stream-json");
-    // evaluate gets Write + Bash; Task is always blocked.
-    expect(args[args.indexOf("--allowedTools") + 1]).toContain("Write");
-    expect(args[args.indexOf("--allowedTools") + 1]).toContain("Bash");
+    // Upstream: evaluate has no write access (the report arrives in an envelope); Task is always blocked.
+    expect(args[args.indexOf("--allowedTools") + 1]).not.toContain("Write");
+    expect(args[args.indexOf("--allowedTools") + 1]).not.toContain("Bash");
     expect(args[args.indexOf("--disallowedTools") + 1]).toContain("Task");
     expect(args[args.indexOf("-p") + 1]).toContain("https://x.test/job");
     const env = opts.env as Record<string, string>;

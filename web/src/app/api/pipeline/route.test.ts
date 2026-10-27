@@ -125,6 +125,7 @@ describe("GET /api/pipeline", () => {
       location: "",
       applyLink: "",
       followUp: "",
+      url: "",
       via: "",
     });
     expect(body.applications[1].company).toBe("Google");

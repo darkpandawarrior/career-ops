@@ -170,6 +170,7 @@ describe("addOffersToPipeline input filtering", () => {
       title: "",
       location: "",
       source: "lever",
+      note: "",
     });
   });
 
@@ -271,31 +272,32 @@ describe("addOffersToPipeline result parsing", () => {
 
   it("coalesces a missing 'added' field to 0", async () => {
     const { result } = await driveClose([offer()], '{"error":"weird"}');
+    // Upstream contract: an answer without a numeric `added` is not the writer's answer.
     expect(result.added).toBe(0);
-    expect(result.error).toBe("weird");
+    expect(result.error).toBe("pipeline writer failed (no result)");
   });
 
-  it("treats empty stdout as {} → added 0, no error", async () => {
+  it("treats empty stdout as a failure, never as 'nothing new to add'", async () => {
     const { result } = await driveClose([offer()], "");
-    expect(result).toEqual({ added: 0, error: undefined });
+    expect(result).toEqual({ added: 0, error: "pipeline writer failed (no result)" });
   });
 
   it("falls back to trimmed stderr when stdout is not valid JSON", async () => {
     const { result } = await driveClose([offer()], "this is not json", "  ERR: cannot import scan.mjs\n");
     expect(result.added).toBe(0);
-    expect(result.error).toBe("ERR: cannot import scan.mjs");
+    expect(result.error).toBe("pipeline writer failed (no result): ERR: cannot import scan.mjs");
   });
 
   it("caps the stderr fallback error at 200 chars", async () => {
     const longErr = "x".repeat(500);
     const { result } = await driveClose([offer()], "not json", longErr);
-    expect(result.error).toHaveLength(200);
+    expect(result.error).toBe(`pipeline writer failed (no result): ${"x".repeat(200)}`);
   });
 
-  it("uses the 'writer returned no result' sentinel when both stdout and stderr are unusable", async () => {
+  it("uses the 'no result' sentinel when both stdout and stderr are unusable", async () => {
     const { result } = await driveClose([offer()], "<<garbage not json>>", "");
     expect(result.added).toBe(0);
-    expect(result.error).toBe("writer returned no result");
+    expect(result.error).toBe("pipeline writer failed (no result)");
   });
 });
 

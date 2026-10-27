@@ -58,6 +58,7 @@ const DEFAULT_ATS_ALLOWLIST = [
   'cutshort.io',
   'startup.ch',
   'keka.com',
+  'paylocity.com',
   'join.com',
 ];
 

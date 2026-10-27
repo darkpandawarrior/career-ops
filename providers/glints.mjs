@@ -155,7 +155,7 @@ async function graphqlPage(apiUrl, query, variables, ctx) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'user-agent': BROWSER_LIKE_USER_AGENT,
         'origin': 'https://glints.com',
         'referer': 'https://glints.com/id/opportunities/jobs/explore',
       },

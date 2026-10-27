@@ -56,17 +56,15 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, realpathSync, lstatSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute, basename, sep } from 'path';
 import { createHash } from 'crypto';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { validateFlags, hasFlag, flagValue } from './lib/cli-flags.mjs';
-import { unescapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { unescapeFormulaCell } from './lib/tsv-formula-escape.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
-const CONTACTS_PATH = join(CAREER_OPS_DATA, 'data/contacts.tsv');
-const DEFAULT_VCF = join(CAREER_OPS_DATA, 'output/contacts.vcf');
+const DATA_ROOT = getCareerOpsRoot();
+const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
+const DEFAULT_VCF = join(DATA_ROOT, 'output/contacts.vcf');
+
 
 // --- CLI args ---
 const KNOWN_FLAGS = ['--summary', '--self-test', '--caller-id', '--vcf', '--help', '-h'];
@@ -84,7 +82,7 @@ const USAGE = `Usage:
 // this script's, and `import { parseContacts } from './contacts.mjs'` inside a
 // process started with any unrecognized flag died at import with
 // "unrecognized flag(s)". Invisible while the suite ran in its own process;
-// surfaced the moment it moved to tests/ and was imported by the harness.
+// surfaced the moment it moved to tests/ and was imported by test-all (#3306).
 const args = isMainModule(import.meta.url) ? process.argv.slice(2) : [];
 validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--vcf'] });
 const summaryMode = args.includes('--summary');
@@ -459,9 +457,12 @@ function writeVcf(contacts, quality) {
   const outPath = resolve(vcfPathArg ?? DEFAULT_VCF);
   // Path-traversal guard: keep the vCard write inside the project directory so
   // a crafted output argument (e.g. "../../etc/cron.d/x") can't escape the
-  // repo. Anchored to the repo root (CAREER_OPS), not process.cwd() — see the
-  // generate-pdf.mjs precedent. Cheap lexical gate first…
-  const relOut = relative(CAREER_OPS, outPath);
+  // repo. Anchored to the data root (the root the contacts are read from and
+  // DEFAULT_VCF lives in), not process.cwd() and not this script's own
+  // directory: they differ when CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR /
+  // .career-ops-data points the user layer outside the checkout. Cheap lexical
+  // gate first…
+  const relOut = relative(DATA_ROOT, outPath);
   if (relOut === '' || relOut.startsWith('..') || isAbsolute(relOut)) {
     console.error(`Refusing to write the vCard outside the project directory: ${outPath}`);
     process.exit(1);
@@ -481,7 +482,7 @@ function writeVcf(contacts, quality) {
     console.error(`Refusing to write the vCard outside the project directory: ${outPath}`);
     process.exit(1);
   }
-  const repoReal = realpathSync(CAREER_OPS);
+  const repoReal = realpathSync(DATA_ROOT);
   const canonicalTarget = existsSync(outPath)
     ? realpathSync(outPath)
     : join(realpathSync(dirname(outPath)), basename(outPath));

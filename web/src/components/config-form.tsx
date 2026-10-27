@@ -16,6 +16,7 @@ import { PageShell, PageHeader } from "@/components/ui/page-shell";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
 import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
 import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
+import { CONFIG_KEY as STORAGE_KEY, writeConfig } from "@/lib/config-events.mjs";
 
 type Cli = {
   id: string;
@@ -35,7 +36,6 @@ const PROVIDERS = [
   { id: "openrouter", label: "OpenRouter" },
 ] as const;
 
-const STORAGE_KEY = "career-ops:config";
 
 export function ConfigForm() {
   const [mode, setMode] = useState<Mode>("cli");
@@ -80,7 +80,7 @@ export function ConfigForm() {
           // would stay selected and save() would write it straight back, so
           // "open Config and click Save config" could never clear it (#4012).
           if (keepIfInstalled(prev, list)) return prev;
-          const auto = pickDefaultInstalled(list);
+          const auto = pickDefaultInstalled(list, typeof d.remembered === "string" ? d.remembered : null);
           if (!auto) return "";
           if (!readSavedCliId()) persistCliId(auto);
           return auto;
@@ -91,23 +91,18 @@ export function ConfigForm() {
 
   function save() {
     // Persist the CLI choice per-profile on the server (the source of truth the
-    // assistant reads), and mirror the global UI prefs to localStorage. The
-    // synthetic "storage" event nudges the assistant console (same tab) to re-read.
+    // assistant reads). The API key is deliberately NOT persisted: nothing reads
+    // it and a secret must never sit in clear-text localStorage.
     if (cliId) {
       fetch("/api/cli", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cliId }),
       }).catch(() => {
-        /* best-effort — localStorage below still gives the UI an instant choice */
+        /* best-effort: localStorage below still gives the UI an instant choice */
       });
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, cliId, provider, apiKey, logos }));
-    try {
-      window.dispatchEvent(new Event("storage"));
-    } catch {
-      /* ignore */
-    }
+    writeConfig(localStorage, window, { mode, cliId, provider, logos });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }

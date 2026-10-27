@@ -3,6 +3,13 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { ConfigForm } from "./config-form";
 
+// ConfigForm now renders CadenceSettings, which calls useRouter() and needs a mounted app router.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 afterEach(cleanup);
 
 const cliResponse = {

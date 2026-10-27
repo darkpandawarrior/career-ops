@@ -25,13 +25,14 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { execFileSync } from 'child_process';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
+import {
+  formatReportNumber, releaseReportNumbers, reserveReportNumbers,
+} from './reserve-report-num.mjs';
 import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils/token-tracker.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
 import { buildBudgetedPrompt } from './lib/context-budget.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
@@ -46,27 +47,26 @@ try {
   config();
 } catch { /* dotenv optional */ }
 
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT), which is a different directory under the
-// multi-profile setup. Data paths below must use CAREER_OPS_DATA, never CAREER_OPS.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 const PATHS = {
-  shared:  join(CAREER_OPS, 'modes', '_shared.md'),
-  oferta:  join(CAREER_OPS, 'modes', 'oferta.md'),
-  cv:      join(CAREER_OPS_DATA, 'cv.md'),
-  profile: join(CAREER_OPS_DATA, 'modes', '_profile.md'),
-  profileYml: join(CAREER_OPS_DATA, 'config', 'profile.yml'),
-  reports: join(CAREER_OPS_DATA, 'reports'),
-  // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under CAREER_OPS_DATA
+  shared:  join(ROOT, 'modes', '_shared.md'),
+  oferta:  join(ROOT, 'modes', 'oferta.md'),
+  cv:      join(DATA_ROOT, 'cv.md'),
+  profile: join(DATA_ROOT, 'modes', '_profile.md'),
+  custom:  join(DATA_ROOT, 'modes', '_custom.md'),
+  profileYml: getProfilePath(),
+  reports: join(DATA_ROOT, 'reports'),
+  // CAREER_OPS_ADDITIONS mirrors merge-tracker.mjs:43. Writing under DATA_ROOT
   // regardless would drop the addition somewhere the merge it instructs never
   // looks, so the evaluation would sit there unread.
   trackerAdditions: process.env.CAREER_OPS_ADDITIONS
     ? process.env.CAREER_OPS_ADDITIONS
-    : join(CAREER_OPS_DATA, 'batch', 'tracker-additions'),
+    : join(DATA_ROOT, 'batch', 'tracker-additions'),
 };
 
 // ---------------------------------------------------------------------------
@@ -186,21 +186,6 @@ function readFile(path, label) {
   return readFileSync(path, 'utf-8').trim();
 }
 
-/**
- * Atomically reserve the next report number via reserve-report-num.mjs, so two
- * concurrent runs (batch workers, parallel windows) never collide on the same
- * slot — see reserve-report-num.mjs for the O_CREAT|O_EXCL sentinel mechanism.
- * @returns {string} Zero-padded report number string, e.g. "042" or "1001".
- */
-function reserveReportNumber() {
-  return execFileSync(process.execPath, [join(CAREER_OPS, 'reserve-report-num.mjs')], { encoding: 'utf-8' }).trim();
-}
-
-/** Release the sentinel for a previously-reserved report number. */
-function releaseReportNumber(num) {
-  execFileSync(process.execPath, [join(CAREER_OPS, 'reserve-report-num.mjs'), '--release', num]);
-}
-
 // ---------------------------------------------------------------------------
 // Loopback guard — cv.md + full JD are sent to this endpoint.
 // A remote URL would silently exfiltrate private data.
@@ -255,6 +240,8 @@ const sharedContext = readFile(PATHS.shared, 'modes/_shared.md');
 const ofertaLogic   = readFile(PATHS.oferta, 'modes/oferta.md');
 const cvContent     = readFile(PATHS.cv,     'cv.md');
 const profileContent = readFile(PATHS.profile, 'modes/_profile.md');
+// _custom.md is optional: an absent file is a valid end state, so no warning.
+const customContent = existsSync(PATHS.custom) ? readFileSync(PATHS.custom, 'utf-8').trim() : '';
 const profileYml    = readFile(PATHS.profileYml, 'config/profile.yml');
 const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profileYml));
 
@@ -267,6 +254,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   cvContent,
   profileYml,
   profileContent,
+  customContent,
   jdText,
   maxTokens: numCtx, // matches options.num_ctx below
 });
@@ -455,14 +443,24 @@ if (summaryMatch) {
 // Save report
 // ---------------------------------------------------------------------------
 if (saveReport) {
-  let reservedNum = null;
+  let reservedNumbers = [];
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
     }
 
-    reservedNum       = reserveReportNumber();
-    const num         = reservedNum;
+    reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
+    const num         = formatReportNumber(reservedNumbers[0]);
+    // LOCAL calendar day (#3070). This one value becomes three things that have to
+    // agree with each other and with the user's calendar: the report FILENAME
+    // ({num}-{slug}-{today}.md), the report's own `**Date:**` header, and the date
+    // column of the tracker row written for it.
+    //
+    // On the UTC day an evaluation run on a Sunday evening in the Americas produces
+    // 042-acme-2026-08-18.md, dated the 18th, in a tracker row dated the 18th —
+    // while every other date the user sees, and every date the other scripts now
+    // stamp, says the 17th. The filename is the part that cannot be corrected
+    // later: reports are addressed by it.
     const today       = localToday();
     const companySlug = slugifyCompany(company);
     const filename    = `${num}-${companySlug}-${today}.md`;
@@ -524,9 +522,9 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
   } catch (err) {
     console.warn(`⚠️   Could not save report: ${err.message}`);
   } finally {
-    if (reservedNum) {
+    if (reservedNumbers.length > 0) {
       try {
-        releaseReportNumber(reservedNum);
+        await releaseReportNumbers(reservedNumbers, { reportsDir: PATHS.reports });
       } catch (err) {
         console.warn(`⚠️   Could not release report reservation: ${err.message}`);
       }

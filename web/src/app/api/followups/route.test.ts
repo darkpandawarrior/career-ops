@@ -204,7 +204,7 @@ describe("GET /api/followups — happy path + shaping", () => {
   it("invokes node with the script path and --json, scoped to the data root via env", async () => {
     feed(JSON.stringify({ entries: [] }));
     await GET(req());
-    expect(h.lastCall!.file).toBe("node");
+    expect(h.lastCall!.file).toBe(process.execPath);
     expect(h.lastCall!.args).toEqual([SCRIPT, "--json"]);
     expect(h.lastCall!.opts.cwd).toBe(ENGINE);
     const env = h.lastCall!.opts.env as Record<string, string>;
@@ -217,7 +217,7 @@ describe("GET /api/followups — missing script", () => {
     fs.rmSync(SCRIPT, { force: true });
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], upcoming: [], nextUpcoming: null });
     expect(h.execFileMock).not.toHaveBeenCalled();
   });
 });
@@ -227,28 +227,28 @@ describe("GET /api/followups — bad output / non-zero exit", () => {
     feed("");
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], upcoming: [], nextUpcoming: null });
   });
 
   it("returns the empty shape when stdout has no '{'", async () => {
     feed("no json at all");
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], upcoming: [], nextUpcoming: null });
   });
 
   it("returns the empty shape when the JSON is malformed", async () => {
     feed("{ nope: not json }");
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], upcoming: [], nextUpcoming: null });
   });
 
   it("returns the empty shape on trailing junk after valid JSON (slice runs to END)", async () => {
     feed(JSON.stringify({ entries: entriesWith("overdue", 2) }) + "\nextra log\n");
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], upcoming: [], nextUpcoming: null });
   });
 
   it("does NOT trust partial stdout from a non-zero-exit child (regression)", async () => {
@@ -257,13 +257,13 @@ describe("GET /api/followups — bad output / non-zero exit", () => {
     feed(JSON.stringify({ metadata: { partial: true }, entries: entriesWith("overdue", 3) }), new Error("exit 1"));
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], upcoming: [], nextUpcoming: null });
   });
 
   it("returns the empty shape when the child errors AND produced no stdout", async () => {
     feed("", new Error("ENOENT"));
     const res = await GET(req());
     const body = await res.json();
-    expect(body).toEqual({ available: false, metadata: null, entries: [], nextUpcoming: null });
+    expect(body).toEqual({ available: false, metadata: null, entries: [], upcoming: [], nextUpcoming: null });
   });
 });

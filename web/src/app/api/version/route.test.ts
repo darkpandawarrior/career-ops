@@ -71,7 +71,7 @@ describe("GET /api/version", () => {
     setVersionFile("parent", "1.2.3\n");
     process.env.VERCEL_GIT_COMMIT_SHA = "abc1234extra";
     const body = await (await GET()).json();
-    expect(body).toEqual({ version: "1.2.3", channel: "stable", sha: "abc1234" });
+    expect(body).toEqual({ version: "1.2.3", coreVersion: "1.2.3", channel: "stable", sha: "abc1234" });
   });
 
   it("truncates the sha to 7 characters", async () => {
@@ -163,7 +163,7 @@ describe("GET /api/version", () => {
   it("returns sha \"\" when no build-time sha env var is set", async () => {
     setVersionFile("parent", "1.0.0");
     const body = await (await GET()).json();
-    expect(body).toEqual({ version: "1.0.0", channel: "stable", sha: "" });
+    expect(body).toEqual({ version: "1.0.0", coreVersion: "1.0.0", channel: "stable", sha: "" });
   });
 
   it("VERCEL_GIT_COMMIT_SHA takes priority over the other two", async () => {

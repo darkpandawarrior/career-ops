@@ -207,6 +207,8 @@ export const ADAPTATIONS = [
       // seam between the two halves of this repo, so it is the MOST likely to
       // break in a sync, not the least.
       if (!/\.(mjs|ts|tsx)$/.test(file)) return [];
+      // This test embeds an import-shaped snippet in a template literal it writes to a temp dir.
+      if (file === 'tests/fact-language-long-tokens.test.mjs') return [];
       const out = [];
       // Relative specifiers resolve against the importing file's directory, so a
       // web file reaching ./x.mjs means web/<dir>/x.mjs, not repo-root x.mjs.
@@ -248,6 +250,7 @@ export const ADAPTATIONS = [
         for (const raw of m[1].split(',')) {
           const name = raw.trim().split(/\s+as\s+/)[0].trim();
           if (!name || name.startsWith('//')) continue;
+          if (/^type\s/.test(name)) continue;               // type-only specifier, erased at compile time
           if (!exported.has(name)) out.push(`${file}: imports \`${name}\` from ${m[2]}, which does not export it`);
         }
       }

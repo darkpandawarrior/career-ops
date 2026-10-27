@@ -6,10 +6,12 @@ import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { requestRoot } from "@/lib/profile-registry";
 import { assembleDedupContext } from "@/lib/core/discover";
+import { makeKnownOfferFilter } from "@/lib/explore-ai";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
 import { codexFencingSupported } from "@/lib/cli-fencing-probe.mjs";
+import { readJsonObject } from "@/lib/json-body";
 
 // Deny list DERIVED, never hand-written: every one of the six advisor argvs
 // that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
@@ -45,12 +47,8 @@ Follow modes/discover.md exactly. You are running headless for the web:
 `;
 
 export async function POST(req: Request) {
-  let body: { query?: string; cliId?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "bad json" }, { status: 400 });
-  }
+  const body = await readJsonObject<{ query?: string; cliId?: string }>(req);
+  if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const query = (body.query || "").trim();
   const requestedCliId = body.cliId;
   if (!query || !requestedCliId) return Response.json({ error: "query and cliId required" }, { status: 400 });
@@ -73,7 +71,7 @@ export async function POST(req: Request) {
   }
 
   const dataRoot = await requestRoot();
-  const { lines } = assembleDedupContext(dataRoot);
+  const { lines, urls: knownUrls } = assembleDedupContext(dataRoot);
   const memory = readMemory(dataRoot);
   const memoryLine = memory.trim() ? `\n\nWHAT YOU KNOW ABOUT THE USER (persistent memory):\n${memory.trim()}` : "";
   const knownBlock = lines.length ? `\n\n--- ALREADY KNOWN (dedup — do NOT propose these) ---\n${lines.join("\n")}` : "";
@@ -281,8 +279,15 @@ export async function POST(req: Request) {
           return false;
         }
       };
-      const emit = (s: string) => {
-        if (safeEnqueue(s)) emitted = true;
+      // The AI's own text goes through the known-URL filter: an offer the user
+      // already has is dropped here, so the browser never needs the whole set.
+      // `emitted` still records that the CLI produced output, even when every
+      // offer in it was a known one.
+      const knownFilter = makeKnownOfferFilter(knownUrls);
+      const emitAi = (s: string) => {
+        if (!s) return;
+        emitted = true;
+        safeEnqueue(knownFilter.feed(s));
       };
       // Same honesty as /api/run: a runtime with no verified fencing mechanism
       // runs with its default access, and that must be visible rather than
@@ -302,7 +307,7 @@ export async function POST(req: Request) {
         if (isCodex) return;
 
         if (!isClaude) {
-          emit(d.toString());
+          emitAi(d.toString());
           return;
         }
         buf += d.toString();
@@ -315,7 +320,7 @@ export async function POST(req: Request) {
             const obj = JSON.parse(line);
             if (obj.type === "stream_event" && obj.event?.type === "content_block_delta") {
               const text = obj.event.delta?.text;
-              if (typeof text === "string") emit(text);
+              if (typeof text === "string") emitAi(text);
             }
           } catch {
             /* partial / non-json line — skip */
@@ -363,7 +368,8 @@ export async function POST(req: Request) {
           }
 
           if (finalText) {
-            emit(finalText);
+            emitAi(finalText);
+            safeEnqueue(knownFilter.flush());
           } else if (code !== 0) {
             const diagnosticText = codexStderr.trim();
             const diagnosticsCaptured = diagnosticText.length > 0;
@@ -394,6 +400,7 @@ export async function POST(req: Request) {
           return;
         }
 
+        safeEnqueue(knownFilter.flush());
         if (!emitted) safeEnqueue("_(no output — is the CLI authenticated?)_");
         safeClose();
       });

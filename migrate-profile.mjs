@@ -56,6 +56,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import * as yaml from 'js-yaml';
+import { loadYaml as parseYaml } from './lib/yaml-document.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -184,7 +185,7 @@ function loadRegistry(registryPath) {
   let doc;
   try {
     const raw = readFileSync(registryPath, 'utf8');
-    doc = raw.trim() ? yaml.load(raw) : null;
+    doc = raw.trim() ? parseYaml(raw) : null;
   } catch (err) {
     die(`failed to parse ${registryPath}: ${err.message}`);
   }

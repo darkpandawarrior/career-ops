@@ -37,7 +37,8 @@
 
 
 import { execSync, execFile, execFileSync, spawn, spawnSync } from 'child_process';
-import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync as _rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync } from 'fs';
+import { checkSyntax, NODE_CHECK_TIMEOUT_MS } from './lib/syntax-check.mjs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync as _rmSync, statSync, unlinkSync, realpathSync, symlinkSync, copyFileSync, cpSync } from 'fs';
 
 // Windows keeps a handle open on a just-exited child process's working files
 // for a short window (antivirus and Search Indexer widen it), so removing a
@@ -57,8 +58,10 @@ import { tmpdir } from 'os';
 import { promisify } from 'util';
 import { fileURLToPath, pathToFileURL } from 'url';
 import * as yaml from 'js-yaml';
-import { pass, fail, warn, run, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
+import { pass, fail, warn, run, ownRootEnv, runAcrossUtcDay, runAcrossLocalDay, lastRunFailure, formatRunFailure, fileExists, finish, results, linkNodeModules, ROOT, QUICK, NODE, DEFAULT_SCRIPT_TIMEOUT_MS, getBash, toBashPath, hermeticGitEnv } from './tests/helpers.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
+// FORK ADAPTATION: upstream's --needs tool-suite filter (tests/required-tools.mjs).
+import { REQUIRED_TOOL_ENV, declaresTool } from './tests/required-tools.mjs';
 import { collectMjsFiles } from './lib/mjs-files.mjs';
 import { walkTree, listTree } from './lib/walk-tree.mjs';
 import { FROZEN_EVALUATION_MODES, KNOWN_EVALUATION_MODES, discoverEvaluationModes, readModeText, structuralGaps } from './tests/evaluation-mode-parity-helpers.mjs';
@@ -181,15 +184,22 @@ function stripCommentLines(src) {
   return kept.join('\n');
 }
 
-async function runDiscovered(filter = null) {
+async function runDiscovered(filter = null, tools = null) {
   let files = discoverTests(TESTS_DIR);
   if (filter) {
     const norm = (p) => p.slice(TESTS_DIR.length + 1).replace(/\\/g, '/');
     files = files.filter((f) => norm(f).includes(filter));
   }
+  if (tools) {
+    files = files.filter((f) => {
+      const src = stripCommentLines(readFileSync(f, 'utf-8'));
+      return tools.some((tool) => declaresTool(src, tool));
+    });
+  }
   if (files.length === 0) {
     // Fail hard: a path typo must never silently turn CI green.
-    console.log(`  ❌ no test files matched${filter ? ` --only "${filter}"` : ''} under tests/`);
+    const what = [filter && `--only "${filter}"`, tools && `--needs ${tools.join(',')}`].filter(Boolean).join(' ');
+    console.log(`  ❌ no test files matched${what ? ` ${what}` : ''} under tests/`);
     process.exit(1);
   }
   for (const f of files) {
@@ -340,6 +350,25 @@ async function runDiscovered(filter = null) {
 // that was asked for — the same silent substitution this file's flag reading
 // was fixed for.
 const ONLY = hasFlag(process.argv, '--only') ? (flagValue(process.argv, '--only') ?? '') : null;
+
+// FORK ADAPTATION: `--needs browser,latex` ported from upstream (see its runner).
+const NEEDS = hasFlag(process.argv, '--needs') ? (flagValue(process.argv, '--needs') ?? '') : null;
+if (NEEDS !== null) {
+  const tools = NEEDS.split(',').map((t) => t.trim()).filter(Boolean);
+  const unknown = tools.filter((t) => !Object.hasOwn(REQUIRED_TOOL_ENV, t));
+  if (tools.length === 0 || NEEDS.startsWith('--') || unknown.length) {
+    console.log(`  ❌ --needs takes a comma-separated list of: ${Object.keys(REQUIRED_TOOL_ENV).join(', ')}${unknown.length ? ` (got "${unknown.join('", "')}")` : ''}`);
+    process.exit(1);
+  }
+  if (ONLY !== null && (ONLY === '' || ONLY.startsWith('--'))) {
+    console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
+    process.exit(1);
+  }
+  for (const tool of tools) process.env[REQUIRED_TOOL_ENV[tool]] = '1';
+  console.log(`\n🧪 career-ops test suite (--needs ${tools.join(',')}${ONLY ? ` --only ${ONLY}` : ''})\n`);
+  await runDiscovered(ONLY || null, tools);
+  finish();
+}
 if (ONLY !== null) {
   if (ONLY === '' || ONLY.startsWith('--')) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
@@ -370,25 +399,26 @@ const mjsFiles = collectMjsFiles(ROOT).map(f => f.slice(ROOT.length + 1).replace
 // diff two runs' pass labels.
 console.log(`  (${mjsFiles.length} .mjs files, recursive from the repository root)`);
 
-// `node --check` parses a file and exits; it runs no user code, touches no
-// shared state, and its result depends on nothing but that one file. Spawning
-// the files one at a time was pure process-startup latency, so they go through
-// a bounded pool instead (#2387) — which is also what keeps the recursive scope
-// above a wall-clock non-event (21s sequential here, ~4s pooled). Results are
-// collected by index and reported afterwards in collector order, so the log
-// stays byte-identical to the sequential version regardless of completion order.
-const SYNTAX_POOL_SIZE = 8;
-const execFileAsync = promisify(execFile);
-const syntaxOk = new Array(mjsFiles.length);
-const syntaxDetail = new Array(mjsFiles.length);
-let nextSyntaxIdx = 0;
+// One process parses all of them, and `node --check` then runs only on a file
+// that pass did not vouch for, so a failure below carries the diagnostic it
+// always carried (lib/syntax-check.mjs, #5078). One `node --check` per file,
+// even eight at a time (#2387), was 22 s of starting node for 0.3 s of parsing.
+// Results come back by index and are reported in collector order, so the log
+// does not depend on what finished first.
+const { errors: syntaxErrors, fastPassUnavailable } = await checkSyntax(mjsFiles, { cwd: ROOT, node: NODE });
+if (fastPassUnavailable) {
+  // Not a failure and not a narrower check: every file went through
+  // `node --check` instead. Said out loud because it costs about 20 s a run,
+  // and nothing else here would show where they went.
+  console.log(`  (the single-process parse did not run: ${fastPassUnavailable}; each file was checked with node --check instead)`);
+}
 
 // A bare catch reports a child killed on timeout, or one that never spawned, as
 // "has syntax errors" — sending the reader hunting for a parse error that does
 // not exist. Keep enough of the child's own diagnosis to tell those apart.
 const describeCheckFailure = (err) => {
   if (err?.killed || err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT') {
-    return `node --check timed out after 30000ms${err.signal ? ` (signal ${err.signal})` : ''}`;
+    return `node --check timed out after ${NODE_CHECK_TIMEOUT_MS}ms${err.signal ? ` (signal ${err.signal})` : ''}`;
   }
   const stderr = String(err?.stderr ?? '').trim();
   if (!stderr) return `no stderr (exit ${err?.code ?? 'unknown'})`;
@@ -398,25 +428,11 @@ const describeCheckFailure = (err) => {
   return clipped.replace(/\n/g, '\n    ');
 };
 
-const syntaxWorker = async () => {
-  for (let i = nextSyntaxIdx++; i < mjsFiles.length; i = nextSyntaxIdx++) {
-    try {
-      await execFileAsync(NODE, ['--check', mjsFiles[i]], { cwd: ROOT, timeout: 30000 });
-      syntaxOk[i] = true;
-    } catch (err) {
-      syntaxOk[i] = false;
-      syntaxDetail[i] = describeCheckFailure(err);
-    }
-  }
-};
-await Promise.all(
-  Array.from({ length: Math.min(SYNTAX_POOL_SIZE, mjsFiles.length) }, syntaxWorker)
-);
 mjsFiles.forEach((f, i) => {
-  if (syntaxOk[i]) {
+  if (!syntaxErrors[i]) {
     pass(`${f} syntax OK`);
   } else {
-    fail(`${f} has syntax errors\n    ${syntaxDetail[i] ?? 'no diagnostic captured'}`);
+    fail(`${f} has syntax errors\n    ${describeCheckFailure(syntaxErrors[i])}`);
   }
 });
 
@@ -456,6 +472,20 @@ const scripts = [
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   // career-ops 1.30.0 sync: /calibrate (#3315) ships an inline self-test.
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
+  // career-ops 1.38.0 sync: inline self-tests registered (tests/self-test-registration).
+  { name: 'ats-payload.mjs --self-test', expectExit: 0 },
+  { name: 'contact-lookup.mjs --self-test', expectExit: 0 },
+  { name: 'cv-title-check.mjs --self-test', expectExit: 0 },
+  { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
+  { name: 'keyword-match.mjs --self-test', expectExit: 0 },
+  { name: 'linkedin-join.mjs --self-test', expectExit: 0 },
+  { name: 'process-quality.mjs --self-test', expectExit: 0 },
+  { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
+  { name: 'salary-gap.mjs --self-test', expectExit: 0 },
+  { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
+  { name: 'validate-profile.mjs --self-test', expectExit: 0 },
+  { name: 'verify-cv-facts.mjs --self-test', expectExit: 0 },
+  { name: 'verify-cv-structure.mjs --self-test', expectExit: 0 },
   { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
   // career-ops 1.19.0 scripts with inline self-tests (ported).
   { name: 'upskill.mjs --self-test', expectExit: 0 },
@@ -1090,7 +1120,11 @@ if (
   fail('apply mode missing liveness/role-match preflight gate');
 }
 
-const ofertaMode = readFile('modes/oferta.md');
+function readOfertaMode() {
+  return readFile('modes/oferta.md')
+    .replace(/^\*\*\d+\. .+?\*\*\. Read `(modes\/oferta-signals\/[^`]+)` when .*$/gm, (_, file) => readFile(file));
+}
+const ofertaMode = readOfertaMode();
 const autoPipelineMode = readFile('modes/auto-pipeline.md');
 if (
   ofertaMode.includes('## Liveness gate (URL inputs)') &&
@@ -1716,7 +1750,7 @@ try {
     await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
 
   const slugs = deriveSlugCandidates('Acme Corp!');
-  if (JSON.stringify(slugs) === JSON.stringify(['acmecorp', 'acme-corp', 'acme_corp', 'acme'])) {
+  if (['acmecorp', 'acme-corp', 'acme_corp', 'acme'].every((x) => slugs.includes(x)) && slugs.includes('acmeai') && slugs.includes('acme.tech')) {
     pass('verify-portals derives slug candidates from a company name');
   } else {
     fail(`verify-portals slug candidates wrong: ${JSON.stringify(slugs)}`);
@@ -2855,6 +2889,14 @@ try {
       // ...and followup-cadence now delegates flag validation to the shared
       // lib/cli-flags.mjs helper, so the fixture carries that too.
       copyFileSync(join(ROOT, 'lib', 'cli-flags.mjs'), join(e2eTmp, 'lib', 'cli-flags.mjs'));
+      // ...and the rest of lib/ (yaml-document, dir-lock, ... reached through owed-actions and tracker-utils).
+      cpSync(join(ROOT, 'lib'), join(e2eTmp, 'lib'), { recursive: true });
+      // followup-cadence reads the status ledger through funnel-velocity.mjs, which pulls in
+      // stats.mjs and more root modules, so the fixture carries every root module.
+      // FORK ADAPTATION: upstream's runner copies the same set one file at a time.
+      for (const f of readdirSync(ROOT)) {
+        if (/\.(mjs|json)$/.test(f) && !existsSync(join(e2eTmp, f))) copyFileSync(join(ROOT, f), join(e2eTmp, f));
+      }
       // ...and its main-guard now comes from lib/is-main-module.mjs (#3170),
       // which is what lets the copy answer "am I main?" correctly from a
       // symlinked tmpdir in the first place.
@@ -2893,7 +2935,7 @@ try {
         cwd: e2eTmp,
         encoding: 'utf-8',
         timeout: 30000,
-        env: { ...process.env, CAREER_OPS_PROFILE: '' },
+        env: ownRootEnv({ CAREER_OPS_PROFILE: '' }),
       });
       const e2e = JSON.parse(e2eOut.trim());
       const byNum = new Map((e2e.entries || []).map(entry => [entry.num, entry]));

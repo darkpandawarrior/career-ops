@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 
 /** Lightweight read of config/profile.yml for the Intel banner (read-only). */
 export type ProfileMeta = {
@@ -17,7 +18,7 @@ export type ProfileMeta = {
 export function readProfileMeta(root: string = careerOpsRoot()): ProfileMeta | null {
   let raw: string;
   try {
-    raw = fs.readFileSync(path.join(root, "config", "profile.yml"), "utf8");
+    raw = fs.readFileSync(getProfilePath(root, { explicitRoot: true }), "utf8");
   } catch {
     return null;
   }

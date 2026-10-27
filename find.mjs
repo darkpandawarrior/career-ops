@@ -27,7 +27,7 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, parseMarkdownLinks } from './tracker-parse.mjs';
 import { resolvePdfIndexPath, resolveWorkspaceRootFor, pathIsInside, pathIsInsideCanonical } from './tracker-utils.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
@@ -40,7 +40,7 @@ const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRo
 
 // "008" and "8" are the same report — zero-padded report-link form vs unpadded
 // tracker-# form (same normalization as the manifest writer in generate-pdf.mjs).
-const normNum = (s) => String(s ?? '').trim().replace(/^0+(?=\d)/, '');
+export const normNum = (s) => String(s ?? '').trim().replace(/^0+(?=\d)/, '');
 
 // Same status hygiene as tracker.mjs: strip markdown bold and stray dates so a
 // messy cell still prints as its canonical label.
@@ -65,7 +65,7 @@ export function parseTrackerRows(text) {
   for (const line of lines) {
     const row = parseTrackerRow(line, colmap);
     if (!row) continue;
-    const link = row.report.match(/\[(\d+)\]\(([^)]+)\)/);
+    const link = parseMarkdownLinks(row.report).find(l => /^\d+$/.test(l.label));
     rows.push({
       trackerNum: row.num,
       date: row.date,
@@ -73,8 +73,8 @@ export function parseTrackerRows(text) {
       role: row.role,
       score: row.score,
       status: cleanStatus(row.status),
-      reportNum: link ? normNum(link[1]) : null,
-      reportPath: link ? link[2].replace(/^(\.\.\/)+/, '') : null,
+      reportNum: link ? normNum(link.label) : null,
+      reportPath: link ? link.target.replace(/^(\.\.\/)+/, '') : null,
     });
   }
   return rows;

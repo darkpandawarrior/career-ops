@@ -63,6 +63,7 @@ function row(o: {
 function appOf(company: string): Application {
   return {
     n: "1",
+    url: "",
     date: "2026-06-01",
     company,
     role: "Engineer",

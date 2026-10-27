@@ -16,27 +16,18 @@
 // would require changing the Provider.fetch(entry, ctx) contract itself.
 
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
-import { resolveCareerOpsRoot } from '../path-resolver.mjs';
-import * as yaml from 'js-yaml';
+import { loadYaml } from '../lib/yaml-document.mjs';
+import { getProfilePath } from '../path-resolver.mjs';
 
 // Matches the CAREER_OPS_PROFILE override already honored by scan.mjs,
 // cv-templates.mjs, followup-cadence.mjs, plugins/_engine.mjs, and
 // test-all.mjs — without this, a user with that env var set would get
 // silently different fallback behavior here than everywhere else.
-// User Layer: resolved from the ACTIVE PROFILE's data root, not the cwd. The old
-// bare-relative default read whatever directory the command ran from, so under
-// `./profile <name>` this fell back to the WRONG profile's target_roles — and
-// because resolveProfileKeywords() fails open to [], that degraded keyword
-// matching silently instead of erroring. The three providers below call it with
-// no argument, so this default is the production path.
-//
-// Resolved at CALL time, not module load: a module-scope const is the right shape
-// for a CLI that runs once, but it freezes the root before any caller (or test)
-// can set CAREER_OPS_ROOT, which is the documented override.
+// Read at call time, not at import: a module-level constant froze whatever
+// the variable held when the first provider loaded, so a test could not
+// isolate the fallback from a developer's own CAREER_OPS_PROFILE.
 function defaultProfilePath() {
-  if (process.env.CAREER_OPS_PROFILE) return process.env.CAREER_OPS_PROFILE;
-  return join(resolveCareerOpsRoot(import.meta.url).dataRoot, 'config/profile.yml');
+  return getProfilePath();
 }
 
 function cleanKeywords(value) {
@@ -74,7 +65,7 @@ export function profileTargetKeywords(profile) {
 export function resolveProfileKeywords(profilePath = defaultProfilePath()) {
   if (!existsSync(profilePath)) return [];
   try {
-    const profile = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const profile = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
     return profileTargetKeywords(profile);
   } catch {
     return [];

@@ -6,6 +6,7 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
 
 /**
  * ACL for portals.yml — the core's scan-filter config (a CONTRACT entry-point,
@@ -48,9 +49,9 @@ export function cleanupTempPortals(file: string): void {
   }
 }
 
-function loadYaml(rel: string, root: string = careerOpsRoot()): Record<string, unknown> | null {
+function loadYaml(file: string): Record<string, unknown> | null {
   try {
-    const doc = yaml.load(fs.readFileSync(path.join(root, rel), "utf8"));
+    const doc = yaml.load(fs.readFileSync(file, "utf8"));
     return doc && typeof doc === "object" ? (doc as Record<string, unknown>) : null;
   } catch {
     return null;
@@ -71,7 +72,7 @@ export function seedExploreFilters(root: string = careerOpsRoot()): { filters: E
   const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] };
   const seededFrom: string[] = [];
 
-  const portals = loadYaml("portals.yml", root);
+  const portals = loadYaml(path.join(root, "portals.yml"));
   if (portals) {
     const tf = (portals.title_filter ?? {}) as Record<string, unknown>;
     const lf = (portals.location_filter ?? {}) as Record<string, unknown>;
@@ -90,7 +91,7 @@ export function seedExploreFilters(root: string = careerOpsRoot()): { filters: E
     // core on BOTH fields — `primary` read as a string when it is a list,
     // `archetypes` spread raw when its entries are objects — so this fallback
     // returned nothing for every profile.yml the app itself writes.
-    const fromRoles = listFrom(profileTargetKeywords(loadYaml("config/profile.yml", root)));
+    const fromRoles = listFrom(profileTargetKeywords(loadYaml(getProfilePath(root))));
     if (fromRoles.length) {
       filters.positive = fromRoles;
       seededFrom.push("profile.yml");

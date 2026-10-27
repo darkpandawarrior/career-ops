@@ -18,6 +18,7 @@
 
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { getProfilePath } from './path-resolver.mjs';
 
 const target = process.argv[2];
 if (!target) {
@@ -163,7 +164,7 @@ writeFileSync(join(target, 'config', 'job-search.yml'),
   + '  learning:\n    - Bazel\n'
   + 'locations:\n  preferred:\n    - Remote\n    - Bengaluru\n    - Pune\n  country: India\n');
 
-writeFileSync(join(target, 'config', 'profile.yml'),
+writeFileSync(getProfilePath(target),
   'personal:\n  name: Demo Candidate\n  email: demo@example.com\n  location: "Bengaluru, India"\n'
   + 'location:\n  country: India\n  city: Bengaluru\n'
   + 'job_search:\n  skills: ["Kotlin", "Kubernetes", "Terraform", "Go", "AWS", "CI/CD", "SRE"]\n'

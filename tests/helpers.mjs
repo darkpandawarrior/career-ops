@@ -5,9 +5,12 @@ import { execFileSync } from 'child_process';
 import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, join, dirname, resolve, sep } from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { isNestedCheckout, trackedFiles } from '../lib/mjs-files.mjs';
 import { localToday } from '../lib/local-today.mjs';
+import { getCareerOpsRoot } from '../path-resolver.mjs';
+import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
+import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -29,6 +32,153 @@ export const NODE = process.execPath;
 // overwritten by a later .env load (#4707 did the same for one test and
 // CAREER_OPS_PIPELINE). A test that needs the override sets its own.
 process.env.CAREER_OPS_TRACKER = '';
+
+// The same rule for the data root itself, which is where everything else a
+// script reads and writes is resolved from (#5113). Left alone, the suite ran
+// against whatever the shell pointed at: with CAREER_OPS_ROOT exported the way
+// the README suggests, the script smoke tests appended a fixture row to the
+// developer's real data/assessments.tsv on every run, and with nothing
+// exported, three suites overwrote live files in the checkout's own data/ and
+// restored them from memory — so an interrupted run left a three-row fixture
+// where the tracker had been, in a directory git does not track.
+//
+// So the suite gets a data root of its own. Pinned through CAREER_OPS_ROOT
+// because that outranks both CAREER_OPS_DATA_DIR and the `.career-ops-data`
+// marker (path-resolver.mjs), and set here for the reason the tracker override
+// is cleared here: the runner and every child it spawns inherit it, and a suite
+// run on its own is covered as well. A test that needs a particular root pins
+// its own, in its child's env or around its own import.
+//
+// One directory per run, not per process. The process that creates it exports
+// it as CAREER_OPS_TEST_DATA_ROOT; a child that loads these helpers finds that
+// and joins the run's root rather than making another, and only the creator
+// removes it.
+const SANDBOX_ENV = 'CAREER_OPS_TEST_DATA_ROOT';
+const SANDBOX_PREFIX = 'career-ops-test-data-';
+
+// The variable is inherited, so it is only as trustworthy as the shell it came
+// from: a stale export naming a real directory would make this process a
+// guest in it — fixtures written there, no snapshot, no drift check. Join only
+// what these helpers could have made: a directory of that name, directly under
+// the OS temp directory.
+function isRunSandbox(path) {
+  try {
+    const real = realpathSync(path);
+    return statSync(real).isDirectory()
+      && dirname(real) === realpathSync(tmpdir())
+      && basename(real).startsWith(SANDBOX_PREFIX);
+  } catch {
+    return false;
+  }
+}
+
+const inheritedSandbox = process.env[SANDBOX_ENV]?.trim();
+const ownsSandbox = !(inheritedSandbox && isRunSandbox(inheritedSandbox));
+
+/**
+ * The data root the developer's own commands resolve to, read before it is
+ * overridden below. Null in a child of the run: the process that owns the
+ * sandbox is the one that answers for the real root.
+ */
+export const REAL_DATA_ROOT = ownsSandbox ? getCareerOpsRoot() : null;
+const realRootBefore = ownsSandbox ? snapshotDataRoot(REAL_DATA_ROOT, ROOT) : null;
+
+/** The scratch data root every script resolves to while the suite runs. */
+export const SANDBOX_DATA_ROOT = ownsSandbox
+  ? realpathSync(mkdtempSync(join(tmpdir(), SANDBOX_PREFIX)))
+  : realpathSync(inheritedSandbox);
+
+/**
+ * Point the data root back at the suite's sandbox.
+ *
+ * Called when these helpers load, and again by any test that had to move or
+ * unset the variable in-process: `delete process.env.CAREER_OPS_ROOT` in a
+ * `finally` does not restore anything, it hands every later suite in the same
+ * process the developer's real root.
+ *
+ * @returns {void}
+ */
+export function pinSandboxDataRoot() {
+  process.env[SANDBOX_ENV] = SANDBOX_DATA_ROOT;
+  process.env.CAREER_OPS_ROOT = SANDBOX_DATA_ROOT;
+  // Blanked, not deleted, for the same reasons as CAREER_OPS_TRACKER above.
+  process.env.CAREER_OPS_DATA_DIR = '';
+}
+pinSandboxDataRoot();
+
+/**
+ * Environment for a child that runs a COPY of the scripts as its own checkout.
+ *
+ * Many fixtures copy a script and path-resolver.mjs into a temp directory and
+ * expect the copy to treat that directory as its data root, which is what the
+ * resolver does when nothing overrides it. Something does now — the pin above —
+ * and a developer's exported CAREER_OPS_ROOT always did, so the expectation is
+ * stated in the child's env instead of assumed from the shell's.
+ *
+ * @param {Record<string, string>} [extra] - Further variables for the child.
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function ownRootEnv(extra = {}) {
+  return { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '', ...extra };
+}
+
+let realRootChecked = false;
+
+/**
+ * Compare the real data root with how the run found it.
+ *
+ * Answers once: finish() reports through the counters, and the exit hook
+ * below must not report the same paths a second time.
+ *
+ * @returns {string[]|null} Lines describing what changed, or null when nothing
+ *   did, the check already ran, or this process does not own the sandbox.
+ */
+export function realDataRootDrift() {
+  if (!ownsSandbox || realRootChecked) return null;
+  realRootChecked = true;
+  const drift = diffSnapshots(realRootBefore, snapshotDataRoot(REAL_DATA_ROOT, ROOT));
+  return drift.length > 0 ? describeDrift(REAL_DATA_ROOT, drift, ROOT) : null;
+}
+
+/**
+ * Make SIGINT and SIGTERM end the process through process.exit().
+ *
+ * Node's default for both is to die where it stands, which skips the 'exit'
+ * hook below — so the run most likely to have left something behind in the
+ * developer's data was the one run that never looked. Exiting through
+ * process.exit() runs the hook, and removes the scratch data root on the way.
+ *
+ * Opt-in, for the long-lived runner: a handler only runs between two turns of
+ * the event loop, so the caller has to be a process that yields.
+ *
+ * @returns {void}
+ */
+export function exitOnInterrupt() {
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    process.on(signal, () => {
+      console.log(`\n  ⛔ interrupted (${signal}) — this is not a test result`);
+      process.exit(code);
+    });
+  }
+}
+
+if (ownsSandbox) {
+  // 'exit' also fires for process.exit(), so this covers a suite run on its
+  // own, which never reaches finish(), and a run ended by exitOnInterrupt().
+  process.on('exit', () => {
+    const drift = realDataRootDrift();
+    if (drift) {
+      console.log(`\n  ❌ ${drift.join('\n     ')}\n`);
+      // Keep a signal's own exit status; anything else becomes a failure.
+      if (!process.exitCode) process.exitCode = 1;
+    }
+    try {
+      _rmSync(SANDBOX_DATA_ROOT, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Under the OS temp directory, which is reclaimed without us.
+    }
+  });
+}
 
 /**
  * A merge-tracker fixture must not consult the install's batch history.
@@ -101,8 +251,105 @@ export function fail(msg) { console.log(`  ❌ ${msg}`); failed++; }
  */
 export function warn(msg) { console.log(`  ⚠️  ${msg}`); warnings++; }
 
+/**
+ * Report that a tool this suite needs is missing (see tests/required-tools.mjs).
+ *
+ * A warning on a machine that simply lacks the tool, and a failure in a run
+ * that must have it (`test-all.mjs --needs <tool>`, or its variable set to 1),
+ * where a skip would turn the check green without running it.
+ *
+ * @param {'browser'|'latex'} tool
+ * @param {string} msg - What was skipped and why.
+ * @returns {void}
+ */
+export function toolUnavailable(tool, msg) {
+  if (toolRequired(tool)) fail(`${msg} — ${REQUIRED_TOOL_ENV[tool]}=1, so a missing ${tool} is a failure in this run`);
+  else warn(msg);
+}
+
 /** Current counter snapshot. */
 export function results() { return { passed, failed, warnings }; }
+
+/**
+ * Add another process's counters to this one's.
+ *
+ * `test-all.mjs --jobs N` runs each discovered suite in a child process. The
+ * child counts its own pass()/fail()/warn() calls and has already printed their
+ * lines; the parent only needs the totals, so the summary line and the exit
+ * code cover every suite exactly as they do when suites run in-process.
+ *
+ * @param {{passed?: number, failed?: number, warnings?: number}} counts - A results() snapshot from a child.
+ * @returns {void}
+ */
+export function absorbResults({ passed: p = 0, failed: f = 0, warnings: w = 0 } = {}) {
+  passed += p;
+  failed += f;
+  warnings += w;
+}
+
+/**
+ * Import one discovered pass/fail-style suite, containing a throw.
+ *
+ * Shared by the two places a suite is imported: test-all.mjs's in-process loop
+ * (`--jobs 1`) and tests/run-discovered-child.mjs (one suite per process), so a
+ * crashing suite reads the same whichever way the run was started.
+ *
+ * An uncaught THROW from a suite ends the run just as completely as a
+ * process.exit() would, and rather more quietly: node unwinds straight out of
+ * test-all, finish() never prints its summary, and every suite sorting after
+ * this one silently never runs. That does not read as a broken suite — it reads
+ * as a finished one, so the screen of green above the cut looks like a pass.
+ * (Measured on a Windows box with no symlink privilege: tests/intake.test.mjs
+ * threw at import and took 2067 of 3693 checks with it, with no verdict line at
+ * all — #2828.) A discovered suite is a guest, not a co-host: its crash is one
+ * failure, not the end of the run.
+ *
+ * How much "one failure" actually cost is reported as `ran`, the exact number
+ * of assertions made before the throw; the reported totals only ever include
+ * those, and nothing else says the rest never happened (#3976). An earlier
+ * version also estimated how many assertions never ran, from a static count of
+ * pass()/fail() call sites in the file. artemtrofymenko (the issue's author)
+ * measured that estimate against real suites and found it wrong in both
+ * directions badly enough to make the diagnostic worse than none: a suite
+ * asserting through a local wrapper has far more real assertions than call
+ * sites (tests/discover-ats.test.mjs: 155 executed, 4 call sites — the estimate
+ * goes negative and the line silently does not print, for 38 of 278 in-process
+ * suites), and a suite writing `if (cond) pass(...); else fail(...)` pairs has
+ * roughly twice as many call sites as real assertions, so the estimate invents
+ * lost assertions that never existed. A signal present for some suites and
+ * silently absent for others turns its own absence into a false reassurance.
+ * `ran` alone does not have that failure mode, so it is printed
+ * unconditionally.
+ *
+ * @param {string} file - Absolute path of the suite.
+ * @param {string} rel - The name to report it under (repo-relative path).
+ * @returns {Promise<void>} Resolves when the import has; never rejects.
+ */
+export async function importSuiteContained(file, rel) {
+  const before = results();
+  // FORK ADAPTATION: the fork runs every suite in test-all's own process, so an
+  // import can nest inside a suite that already sealed git (hermetic-git-env does).
+  // Stash the outer seal so this import unseals only what it sealed itself.
+  const outerUnseal = unsealGitEnv;
+  unsealGitEnv = null;
+  try {
+    await import(pathToFileURL(file).href);
+  } catch (err) {
+    const ran = (results().passed - before.passed) + (results().failed - before.failed);
+    fail(`${rel} — suite threw and was contained (${err?.code ?? err?.name ?? 'Error'}): ${err?.message ?? err}`);
+    console.log(`      ${ran} assertion${ran === 1 ? '' : 's'} ran before the throw; everything after it in this file did not run`);
+    // The throw site, not just the message: a suite that dies mid-import
+    // leaves no other clue how far it got.
+    for (const line of String(err?.stack ?? '').split('\n').slice(1, 4)) {
+      if (line.trim()) console.log(`      ${line.trim()}`);
+    }
+  } finally {
+    // A suite that sealed git (sealProcessGitEnv) hands the environment back,
+    // so the suites after it in this process do not inherit the seal.
+    if (unsealGitEnv) unsealGitEnv();
+    unsealGitEnv = outerUnseal;
+  }
+}
 
 /**
  * Print the summary line and exit with the suite's exit code.
@@ -124,6 +371,10 @@ export function finish() {
   // stay authoritative for inline assertions; this only adds a failure source
   // that was already being computed and thrown away.
   const runnerFailed = Boolean(process.exitCode);
+  // Before the summary, so a run that wrote to the developer's data cannot
+  // print "All tests passed" above the line that says it did (#5113).
+  const drift = realDataRootDrift();
+  if (drift) fail(drift.join('\n     '));
   console.log('\n' + '='.repeat(50));
   console.log(`📊 Results: ${passed} passed, ${failed} failed, ${warnings} warnings`
     + (runnerFailed ? ' — plus failures in a discovered node:test suite (see above)' : ''));
@@ -242,6 +493,9 @@ export function run(cmd, args = [], opts = {}) {
     lastFailure = {
       status: e?.status ?? null,
       signal: e?.signal ?? null,
+      // 'ETIMEDOUT' when the timeout killed the child. A killed child has no
+      // exit status, so this is the only field that says it ran out of time.
+      code: e?.code ?? null,
       stdout: e?.stdout == null ? '' : String(e.stdout),
       stderr: e?.stderr == null ? '' : String(e.stderr),
     };
@@ -259,10 +513,51 @@ let lastFailure = null;
  * Cleared by a successful run so a stale record is never attributed to a later
  * command. The suite is sequential, so "most recent" is unambiguous.
  *
- * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string}|null}
+ * @returns {{status: number|null, signal: string|null, code: string|null, stdout: string, stderr: string}|null}
  */
+// describeSpawn lives in helpers/describe-spawn.mjs and is re-exported here so
+// the 410 tests that already import from this file can reach it. It is a
+// SEPARATE module because importing this one is not free: the lines above set
+// process.env.CAREER_OPS_TRACKER, call pinSandboxDataRoot() and register an
+// 'exit' hook. A test that does not already depend on that must be able to
+// describe a failed child without inheriting it.
+export { describeSpawn } from './helpers/describe-spawn.mjs';
+
 export function lastRunFailure() {
   return lastFailure;
+}
+
+// A V8 stack frame as Node prints it for an uncaught exception:
+// `    at fn (/path/file.mjs:12:5)`, `    at /path/file.mjs:12:5`.
+const STACK_FRAME_RE = /^ {4}at \S.*:\d+:\d+\)?$/m;
+
+/**
+ * Run a command that is expected to refuse its input, and report whether it
+ * refused it the intended way.
+ *
+ * `run(...) === null` is not that check. run() returns null for every failure:
+ * the intended rejection, but also an uncaught TypeError (Node exits 1 for that
+ * too), a signal, and the 30 s timeout. A script that crashed on the bad input
+ * therefore read as "correctly rejected". This requires the expected exit
+ * status, no signal, the expected message on stderr, and no stack trace there,
+ * so a crash whose text happens to contain the message still fails.
+ *
+ * @param {string} cmd - Executable, resolved through the run() allowlist.
+ * @param {string[]} args - Argument vector.
+ * @param {{stderr: string|RegExp, status?: number|null}} expected - The rejection:
+ *   a substring (or pattern) stderr must contain, and the exit status (default 1).
+ *   A signal-killed child has status null; it still never passes, since any
+ *   signal is refused.
+ * @param {object} [opts={}] - Passed through to run().
+ * @returns {boolean} True only for the intended rejection. On false,
+ *   formatRunFailure() describes what the child actually did.
+ */
+export function runRejects(cmd, args, { stderr, status = 1 }, opts = {}) {
+  if (run(cmd, args, opts) !== null) return false;
+  const f = lastFailure;
+  if (!f || f.signal !== null || f.status !== status) return false;
+  if (STACK_FRAME_RE.test(f.stderr)) return false;
+  return typeof stderr === 'string' ? f.stderr.includes(stderr) : stderr.test(f.stderr);
 }
 
 /**
@@ -1091,24 +1386,26 @@ export async function captureConsoleErrors(fn) {
 }
 
 /**
- * Build a throwaway git repository for the two updater suites that hand the
- * updater its git runner (`updater-add-paths`, `updater-is-tracked`). Only
- * the first asserts on ignore RESOLUTION; the second writes its own .gitignore
- * and then asks about index membership, which is a different question.
+ * Build a throwaway git repository for the updater suites that hand the
+ * updater its git runner (`updater-add-paths`, `updater-is-tracked`, and
+ * `updater-rollback-target-manifest`). The first asserts on ignore RESOLUTION;
+ * the second writes its own .gitignore and asks about index membership; the
+ * third builds real backup/target commits and invokes the rollback CLI.
  *
  * The pins below are the reason this is shared rather than copied, but they are
- * not all load-bearing for both callers, and this docstring should not imply
+ * not all load-bearing for every caller, and this docstring should not imply
  * otherwise. Mutation-tested by dropping each pin under a GIT_CONFIG_GLOBAL it
  * exists to neutralise:
  *
  *   - `commit.gpgsign=false` and `core.hooksPath` → an empty dir. Either one
  *     inherited from the environment breaks every commit the fixtures make.
- *     Dropping either reddens BOTH suites.
+ *     Dropping either reddens all three suites.
  *   - `core.excludesFile` → an empty file. A global ignore rule silently alters
  *     what is measured (the failure mode reported in #2269). Dropping it reddens
  *     updater-add-paths only: updater-is-tracked writes its own .gitignore and
- *     then reads index membership, which a global rule does not move. Kept for
- *     both as a defensive pin, proven by one.
+ *     then reads index membership, while updater-rollback-target-manifest stages
+ *     snapshots with `git add -A`, so a global rule could drop a fixture file;
+ *     it stayed green in the mutation run only because no such rule was set.
  *
  * Point `core.excludesFile` at an empty file rather than /dev/null: git on
  * Windows maps that to `nul` and dies with "fatal: cannot use nul as an
@@ -1149,6 +1446,7 @@ export function makeUpdaterRepo({ prefix = 'co-updater-', includeRoot = false } 
   const dir = mkdtempSync(join(tmpdir(), prefix));
   const g = hermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
+  g('config', 'core.autocrlf', 'false');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
   const emptyExcludes = join(dir, '.git', 'co-empty-excludes');
@@ -1252,6 +1550,78 @@ export function hermeticGitRunner(dir, { stdio } = {}) {
   const options = { cwd: dir, encoding: 'utf-8', env, ...(stdio ? { stdio } : {}) };
   return (...args) => execFileSync('git', args, options).trim();
 }
+
+/**
+ * Seal THIS process's git environment, for a suite whose fixtures run git
+ * through something that inherits process.env rather than through
+ * `hermeticGitRunner`: the updater's own `gitIn` / `gitQuietIn` and the `*In`
+ * helpers built on them, a bare `execFileSync('git', ...)`, or a CLI spawned
+ * with the parent's environment. Those inherit the environment as a real
+ * install must, so a fixture built with them is only as isolated as the
+ * contributor's shell. With `tag.gpgSign = true` in ~/.gitconfig a lightweight
+ * `git tag` becomes a signed annotated tag with no message and git dies with
+ * "no tag message?"; with `commit.gpgSign = true` every fixture commit is
+ * signed with the contributor's own key, or fails where gpg cannot sign.
+ *
+ * Sealing the process rather than one runner is what reaches the git calls
+ * the code under test makes for itself. Call it before the suite's first git
+ * command; a later `process.env` override (an identity negative control, say)
+ * still applies on top and restores back to the seal.
+ *
+ * A suite run directly, under `node --test`, or by `test-all.mjs --jobs N` has
+ * a process of its own. The serial loop (`--jobs 1`, or a single matched file)
+ * imports the suite into test-all's process instead, so the seal records every
+ * variable it changes and `importSuiteContained` puts them back once the import
+ * settles, thrown or not. The suites after it see the environment they would
+ * have seen without it.
+ *
+ * The environment is `hermeticGitEnv`'s, so the runtime-layer pins come with
+ * it, and the variables that helper and `hermeticGitRunner` drop are deleted
+ * from process.env, not merely left uncopied. The repository-location names
+ * are matched without regard to case: Windows environment names are
+ * case-insensitive, so a `Git_Dir` would otherwise survive and still point git
+ * at another repository. The config path names a file that is never created:
+ * a missing global file is simply an empty one.
+ */
+export function sealProcessGitEnv() {
+  // One directory per process: the serial loop imports several sealing suites
+  // into one, and an exit listener each would add up.
+  if (!sealDir) {
+    const dir = mkdtempSync(join(tmpdir(), 'co-sealed-git-'));
+    process.on('exit', () => _rmSync(dir, { recursive: true, force: true }));
+    sealDir = dir;
+  }
+  const sealed = hermeticGitEnv(join(sealDir, 'gitconfig'));
+  const repoLocation = new Set(REPO_LOCATION_ENV);
+  for (const name of Object.keys(sealed)) {
+    if (repoLocation.has(name.toUpperCase())) delete sealed[name];
+  }
+  const changed = new Map();
+  for (const name of Object.keys(process.env)) {
+    if (!Object.hasOwn(sealed, name)) {
+      changed.set(name, process.env[name]);
+      delete process.env[name];
+    }
+  }
+  for (const [name, value] of Object.entries(sealed)) {
+    if (process.env[name] !== value && !changed.has(name)) changed.set(name, process.env[name]);
+    process.env[name] = value;
+  }
+  // A second seal in the same suite must not record the first one's values as
+  // the originals.
+  if (!unsealGitEnv) {
+    unsealGitEnv = () => {
+      for (const [name, value] of changed) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    };
+  }
+}
+
+/** Set while a seal is in force; `importSuiteContained` calls and clears it. */
+let unsealGitEnv = null;
+let sealDir = null;
 
 /**
  * Can a directory write-deny actually stop THIS process from creating a file?

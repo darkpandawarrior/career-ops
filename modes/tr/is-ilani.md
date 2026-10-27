@@ -125,8 +125,8 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 ```markdown
 # Değerlendirme: {Şirket} — {Rol}
 
-**Tarih:** {YYYY-MM-DD}
-**Arketip:** {tespit edilen}
+**Date:** {YYYY-MM-DD}
+**Archetype:** {tespit edilen}
 <!-- Rol kullanıcının hedeflerinden biriyle eşleşiyorsa onun adını yaz. Hiçbiriyle
      eşleşmiyorsa bu alan boş BIRAKILMAZ ve muğlak geçilmez — boş bir alan aracın
      çalışmadığı gibi okunur, "muhtemelen X ile Y'nin hibriti" ise burada önlenmek
@@ -136,10 +136,13 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
      Varsayılan satırı adlandırmak okuyucunun rolü konumlandırmasına yine yardım
      eder; yapmaması gereken, kullanıcının gerçekten sahip olduğu bir hedefin yerine
      geçmektir. -->
-**Puan:** {X.X}/5
+**Score:** {X/5}
+**Karar:** {Başvur | Değerlendir | Önce araştır | Geç}
 **URL:** {ilan URL'si}
 **PDF:** ✅/❌
-**Meşruiyet:** {Güvenilir | Dikkatli İlerle | Şüpheli}
+**Legitimacy:** {Güvenilir | Dikkatli İlerle | Şüpheli}
+
+{`## Karar (lead)` cümlesi, kelimesi kelimesine}
 
 ---
 
@@ -177,7 +180,17 @@ Değerlendirmenin tamamını `reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` olara
 
 ## Çıkarılan Anahtar Kelimeler
 (ATS optimizasyonu için ilandan 15-20 anahtar kelime)
+
+## Keyword Coverage
+(`node keyword-match.mjs <rapor>` tarafından üretilir — kapsam %, present, thin, missing)
+
+## Job Description (archived verbatim)
+(the posting's full text, pasted verbatim — see requirement below)
 ```
+
+**JD arşivi (zorunlu, #2789):** Her rapor, ilanın tam metnini olduğu gibi içeren bir `## Job Description (archived verbatim)` bölümü taşır; metin asla özetlenmez, asla başka sözcüklerle yeniden yazılmaz. Başlık İngilizce kalır, çünkü `check-jd-archive.mjs` bölümü adıyla arar. `**URL:**` alanı bir arşiv değildir: ilan kapandığında bağlantı çalışmaz olur ve özgün gereksinimleri geri getirmenin bir yolu kalmaz. Bölümün ilk satırı, kaynakta göründüğü haliyle yayın tarihidir (`Posted: {tarih ya da göründüğü gibi göreli ifade}`, gerçekten görünmüyorsa `Posted: not visible in source`); bu satır asla rapor dosyasının tarihiyle doldurulmaz. İlan çok uzunsa ya da tamamı alıntılanamıyorsa, `archive-posting.mjs <url> --company={sirket-slug} --report={num}` ile kaydedin ve bölüme başka hiçbir metin eklemeden **tam olarak** şu cümleyi yazın: `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` Metnin yerine başka sözcüklerle yazılmış bir özet konmaz; kuralın tamamı `modes/oferta.md` içinde (**JD archival**).
+
+Raporu kaydettikten sonra `node keyword-match.mjs reports/{###}-{sirket-slug}-{YYYY-MM-DD}.md` komutunu çalıştırın ve çıktıdaki `## Keyword Coverage` bloğunu çıkarılan anahtar kelimelerin hemen altına, `## Job Description (archived verbatim)` bölümünden önce yapıştırın. Başlık İngilizce kalır. Yalnızca tanı amaçlıdır: bir anahtar kelimeyi CV'ye ancak gerçek bir deneyime karşılık geliyorsa ekleyin.
 
 ### 2. Takipçiye Kaydet
 
@@ -268,7 +281,7 @@ Ardından `node merge-tracker.mjs` çalıştır.
 - **Üst düzey / niş roller:** Staff+, VP, Direktör veya yüksek uzmanlaşma gerektiren roller meşru olarak aylarca açık kalabilir.
 - **Erken aşama startup:** Rol henüz tam şekillenmemiş olduğundan ilanın muğlak yazılmış olması normaldir. İçerik belirsizliğine daha az ağırlık ver.
 - **Tarih bilgisi yok:** Yayın tarihi belirlenemiyorsa ve başka endişe verici sinyal yoksa varsayılan olarak "Dikkatli İlerle" kullan. Kanıt olmaksızın asla "Şüpheli" deme.
-- **Recruiter kaynağı (kamuya açık ilan yok):** Tazelik sinyali alınamaz. Aktif recruiter temasının kendisinin olumlu bir meşruiyet sinyali olduğunu not et.
+- **Recruiter kaynağı (ilan linki gönderen recruiter teması dahil):** Tazelik sinyali sadece ilanın snapshot'ı yoksa alınamaz; recruiter'ın gönderdiği ilan kontrol edildiyse tarih ve Apply butonu bulguları korunur. Recruiter teması tek başına Nötr'dür, olumlu bir meşruiyet sinyali değildir. Seviye vermeden önce recruiter'ın kimliğini doğrula: (a) şirketin kendi kariyer sayfası veya herkese açık ATS board'u bu rolü listeliyor mu; (b) bilinen bir markaya eklenmiş tanıdık olmayan bir isim ayrı bir kurum olarak kontrol edilir; (c) recruiter'ın email domain'i veya bağımsız bir kaynak onu şirkete bağlıyor mu; (d) tek bir arama: `"{isim}" scam OR "fake recruiter" OR "fake job"`; (e) gönderdiği kodu klonlamanı, kurmanı veya çalıştırmanı, bu kod açıkken ekran paylaşmanı, Telegram/WhatsApp/Discord'a geçmeni ya da herhangi bir ödeme yapmanı istiyor mu. (a) tek bir sorgu, (d) tek bir arama kullanır; (b), (c) ve (e) yeni arama yapmaz, sadece yapıştırılan metni, (a) ve (d)'nin sonuçlarını ve zaten yapılmış araştırmayı kullanır. Kanıt yoksa kontrol Bilinmiyor (Nötr) kalır, asla Endişe Verici sayılmaz. (a) veya (d) Endişe Verici ve bir kontrol daha Endişe Verici ise "Şüpheli". Bu doğrulama yüzünden seviye "Şüpheli" olursa kısa ve suçlamayan bir not ekle: hangi kontroller Endişe Verici çıktı ve kaynakları ne, rolü şirketin kendi domain'indeki bir email adresinden teyit etmesi ve recruiter'ın gönderdiği kodu çalıştırmaması. Recruiter'ın gönderdiği repo, arşiv veya linki asla klonlama, kurma, açma ya da çalıştırma.
 
 ---
 

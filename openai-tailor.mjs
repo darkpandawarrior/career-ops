@@ -19,28 +19,30 @@
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
+import { readLockedSections } from './theme-style.mjs';
 
 try {
   const { config } = await import('dotenv');
   config();
 } catch { /* dotenv optional */ }
 
-// engineRoot = where this script and its siblings live; dataRoot = the ACTIVE
-// profile's data (CAREER_OPS_ROOT). Data paths must use CAREER_OPS_DATA, never CAREER_OPS.
-const { engineRoot: CAREER_OPS, dataRoot: CAREER_OPS_DATA } = resolveCareerOpsRoot(import.meta.url);
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 const PATHS = {
-  shared:   join(CAREER_OPS, 'modes', '_shared.md'),
-  pdfMode:  join(CAREER_OPS, 'modes', 'pdf.md'),
-  cv:       join(CAREER_OPS_DATA, 'cv.md'),
-  profile:  join(CAREER_OPS_DATA, 'config', 'profile.yml'),
-  template: join(CAREER_OPS, 'templates', 'cv-template.html'),
-  output:   join(CAREER_OPS_DATA, 'output'),
+  shared:   join(ROOT, 'modes', '_shared.md'),
+  writing:  join(ROOT, 'modes', '_writing.md'),
+  pdfMode:  join(ROOT, 'modes', 'pdf.md'),
+  cv:       join(DATA_ROOT, 'cv.md'),
+  profile:  getProfilePath(),
+  template: join(ROOT, 'templates', 'cv-template.html'),
+  output:   join(DATA_ROOT, 'output'),
 };
 
 // ---------------------------------------------------------------------------
@@ -116,20 +118,8 @@ if (!existsSync(reportPath)) {
 const jdText = readFileSync(jdPath, 'utf-8').trim();
 const reportText = readFileSync(reportPath, 'utf-8').trim();
 
-// Attempt to parse company slug and candidate name
+// The report filename identifies the application being tailored.
 const reportFilename = basename(reportPath);
-const match = reportFilename.match(/^\d+-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}\.md$/);
-const companySlug = match ? match[1] : 'unknown-company';
-
-// Extract role from report header (e.g., "# Evaluation: Company — Role Title").
-// This fork's reports (see modes/oferta.md, gemini/openai/ollama-eval.mjs) use an
-// em dash separator, not a hyphen — the [-—] class matches either.
-let roleSlug = 'role';
-const roleMatch = reportText.match(/^#\s+Evaluation:\s+[^-—]+\s+[-—]\s+(.+?)$/m);
-if (roleMatch && roleMatch[1]) {
-  roleSlug = roleMatch[1]
-    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
 
 // ---------------------------------------------------------------------------
 // Endpoint + security guard.
@@ -187,6 +177,10 @@ function readFile(path, label, required = false) {
 console.log('\\n📂  Loading context files...');
 
 const sharedContext  = readFile(PATHS.shared, 'modes/_shared.md', false);
+// Writing guardrails (Voice DNA / Writing Style / Professional Writing) live in
+// _writing.md since #1710 — a CV-tailoring script needs them, unlike the eval
+// engines that read the eval-core _shared.md alone.
+const writingContext = readFile(PATHS.writing, 'modes/_writing.md', false);
 const pdfModeLogic   = readFile(PATHS.pdfMode, 'modes/pdf.md', false);
 const cvContent      = readFile(PATHS.cv, 'cv.md', true);
 const profileContent = readFile(PATHS.profile, 'config/profile.yml', true);
@@ -203,6 +197,11 @@ Your job is to apply strict anti-fabrication tailoring rules to fill in an HTML 
 SYSTEM CONTEXT (_shared.md)
 ═══════════════════════════════════════════════════════
 ${sharedContext}
+
+═══════════════════════════════════════════════════════
+WRITING GUARDRAILS (_writing.md)
+═══════════════════════════════════════════════════════
+${writingContext}
 
 ═══════════════════════════════════════════════════════
 PDF TAILORING MODE (pdf.md)
@@ -315,7 +314,7 @@ try {
 
   let candidateName = 'candidate';
   try {
-    const profile = yaml.load(profileContent);
+    const profile = loadYaml(profileContent);
     if (profile && profile.name) {
       candidateName = profile.name;
     }
@@ -325,18 +324,28 @@ try {
   candidateName = candidateName
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-  const filename = `cv-${candidateName}-${companySlug}.html`;
+  // Reports identify applications; one employer can have several requisitions
+  // with the same title. Re-tailoring one report may replace its own artifact.
+  const artifactStem = `cv-${candidateName}-${reportFilename.replace(/\.md$/i, '')}`;
+  const filename = `${artifactStem}.html`;
   const htmlPath = join(PATHS.output, filename);
+
+  const lockedKeys = readLockedSections(PATHS.profile, sectionKey);
+  const cvMarkdown = readFileSync(PATHS.cv, 'utf-8');
+  validateLockedSections(tailoredHtml, cvMarkdown, lockedKeys);
 
   writeFileSync(htmlPath, tailoredHtml, 'utf-8');
   console.log(`\n✅  Tailored HTML saved: ${htmlPath}`);
 
   // Print next steps
-  const pdfFilename = `cv-${candidateName}-${companySlug}-${roleSlug}-${new Date().toISOString().split('T')[0]}.pdf`;
+  const pdfFilename = `${artifactStem}.pdf`;
   const reportNumMatch = reportFilename.match(/^(\d+)-/);
   const reportNum = reportNumMatch ? reportNumMatch[1] : '001';
+  const pdfPaths = [`output/${filename}`, `output/${pdfFilename}`]
+    .map(path => /^[A-Za-z0-9._@+/-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`)
+    .join(' ');
 
-  console.log(`\n📄  Next step (generate PDF):\n    node generate-pdf.mjs output/${filename} output/${pdfFilename} --format=letter --report=${reportNum}\n`);
+  console.log(`\n📄  Next step (generate PDF):\n    node generate-pdf.mjs ${pdfPaths} --format=letter --report=${reportNum}\n`);
 
 } catch (err) {
   console.warn(`⚠️   Could not save HTML: ${err.message}`);

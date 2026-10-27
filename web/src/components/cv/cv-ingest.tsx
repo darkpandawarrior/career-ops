@@ -9,6 +9,7 @@ import { Upload, FileText, Loader2, Check, AlertTriangle, Lock, ArrowRight, Rota
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 import { cvReadiness, parseCvStream, type CvSeed } from "@/lib/cv/quality";
+import { ingestErrorMessage } from "@/lib/cv/ingest-error.mjs";
 import { DEFAULT_FILTERS, filtersToParams } from "@/lib/explore";
 import { StatusDot } from "@/components/ui/status-dot";
 
@@ -52,8 +53,9 @@ export function CvIngest({ onSaved }: { onSaved?: () => void }) {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       const r = await fetch("/api/cv/ingest", init);
-      if (r.status === 404) {
-        setErr("Connect an AI CLI in Config first — it parses your CV locally.");
+      const failure = await ingestErrorMessage(r);
+      if (failure) {
+        setErr(failure);
         setPhase("error");
         return;
       }

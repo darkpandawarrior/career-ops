@@ -54,7 +54,7 @@ export async function POST(req: Request) {
        "--permission-mode", "acceptEdits", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch"]
     : spec.args(prompt);
 
-  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, shell: process.platform === "win32" });
+  const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, shell: process.platform === "win32", windowsHide: true });
   if (!isClaude && spec.promptViaStdin) {
     child.stdin?.write(prompt);
     child.stdin?.end();

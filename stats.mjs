@@ -20,34 +20,32 @@ import { validateFlags } from './lib/cli-flags.mjs';
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import * as yaml from 'js-yaml';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { normalizeStatus } from './followup-cadence.mjs';
-import { resolveCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { normalizeStatus, analyzeFromContent, loadFollowupsEnabled } from './followup-cadence.mjs';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseStatusLogStages, recoverFunnelStages } from './funnel-stages.mjs';
 export { parseStatusLogStages } from './funnel-stages.mjs';
 import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 
-// Fork: data lives under the resolved DATA root, never the script's own dir —
-// under multi-profile those differ and reading the script dir silently serves
-// another profile's numbers.
-const { dataRoot: ROOT } = resolveCareerOpsRoot(import.meta.url);
-const APPS_FILE = resolveTrackerPath(ROOT);
-const SCAN_HISTORY_FILE = join(ROOT, 'data', 'scan-history.tsv');
-const FOLLOWUPS_FILE = join(ROOT, 'data', 'follow-ups.md');
-const SCAN_RUNS_FILE = join(ROOT, 'data', 'scan-runs.tsv');
-const STATUS_LOG_FILE = join(ROOT, 'data', 'status-log.tsv');
-const PORTALS_FILE = join(ROOT, 'portals.yml');
-const PORTAL_HEALTH_FILE = join(ROOT, 'data', 'portal-health.tsv');
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(DATA_ROOT);
+const SCAN_HISTORY_FILE = join(DATA_ROOT, 'data', 'scan-history.tsv');
+const FOLLOWUPS_FILE = join(DATA_ROOT, 'data', 'follow-ups.md');
+const SCAN_RUNS_FILE = join(DATA_ROOT, 'data', 'scan-runs.tsv');
+const PORTALS_FILE = join(DATA_ROOT, 'portals.yml');
+const PORTAL_HEALTH_FILE = join(DATA_ROOT, 'data', 'portal-health.tsv');
 
 const CANONICAL_STATUSES = ['Evaluated', 'Applied', 'Responded', 'Assessment', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP'];
 
-// In-flight applications. Deliberately NARROWER than the dashboard's
-// ActiveApps (which also counts Evaluated): an evaluated-but-never-sent row is
-// a candidate, not an application in flight. Hired is a terminal success, not
+// In-flight applications, shared with the web Analytics and Go dashboard
+// ActiveApps: an evaluated-but-never-sent row is a candidate, not an
+// application in flight. Hired is a terminal success, not
 // in flight, so it is intentionally excluded here (but see PURSUED/funnel).
 const ACTIVE_STATUSES = new Set(['Applied', 'Responded', 'Assessment', 'Interview', 'Offer']);
 
@@ -121,6 +119,29 @@ export function trackerStatusByNum(content) {
     if (row) byNum.set(row.num, canonicalStatus(row.status));
   }
   return byNum;
+}
+
+/**
+ * Tracker numbers that followup-cadence.mjs's own cadence math already
+ * classifies 'cold' (Applied, zero response after applied_max_followups
+ * follow-ups). Reuses `analyzeFromContent` — the same function
+ * followup-cadence.mjs's CLI runs — instead of re-deriving the
+ * applied_max_followups/cadence rule here (#2123). A row can only be
+ * classified cold when its status is 'applied', so every number returned
+ * here is already a subset of ACTIVE_STATUSES.
+ *
+ * Missing follow-ups content (`null`/absent file, the common case) degrades
+ * gracefully: analyzeFromContent treats it as zero logged follow-ups for
+ * every row, so nothing can cross the follow-up-count threshold and this
+ * returns an empty set — never an error, never a guess.
+ *
+ * @param {string} trackerContent - Raw applications.md text.
+ * @param {string|null} followupsContent - Raw follow-ups.md text, or null when absent.
+ */
+export function computeColdAppNums(trackerContent, followupsContent) {
+  const result = analyzeFromContent(trackerContent, followupsContent || '');
+  if (result.error) return new Set();
+  return new Set(result.entries.filter((e) => e.urgency === 'cold').map((e) => e.num));
 }
 
 // ── Cumulative funnel ───────────────────────────────────────────────
@@ -278,36 +299,37 @@ export function scanCompanyNames(content) {
  * `name` and the scanner's company string; that undercounts when names differ
  * ("Acme" vs "Acme, Inc."). Documented v1 contract — no silent fuzzy-matching.
  *
+ * configuredCompanies counts every tracked_companies entry, disabled ones
+ * included; enabledCompanies is the distinct enabled names producingPct
+ * divides by. They differ whenever an entry is disabled, as many are in the
+ * shipped template, so a reader handed only the first would see a percentage
+ * that does not divide out from the counts beside it.
+ *
  * @param {string} portalsYmlContent - Raw portals.yml text.
  * @param {object|null} scanStats - Result of computeScanStats (for activePortals).
  * @param {string[]} [producingCompanyNames] - From scanCompanyNames().
- * @param {string|null} [portalHealthContent] - Raw data/portal-health.tsv text
- *   (timestamp\tcompany\tstatus rows written by scan.mjs's health tracking,
- *   #1744). Optional — coverage-decay numbers are omitted when absent.
  */
 export function computePortalStats(portalsYmlContent, scanStats, producingCompanyNames = [], portalHealthContent = null) {
   let cfg;
   try {
-    const raw = String(portalsYmlContent ?? '');
-    cfg = (raw.trim() ? yaml.load(raw) : {}) || {};
+    cfg = loadYaml(String(portalsYmlContent ?? '')) || {};
   } catch {
     return null; // malformed YAML → no portal section rather than a crash
   }
   const companies = Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : [];
   const boards = Array.isArray(cfg.job_boards) ? cfg.job_boards : [];
+  // Only enabled entries count as configured: a disabled entry writes no new
+  // health rows (resolveEntries skips it), so counting it here would let its
+  // final failure streak light the 🚨 forever in a way no fix can clear — the
+  // same trap documented below for probe staleness.
+  const enabledEntries = companies.filter((c) => c?.enabled !== false);
   const configuredNames = new Set(
-    companies.map((c) => String(c?.name || '').toLowerCase()).filter(Boolean),
+    enabledEntries.map((c) => String(c?.name || '').toLowerCase()).filter(Boolean),
   );
   const producing = new Set(producingCompanyNames.map((n) => String(n).toLowerCase()));
   let producingCompanies = 0;
   for (const name of configuredNames) if (producing.has(name)) producingCompanies++;
 
-  // Coverage decay: a portal stuck on slug_gone/network for N consecutive
-  // health-checks (default 3, config `portal_health_threshold`) is flagged as
-  // persistently dead rather than transiently flaky. Streak resets on any
-  // reachable/empty result. Mirrors scan.mjs's computeConsecutiveFailures —
-  // duplicated here (not imported) so stats.mjs stays a pure reader with no
-  // dependency on the scanner's write path.
   let persistentlyDead = 0;
   if (portalHealthContent) {
     const lines = portalHealthContent.split('\n');
@@ -324,10 +346,12 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
     const lastProbed = new Map();
     let newestProbe = 0;
     for (const r of healthRecords) {
-      if (r.status === 'slug_gone' || r.status === 'network') {
-        streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
-      } else if (r.status === 'reachable' || r.status === 'empty') {
+      // Mirrors scan.mjs computeConsecutiveFailures: healthy statuses reset,
+      // every other status (slug_gone/network/auth/server/unknown) counts.
+      if (r.status === 'reachable' || r.status === 'empty') {
         streaks.set(r.company, 0);
+      } else {
+        streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
       }
       if (Number.isFinite(r.ts)) {
         if (r.ts > (lastProbed.get(r.company) || 0)) lastProbed.set(r.company, r.ts);
@@ -359,6 +383,7 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
 
   return {
     configuredCompanies: companies.length,
+    enabledCompanies: configuredNames.size,
     configuredBoards: boards.length,
     activePortals: Object.keys(scanStats?.byPortal || {}).length,
     producingCompanies,
@@ -375,7 +400,7 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
  */
 export function computePortalRecommendations(portalsContent, scanContent, healthContent, now = Date.now()) {
   let cfg;
-  try { cfg = yaml.load(String(portalsContent ?? '')) || {}; } catch { return null; }
+  try { cfg = loadYaml(String(portalsContent ?? '')) || {}; } catch { return null; }
   const positive = (n, fallback) => Number.isInteger(n) && n > 0 ? n : fallback;
   const days = positive(cfg.portal_prune_quiet_days, 30);
   const threshold = positive(cfg.portal_health_threshold, 3);
@@ -538,13 +563,13 @@ export function computeRunStats(content) {
   if (idx.timestamp == null || idx.found == null) return null; // unknown schema
   const filterCols = header.filter((h) => h.startsWith('filtered_'));
   const rows = [];
-  // Rows WIDER than the header are the dangerous case, and the header comment above (correctly)
-  // only guarded the narrow one. When a column is appended or inserted, the on-disk header stops
-  // describing the rows: every name-based lookup silently reads the wrong column, and the result
-  // is a confident, precise, wrong number. Measured 2026-08-24: 218 of 226 rows were wider than
-  // their header and `avg new per run` was reporting the dupes column (24.0) instead of new_added
-  // (0.17) — off by ~140x, and pointing the opposite direction ("funnel is full" vs "funnel is
-  // empty"). Count the drift and surface it rather than averaging over whatever happens to align.
+  // A row WIDER than the header is the dangerous case, and only the narrow one was guarded.
+  // SCAN_RUNS_HEADER is written by appendScanRunSummary only when the file does not yet exist, so
+  // when a release appends or inserts a counter the on-disk header silently stops describing the
+  // rows beneath it. Every name-based lookup then reads a neighbouring column, and the result is a
+  // confident, precise, wrong number rather than an obvious break. Count these and exclude them:
+  // the averages must describe the rows the header can still describe, and the caller has to be
+  // able to see when that is a minority of the file.
   let driftedRows = 0;
   for (const line of lines.slice(1)) {
     const cols = line.split('\t');
@@ -605,7 +630,7 @@ export function computeAllStats({
   scanRunsFile = SCAN_RUNS_FILE,
   portalsFile = PORTALS_FILE,
   portalHealthFile = PORTAL_HEALTH_FILE,
-  statusLogFile = STATUS_LOG_FILE,
+  statusLogFile = join(dirname(appsFile), 'status-log.tsv'),
   prune = false,
 } = {}) {
   const read = (f) => (existsSync(f) ? readFileSync(f, 'utf-8') : null);
@@ -616,8 +641,33 @@ export function computeAllStats({
   const runs = read(scanRunsFile);
   const portalHealth = read(portalHealthFile);
   const statusLog = read(statusLogFile);
-  const tracker = apps ? computeTrackerStats(apps) : null;
+  const trackerBase = apps ? computeTrackerStats(apps) : null;
   const scan = scanHist ? computeScanStats(scanHist) : null;
+
+  // Cold-classification wiring (#2123): activeApps is purely status-based and
+  // stays untouched for backward compatibility. activeAppsLive subtracts rows
+  // followup-cadence.mjs's own cadence math independently classifies 'cold'
+  // (Applied, zero response after applied_max_followups follow-ups) — the more
+  // honest "still worth expecting a reply from" figure. No follow-up data
+  // (`fups` null) means no cold rows can be identified, so activeAppsLive
+  // simply equals activeApps.
+  let tracker = trackerBase;
+  if (trackerBase) {
+    const coldNums = computeColdAppNums(apps, fups);
+    let activeAppsCold = 0;
+    if (coldNums.size > 0) {
+      const byNum = trackerStatusByNum(apps);
+      for (const [num, status] of byNum) {
+        if (ACTIVE_STATUSES.has(status) && coldNums.has(num)) activeAppsCold++;
+      }
+    }
+    tracker = {
+      ...trackerBase,
+      activeAppsLive: trackerBase.activeApps - activeAppsCold,
+      activeAppsCold,
+    };
+  }
+
   return {
     metadata: {
       generatedAt: localToday(),
@@ -648,7 +698,7 @@ export function computeAllStats({
 }
 
 /** Human-readable table. pdfPct/reportPct are JSON-only by design — no job-search decision follows from them. */
-function printSummary(stats) {
+function printSummary(stats, { followupsEnabled = true } = {}) {
   const line = '━'.repeat(45);
   console.log(`\n${line}`);
   console.log(`Pipeline Stats — ${stats.metadata.generatedAt}`);
@@ -658,7 +708,14 @@ function printSummary(stats) {
     const fit = t.avgScore != null
       ? ` | avg fit ${t.avgScore}/5${t.avgScoreApplied != null ? ` (pursued roles ${t.avgScoreApplied}/5)` : ''} | top ${t.topScore}`
       : '';
-    console.log(`Tracker:    ${t.total} total | ${t.activeApps} active${fit}`);
+    // Only break out live/cold when there's a cold row to report — with no
+    // follow-up data (or genuinely zero cold rows) the plain count is exactly
+    // as accurate and the parenthetical would be noise. 'Cold' is a follow-up
+    // cadence verdict, so it goes too when follow-ups are off: the Follow-ups
+    // line below says they are, and followup-cadence.mjs reports no cold rows
+    // then. JSON is unchanged, as for the follow-up line (#5710).
+    const liveInfo = followupsEnabled && t.activeAppsCold > 0 ? ` (${t.activeAppsLive} live, ${t.activeAppsCold} cold)` : '';
+    console.log(`Tracker:    ${t.total} total | ${t.activeApps} active${liveInfo}${fit}`);
     const statusLine = Object.entries(t.byStatus).filter(([, c]) => c > 0).map(([s, c]) => `${s} ${c}`).join(' · ');
     if (statusLine) console.log(`Status:     ${statusLine}`);
   } else {
@@ -680,12 +737,14 @@ function printSummary(stats) {
   const p = stats.portals;
   if (p) {
     const deadPart = p.persistentlyDead > 0 ? ` | 🚨 ${p.persistentlyDead} persistently dead (run verify-portals.mjs)` : '';
-    console.log(`Portals:    ${p.configuredCompanies} companies + ${p.configuredBoards} boards configured | ${p.producingCompanies} have produced a match (${p.producingPct}%)${deadPart} — low ≠ broken, may just be no openings`);
+    console.log(`Portals:    ${p.configuredCompanies} companies + ${p.configuredBoards} boards configured | ${p.producingCompanies} of ${p.enabledCompanies} enabled have produced a match (${p.producingPct}%)${deadPart} — low ≠ broken, may just be no openings`);
   } else {
     console.log('Portals:    — no data (portals.yml missing)');
   }
   const fu = stats.followups;
-  if (fu) {
+  if (!followupsEnabled) {
+    console.log('Follow-ups: turned off (follow_ups.enabled: false in config/profile.yml)');
+  } else if (fu) {
     console.log(`Follow-ups: ${fu.totalFollowups} sent across ${fu.appsWithFollowups} apps | ${fu.appliedWithoutFollowup} Applied apps with none | avg ${fu.avgPerApp}/app`);
   } else {
     console.log('Follow-ups: — no data (data/follow-ups.md missing)');
@@ -701,10 +760,9 @@ function printSummary(stats) {
     const failed = r.failedRuns > 0 ? ` | ${r.failedRuns} failed` : '';
     console.log(`Runs:       ${r.totalRuns} recorded (last ${r.lastRunDate})${failed} | avg ${r.avgFoundPerRun} found / ${r.avgNewPerRun} new per run | filters remove ${r.filterRemovalPct}%`);
     if (r.driftedRows > 0) {
-      // Say it plainly rather than quietly averaging the minority that still aligns: these figures
-      // describe only the rows the header can still describe, which may be a small and unrepresentative
-      // tail of the history.
-      console.log(`            ⚠️  ${r.driftedRows} row(s) EXCLUDED — wider than scan-runs.tsv's header, so their columns cannot be read by name. The averages above cover only the remaining ${r.totalRuns}.`);
+      // Say it rather than quietly averaging whichever rows still line up: those may be a small
+      // and unrepresentative tail of the file.
+      console.log(`            ${r.driftedRows} row(s) excluded — wider than scan-runs.tsv's header, so their columns cannot be read by name. Move the file aside to start a fresh one.`);
     }
   } else {
     console.log('Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)');
@@ -737,6 +795,6 @@ if (isMainModule(import.meta.url)) {
   validateFlags(args, KNOWN_FLAGS, USAGE);
 
   const stats = computeAllStats({ prune: args.includes('--prune') });
-  if (args.includes('--summary')) printSummary(stats);
+  if (args.includes('--summary')) printSummary(stats, { followupsEnabled: loadFollowupsEnabled() });
   else console.log(JSON.stringify(stats, null, 2));
 }

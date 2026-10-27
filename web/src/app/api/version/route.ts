@@ -1,17 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 
-// The WEB build's own version + channel (NOT the user's data checkout) — read
-// from the repo's VERSION (parent of the web/ cwd). Keep this build-time safe by
-// avoiding shelling out to git during Next's trace phase.
+// The WEB build's own version + channel (NOT the user's data checkout) — read from
+// the repo's VERSION (parent of the web/ cwd). The channel is derived from a
+// pre-release suffix (`-rc`/`-beta`) so the UI can show a beta banner + the bug
+// reporter can tag the right release. Invisible to stable installs (the updater
+// reads VERSION from `main`, which stays stable while the bundle lives on a branch).
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 function readVersion(): string {
-  const candidates = [
-    path.join(process.cwd(), "..", "VERSION"),
-    path.join(process.cwd(), "VERSION"),
-  ];
+  const candidates = [path.join(process.cwd(), "..", "VERSION"), path.join(process.cwd(), "VERSION")];
   for (const p of candidates) {
     try {
       // Candidate roots differ between `next dev` and the packaged app. They
@@ -25,6 +24,7 @@ function readVersion(): string {
   return "";
 }
 
+// Fork: no git shell-out (keeps the build trace-safe); CI/Vercel inject the sha.
 function shortSha(): string {
   return (
     process.env.VERCEL_GIT_COMMIT_SHA ||
@@ -34,9 +34,24 @@ function shortSha(): string {
   ).slice(0, 7);
 }
 
+function webVersion(): string {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"));
+    return typeof pkg.version === "string" ? pkg.version : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function GET() {
-  const version = readVersion();
-  const m = version.match(/-(rc|beta|alpha|next)(?![a-z])/i);
-  const channel = m ? m[1].toLowerCase() : "stable";
-  return Response.json({ version, channel, sha: shortSha() });
+  const coreVersion = readVersion();
+  const web = webVersion();
+  const m = coreVersion.match(/-(rc|beta|alpha|next)(?![a-z])/i);
+  // Channel precedence: an explicit core pre-release suffix wins (RC installs);
+  // otherwise the web component's own maturity decides — pre-1.0 on main IS the
+  // alpha (release-please versions web/ independently), and the banner/bug-report
+  // stay visible until the web graduates to 1.0.
+  const channel = m ? m[1].toLowerCase() : web && /^0\./.test(web) ? "alpha" : "stable";
+  const version = web ? `web ${web}` : coreVersion;
+  return Response.json({ version, coreVersion, channel, sha: shortSha() });
 }

@@ -39,15 +39,14 @@ import {
   existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync,
 } from 'fs';
 import { dirname, extname, join, relative, resolve, sep } from 'path';
+import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { resolveCareerOpsRoot } from './path-resolver.mjs';
-import { writeFileAtomic } from './tracker-utils.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { writeFileAtomic, acquireTrackerLock } from './tracker-utils.mjs';
 import { isNestedCheckout } from './lib/mjs-files.mjs';
 
-// dataRoot, not engineRoot: documents/ and data/intake-state.json belong to the
-// ACTIVE profile, which is a different directory than this script's own under
-// the multi-profile setup (see path-resolver.mjs).
-const { engineRoot: ROOT, dataRoot: DATA_ROOT } = resolveCareerOpsRoot(import.meta.url);
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 const DOCS_DIR = process.env.CAREER_OPS_DOCUMENTS_DIR || join(DATA_ROOT, 'documents');
 const STATE_FILE = process.env.CAREER_OPS_INTAKE_STATE || join(DATA_ROOT, 'data', 'intake-state.json');
 
@@ -362,26 +361,30 @@ const COMMIT_ALL = Symbol('commit-all');
 // confirmed for merge, or COMMIT_ALL. A blanket commit after a per-item
 // confirmation would mark declined sources as ingested and silently bury them
 // on every future run, so an empty list records nothing.
-function commitState(result, only = []) {
-  const all = only === COMMIT_ALL;
-  const state = loadState();
-  state.ingested = state.ingested || {};
-  const now = new Date().toISOString();
-  let count = 0;
-  for (const s of result.sources) {
-    if (!s.hash || s.status === 'ingested') continue;
-    if (!all && !only.includes(s.path)) continue;
-    state.ingested[s.path] = { hash: s.hash, ingestedAt: now };
-    count += 1;
-  }
+async function commitState(result, only = []) {
   mkdirSync(dirname(STATE_FILE), { recursive: true });
-  // Atomic for the same reason as hired-share's: a truncating write that is
-  // interrupted leaves unparseable JSON, which is the condition the loader
-  // above now refuses to silently paper over.
-  writeFileAtomic(STATE_FILE, JSON.stringify(state, null, 2) + '\n');
-  return count;
+  const lock = await acquireTrackerLock(`${STATE_FILE}.lock`, { tracker: STATE_FILE });
+  try {
+    const all = only === COMMIT_ALL;
+    const state = loadState();
+    state.ingested = state.ingested || {};
+    const now = new Date().toISOString();
+    let count = 0;
+    for (const s of computeDelta(state, result.sources.filter(source => source.status !== 'ingested'))) {
+      if (!s.hash || s.status === 'ingested') continue;
+      if (!all && !only.includes(s.path)) continue;
+      state.ingested[s.path] = { hash: s.hash, ingestedAt: now };
+      count += 1;
+    }
+    // Atomic for the same reason as hired-share's: a truncating write that is
+    // interrupted leaves unparseable JSON, which is the condition the loader
+    // above now refuses to silently paper over.
+    writeFileAtomic(STATE_FILE, JSON.stringify(state, null, 2) + '\n');
+    return count;
+  } finally {
+    lock.release();
+  }
 }
-
 function printSummary(result) {
   console.log(`documents/: ${result.documentsDir}`);
   console.log(`PDF extractor: ${result.pdfExtractor || 'none — ' + PDF_INSTALL_HINT}`);
@@ -456,7 +459,7 @@ const isMain = isMainModule(import.meta.url);
 // instead of calling process.exit(0). `--text` writes a whole CV to stdout and
 // is meant to be piped; process.exit() is synchronous and can truncate a pipe
 // write that hasn't drained. Falling off the end leaves exitCode at 0.
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) runSelfTest();
 
@@ -512,7 +515,7 @@ function main() {
       );
       process.exit(1);
     }
-    const count = commitState(result, all ? COMMIT_ALL : only);
+    const count = await commitState(result, all ? COMMIT_ALL : only);
     console.log(`Recorded ${count} source(s) as ingested → ${STATE_FILE}`);
     return;
   }
@@ -526,7 +529,7 @@ if (isMain) {
   // reaches here as a throw, because it is raised deep inside extractAll().
   // Anything else is a bug in this script and keeps its stack trace.
   try {
-    main();
+    await main();
   } catch (err) {
     if (!(err instanceof StateError)) throw err;
     console.error(err.message);

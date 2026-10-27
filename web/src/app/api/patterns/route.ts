@@ -18,17 +18,15 @@ export async function GET() {
   if (!fs.existsSync(script)) return NextResponse.json({ available: false, result: null });
   const dataRoot = await requestRoot();
   const stdout = await new Promise<string>((resolve) => {
+    // process.execPath + windowsHide: see api/doctor/route.ts — a stale inherited
+    // console kills every child with 0xC0000142 on Windows; never inherit one.
+    // analyze-patterns.mjs EMITS JSON by default and rejects --json (exits non-zero).
+    // It exits 1 for "not enough data yet" and still prints the explanatory JSON,
+    // so stdout is taken even on a non-zero exit.
     execFile(
-      "node",
-      // analyze-patterns.mjs EMITS JSON by default and rejects --json as an
-      // unrecognized flag, so passing it made the script exit non-zero. execFile
-      // maps that to err, the handler below resolves "", and the Patterns page
-      // silently rendered as "unavailable" instead of showing an error.
+      process.execPath,
       [script],
-      { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, timeout: 45_000, maxBuffer: 8 * 1024 * 1024 },
-      // Take stdout even on a non-zero exit: analyze-patterns exits 1 for
-      // "not enough data yet" and still prints the JSON that explains it.
-      // Discarding it rendered the page as "unavailable" instead.
+      { cwd: careerOpsRoot(), env: { ...process.env, CAREER_OPS_ROOT: dataRoot }, timeout: 45_000, maxBuffer: 8 << 20, windowsHide: true },
       (_err, out) => resolve(out || ""),
     );
   });
