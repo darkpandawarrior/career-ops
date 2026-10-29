@@ -4,7 +4,7 @@
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "engines": {
-    "node": ">=22.6.0"
+    "node": "^22.13.0 || >=23.4.0"
   },
   "scripts": {
     "dev": "node server.mjs dev",
