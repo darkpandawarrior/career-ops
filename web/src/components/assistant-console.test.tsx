@@ -68,7 +68,7 @@ function stubCliFetch(selected: string | null) {
 // The launcher renders a closed bubble first; the /api/cli read only fires once
 // the panel is open (effect keyed on `open`). Click "Ask" to open it.
 function openConsole() {
-  fireEvent.click(screen.getByLabelText("Open assistant"));
+  fireEvent.click(screen.getByRole("button", { name: /Ask/ }));
 }
 
 // jsdom doesn't implement Element.scrollTo; the console scrolls its message list
@@ -166,7 +166,7 @@ describe("AssistantConsole — CLI selection wiring", () => {
     render(<AssistantConsole />);
 
     // Closed: only the "Ask" launcher is on screen (no header subtitle yet).
-    expect(screen.getByLabelText("Open assistant")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Ask/ })).toBeTruthy();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/cli"));
     expect(screen.queryByText("via claude")).toBeNull();
 
