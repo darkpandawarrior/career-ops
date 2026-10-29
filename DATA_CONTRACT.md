@@ -173,12 +173,13 @@ These files contain system logic, scripts, templates, and instructions that impr
 
 ## Custom Data Directory
 
-By default, all User Layer files reside inside the engine checkout root. You can configure a separate, external directory for your personal data — this is also what the fork's multi-profile launcher (`./profile <name>`) uses under the hood.
+By default, a checkout keeps all User Layer files inside the engine checkout root. A Claude Code plugin install keeps them in `~/career-ops-data` instead (see the Plugin Install Default below). Either way, you can configure a separate, external directory for your personal data; this is also what the fork's multi-profile launcher (`./profile <name>`) uses under the hood.
 
 ### Resolution Precedence:
-1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory (a relative path is resolved against the engine root).
+1. **Environment Variables (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`):** Set this to the absolute or relative path of your custom data directory (a relative path is resolved against the engine root). A directory inside a Claude Code plugin install copy is refused, here and in the marker file, because Claude Code replaces that copy on every plugin update.
 2. **Marker File (`.career-ops-data`):** A file named `.career-ops-data` in the engine root containing the path (absolute or relative) to the user data directory.
-3. **Repository Default:** Defaults to the engine/checkout root directory.
+3. **Plugin Install Default (`~/career-ops-data`):** When neither is set and the code runs from a Claude Code plugin install copy (inside `~/.claude/plugins/cache/`, `marketplaces/` or `synced/`). Claude Code replaces that copy on every plugin update, so it can never hold User Layer files. See [docs/CLAUDE_PLUGIN.md](docs/CLAUDE_PLUGIN.md).
+4. **Repository Default:** Otherwise, defaults to the engine/checkout root directory.
 
 When resolved, all User Layer files/directories (e.g. `cv.md`, `config/profile.yml`, `modes/_profile.md`, `modes/_custom.md`, `data/`, `reports/`, `output/`, `portals.yml`, `batch/tracker-additions/`) are resolved relative to that path. System Layer files continue to resolve relative to the engine root, keeping code and personal data completely separate. Scripts reach both roots through `resolveCareerOpsRoot(import.meta.url)` (`{engineRoot, dataRoot}`) or `getCareerOpsRoot()` in `path-resolver.mjs` — never their own directory.
 
