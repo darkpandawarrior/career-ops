@@ -498,6 +498,7 @@ const scripts = [
   { name: 'contacts.mjs --self-test', expectExit: 0 },
   { name: 'company-history.mjs --self-test', expectExit: 0 },
   { name: 'rejection-latency.mjs --self-test', expectExit: 0 },
+  { name: 'role-clarity.mjs --self-test', expectExit: 0 },
   { name: 'seed-fixture.mjs --self-test', expectExit: 0 },
   // career-ops follow-up sync (2026-07-30): check-table-freshness.mjs ships
   // its own fixture-driven --self-test (discovery shapes, expired/review-due
