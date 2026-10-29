@@ -61,6 +61,7 @@ export function sourceFiles(root = ROOT) {
   })) out.push(relative(root, abs));
   // .gitignore is not source, but one rule asserts a line in it.
   out.push('.gitignore');
+  out.push('AGENTS.md');
   // Mode prose is not source either, but two upstream-owned mode files carry fork-only workflow
   // steps that a sync would copy over silently. Prose has no test that fails when it disappears,
   // so it has to be asserted here or not at all.
@@ -144,6 +145,19 @@ export const ADAPTATIONS = [
       return /from\s+['"]\.\/update-system\.mjs['"]/.test(src)
         ? [`${file}: imports ./update-system.mjs, which this fork does not ship`]
         : [];
+    },
+  },
+  {
+    id: 'agents-md-no-missing-scripts',
+    why: 'Upstream AGENTS.md tells every session to run update-system.mjs and, on a hire, '
+       + 'hired-share.mjs. Neither ships in this fork, so an absorb that takes those sections '
+       + 'makes every session start by running a missing script (MODULE_NOT_FOUND).',
+    autofix: false,
+    violations(src, file) {
+      if (file !== 'AGENTS.md') return [];
+      return ['update-system.mjs', 'hired-share.mjs']
+        .filter((s) => src.includes(`node ${s}`))
+        .map((s) => `AGENTS.md: instructs agents to run ${s}, which this fork does not ship`);
     },
   },
   {
